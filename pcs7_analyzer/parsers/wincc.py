@@ -61,3 +61,45 @@ def compare_os(a: dict, b: dict) -> dict:
 def is_custom_picture(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     return rel.startswith("gracs/") and name.endswith(".pdl") and not name.startswith("@")
+
+
+def normalize_os_rel(rel: str) -> str:
+    """'<PCadı>/PAS/x.pas' -> '<pc>/pas/x.pas': bilgisayar adı klasörü karşılaştırmada ihmal edilir."""
+    parts = rel.lower().split("/")
+    if len(parts) >= 3 and parts[1] == "pas":
+        parts[0] = "<pc>"
+    return "/".join(parts)
+
+
+def list_os_entries(entries, os_dir: str) -> dict[str, tuple[int, float]]:
+    """Kaynak indeksinden (source.Entry listesi) OS projesi listesi; list_os_project ile aynı kurallar."""
+    prefix = os_dir + "/"
+    out = {}
+    for e in entries:
+        if not e.rel.startswith(prefix):
+            continue
+        rel = normalize_os_rel(e.rel[len(prefix):])
+        if rel.endswith(OS_IGNORE_EXT):
+            continue
+        out[rel] = (e.size, e.mtime)
+    return out
+
+
+F_FACEPLATE_PREFIXES = ("@pg_swc_mos", "@pcs7typicals_s7f")
+STANDARD_TYPICALS = ("@pcs7typicals.pdl", "@@pcs7typicals.pdl", "@template.pdl", "@templateaplver10.pdl",
+                     "@pcs7typicalsaplver10.pdl", "@pcs7typicalsapl.pdl", "@templateapl.pdl",
+                     "@pcs7typicalsapc.pdl", "@pcs7typicalsaplv8.pdl", "@templateaplv8.pdl")
+
+
+def picture_kind(rel: str) -> str:
+    """gracs/*.pdl sınıfı: custom / faceplate / f_faceplate / typicals / custom_typicals / other."""
+    name = rel.rsplit("/", 1)[-1].lower()
+    if not (rel.lower().startswith("gracs/") and rel.count("/") == 1 and name.endswith(".pdl")):
+        return "other"
+    if not name.startswith("@"):
+        return "custom"
+    if name.startswith(F_FACEPLATE_PREFIXES):
+        return "f_faceplate"
+    if "typicals" in name or name.startswith("@template"):
+        return "typicals" if name in STANDARD_TYPICALS else "custom_typicals"
+    return "faceplate"

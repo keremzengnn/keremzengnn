@@ -6,7 +6,7 @@ USED_HEX = " ".join(f"{b:02X}" for b in USED.encode("latin1") + b"\x00")
 CFG = "\r\n".join([
     "FILEVERSION \"3.2\"",
     "#STEP7_VERSION V5.5 SP4",
-    f'STATION S7400H , "AS_TEST"',
+    'STATION S7400H , "AS_TEST"',
     'SUBNET PROFIBUS , "PROFIBUS(1)"',
     'SUBNET INDUSTRIAL_ETHERNET , "Plant bus"',
     'RACK 0, "6ES7 400-2JA00-0AA0", "UR2-H"',

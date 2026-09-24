@@ -7,7 +7,7 @@ name = "pcs7-analyzer"
 version = "0.1.0"
 description = "PCS 7 (STEP 7 V5.x) proje backup'ını offline okuyan upgrade ön değerlendirme aracı"
 requires-python = ">=3.11"
-dependencies = ["dbfread>=2.0.7"]
+dependencies = []  # dbfread 2.0.7 pcs7_analyzer/_vendor altında gömülü
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
@@ -20,3 +20,6 @@ include = ["pcs7_analyzer*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+pcs7_analyzer = ["data/*", "_vendor/dbfread/LICENSE"]

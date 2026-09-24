@@ -1,21 +1,21 @@
 """
-Keşif: proje klasörünü SALT OKUNUR tarar, analiz yapmadan ne bulunduğunu listeler.
+Keşif: kaynağın (klasör veya zip) dosya indeksinden, analiz yapmadan ne bulunduğunu listeler.
 
 Bulunanlar: multiproject (*.s7f), proje (*.s7p), block klasörleri (ombstx/offline/<8hex>/SUBBLK.DBF),
 HW Config (*.s7h, .cfg export), symbol table (YDBs/SYMLIST.DBF, *.asc/*.sdf export),
-WinCC OS projeleri (*.mcp içeren klasör), arşivler (*.zip/*.7z; düzleşme riski).
-Tüm path'ler tam (root'a göre relatif) tutulur: aynı isimli dosyalar yüzlerce kez tekrar eder.
+WinCC OS projeleri (*.mcp içeren klasör), iç içe arşivler (*.zip/*.7z).
+Tüm path'ler tam tutulur: aynı isimli dosyalar yüzlerce kez tekrar eder.
 """
 from __future__ import annotations
 
-import os
 import re
 import struct
-import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+from .source import Entry, Source, open_source
 
 _HEX8 = re.compile(r"^[0-9A-Fa-f]{8}$")
 _WINCC_BUILD = re.compile(rb"V0?\d\.\d\d\.\d\d\.\d\d")
@@ -24,41 +24,27 @@ _SYMBOL_EXPORT_EXT = (".asc", ".sdf")
 
 
 def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
-
-
-def dbf_record_count(path: Path) -> int | None:
-    """DBF header'ından kayıt sayısı (offset 4, uint32 LE). Tüm dosyayı okumaz."""
     try:
-        with open(path, "rb") as f:
-            head = f.read(8)
-        return struct.unpack("<I", head[4:8])[0] if len(head) == 8 else None
-    except OSError:
-        return None
+        return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+    except (OverflowError, OSError, ValueError):
+        return "-"
 
 
-def is_hw_cfg(path: Path) -> bool:
+def dbf_record_count_from_head(head: bytes) -> int | None:
+    return struct.unpack("<I", head[4:8])[0] if len(head) >= 8 else None
+
+
+def is_hw_cfg_head(head: bytes) -> bool:
     """HW Config export'u mu? (WinCC'nin TemplateControl.cfg vb. dosyalarını eler)."""
-    try:
-        with open(path, "rb") as f:
-            head = f.read(4096)
-    except OSError:
-        return False
     return b"#STEP7_VERSION" in head or b"\nSTATION " in head or head.startswith(b"STATION ")
-
-
-def wincc_build(mcp: Path) -> str:
-    try:
-        m = _WINCC_BUILD.search(mcp.read_bytes())
-    except OSError:
-        return ""
-    return m.group().decode() if m else ""
 
 
 @dataclass
 class BlockFolderInfo:
     path: str
     project: str
+    dbf: str
+    dbt: str | None
     dbf_size: int
     dbf_mtime: str
     n_records: int | None
@@ -70,11 +56,15 @@ class BlockFolderInfo:
     def is_empty(self) -> bool:
         return self.n_records == 0
 
+    @property
+    def label(self) -> str:
+        return f"{Path(self.project).name or '-'}/{self.path.rsplit('/', 1)[-1]}"
+
 
 @dataclass
 class OsProjectInfo:
     path: str
-    project: str
+    project: str            # içinde bulunduğu .s7p projesi ('-' = proje dışında: OS PC'den kopya)
     mcp: str
     wincc_build: str
     n_files: int
@@ -83,6 +73,11 @@ class OsProjectInfo:
     vbs_modules: int
     vbs_actions: int
     c_actions: int
+    newest_mtime: str
+
+    @property
+    def name(self) -> str:
+        return self.path.rsplit("/", 1)[-1]
 
 
 @dataclass
@@ -105,126 +100,118 @@ class DiscoveryResult:
         return asdict(self)
 
 
-def _owner_project(rel: Path, project_dirs: list[Path]) -> str:
+def owner_project(rel_dir: str, project_dirs: list[str]) -> str:
     """En yakın üst klasördeki .s7p projesi (yoksa '-')."""
     best = None
     for p in project_dirs:
-        if (p == Path(".") or p in rel.parents or p == rel) and (best is None or len(p.parts) > len(best.parts)):
+        if (p == "" or rel_dir == p or rel_dir.startswith(p + "/")) and (best is None or len(p) > len(best)):
             best = p
-    return best.as_posix() if best is not None else "-"
+    return best if best is not None else "-"
 
 
-def _summarize_os(os_dir: Path) -> dict:
+def _summarize_os(files: list[Entry], os_dir: str) -> Counter:
     c = Counter()
-    for dirpath, _, files in os.walk(os_dir):
-        parts = [p.lower() for p in Path(dirpath).relative_to(os_dir).parts]
-        for fn in files:
-            c["n_files"] += 1
-            low = fn.lower()
-            if parts[:1] == ["gracs"] and low.endswith(".pdl"):
-                c["faceplates_and_templates" if low.startswith("@") else "custom_pictures"] += 1
-            elif parts[:1] == ["scriptlib"] and low.endswith(".bmo"):
-                c["vbs_modules"] += 1
-            elif parts[:1] == ["scriptact"] and low.endswith(".bac"):
-                c["vbs_actions"] += 1
-            elif "pas" in parts and low.endswith(".pas"):
-                c["c_actions"] += 1
+    newest = 0.0
+    for e in files:
+        parts = [p.lower() for p in e.rel[len(os_dir) + 1:].split("/")]
+        low = parts[-1]
+        c["n_files"] += 1
+        newest = max(newest, e.mtime)
+        if parts[0] == "gracs" and len(parts) == 2 and low.endswith(".pdl"):
+            c["faceplates_and_templates" if low.startswith("@") else "custom_pictures"] += 1
+        elif parts[0] == "scriptlib" and low.endswith(".bmo"):
+            c["vbs_modules"] += 1
+        elif parts[0] == "scriptact" and low.endswith(".bac"):
+            c["vbs_actions"] += 1
+        elif "pas" in parts[:-1] and low.endswith(".pas"):
+            c["c_actions"] += 1
+    c["newest"] = newest
     return c
 
 
-def discover(root: Path, progress: bool = False) -> DiscoveryResult:
-    root = Path(root).resolve()
-    res = DiscoveryResult(root=str(root))
-    project_dirs: list[Path] = []
-    block_dirs: list[tuple[Path, Path]] = []   # (rel_dir, abs_dir)
-    os_dirs: list[tuple[Path, Path]] = []
-    n_dirs = 0
+def discover_source(src: Source) -> DiscoveryResult:
+    res = DiscoveryResult(root=src.label, warnings=list(src.warnings))
+    by_dir: dict[str, list[Entry]] = defaultdict(list)
+    for e in src.entries:
+        by_dir[e.parent].append(e)
+        res.n_files += 1
+        res.total_bytes += e.size
+        low = e.name.lower()
+        if low.endswith(".s7f"):
+            res.multiprojects.append(e.rel)
+        elif low.endswith(".s7p"):
+            res.projects.append(e.rel)
+        elif low.endswith(".s7h"):
+            res.s7h_files.append(e.rel)
+        elif low.endswith(".cfg") and "/wincproj/" not in f"/{e.rel.lower()}":
+            if is_hw_cfg_head(src.read_head(e.rel, 4096)):
+                res.cfg_exports.append(e.rel)
+        elif low.endswith(_SYMBOL_EXPORT_EXT):
+            res.symbol_exports.append(e.rel)
+        elif low == "symlist.dbf":
+            res.symbol_tables.append(e.rel)
+        elif low.endswith(_ARCHIVE_EXT):
+            res.archives.append(e.rel)
+    project_dirs = [p.rsplit("/", 1)[0] if "/" in p else "" for p in res.projects]
 
-    def _onerror(err: OSError) -> None:
-        res.warnings.append(f"Okunamadı: {err.filename} ({err.strerror})")
-
-    for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
-        dirnames.sort()
-        n_dirs += 1
-        if progress and n_dirs % 500 == 0:
-            print(f"  ... {n_dirs} klasör, {res.n_files} dosya", file=sys.stderr)
-        d = Path(dirpath)
-        rel_d = d.relative_to(root)
-        lower = {f.lower(): f for f in filenames}
-        for fn in filenames:
-            p = d / fn
-            try:
-                res.total_bytes += p.stat().st_size
-            except OSError:
-                pass
-            res.n_files += 1
-            low = fn.lower()
-            rel = (rel_d / fn).as_posix()
-            if low.endswith(".s7f"):
-                res.multiprojects.append(rel)
-            elif low.endswith(".s7p"):
-                res.projects.append(rel)
-                project_dirs.append(rel_d)
-            elif low.endswith(".s7h"):
-                res.s7h_files.append(rel)
-            elif low.endswith(".cfg") and is_hw_cfg(p):
-                res.cfg_exports.append(rel)
-            elif low.endswith(_SYMBOL_EXPORT_EXT):
-                res.symbol_exports.append(rel)
-            elif low == "symlist.dbf":
-                res.symbol_tables.append(rel)
-            elif low.endswith(_ARCHIVE_EXT):
-                res.archives.append(rel)
-        parts_low = [x.lower() for x in rel_d.parts]
-        if (len(parts_low) >= 3 and parts_low[-3:-1] == ["ombstx", "offline"]
-                and _HEX8.match(rel_d.name) and "subblk.dbf" in lower):
-            block_dirs.append((rel_d, d))
-        if any(f.endswith(".mcp") for f in lower):
-            os_dirs.append((rel_d, d))
-            dirnames[:] = []   # OS projesinin içini ayrıca özetleyeceğiz
-
-    for rel_d, d in block_dirs:
-        dbf = d / next(f for f in os.listdir(d) if f.lower() == "subblk.dbf")
-        dbt = next((d / f for f in os.listdir(d) if f.lower() == "subblk.dbt"), None)
-        st = dbf.stat()
-        dst = dbt.stat() if dbt else None
+    # Block klasörleri
+    for d, files in sorted(by_dir.items()):
+        parts = d.lower().split("/")
+        if len(parts) < 3 or parts[-3:-1] != ["ombstx", "offline"] or not _HEX8.match(parts[-1]):
+            continue
+        names = {f.name.lower(): f for f in files}
+        dbf = names.get("subblk.dbf")
+        if not dbf:
+            continue
+        dbt = names.get("subblk.dbt")
         res.block_folders.append(BlockFolderInfo(
-            path=rel_d.as_posix(), project=_owner_project(rel_d, project_dirs),
-            dbf_size=st.st_size, dbf_mtime=_iso(st.st_mtime), n_records=dbf_record_count(dbf),
-            dbt_size=dst.st_size if dst else None, dbt_mtime=_iso(dst.st_mtime) if dst else None,
-            has_baustein=any(f.lower() == "baustein.dbf" for f in os.listdir(d)),
+            path=d, project=owner_project(d, project_dirs), dbf=dbf.rel, dbt=dbt.rel if dbt else None,
+            dbf_size=dbf.size, dbf_mtime=_iso(dbf.mtime),
+            n_records=dbf_record_count_from_head(src.read_head(dbf.rel, 8)),
+            dbt_size=dbt.size if dbt else None, dbt_mtime=_iso(dbt.mtime) if dbt else None,
+            has_baustein="baustein.dbf" in names,
         ))
         if dbt is None:
-            res.warnings.append(f"{rel_d.as_posix()}: SUBBLK.DBT yok -> instance eşlemesi yapılamaz")
-        elif dst and abs(dst.st_mtime - st.st_mtime) > 24 * 3600:
-            res.warnings.append(f"{rel_d.as_posix()}: SUBBLK.DBF ve .DBT tarihleri >1 gün farklı -> eşleşme teyit edilmeli")
+            res.warnings.append(f"{d}: SUBBLK.DBT yok -> instance eşlemesi yapılamaz")
+        elif abs(dbt.mtime - dbf.mtime) > 24 * 3600:
+            res.warnings.append(f"{d}: SUBBLK.DBF ve .DBT tarihleri >1 gün farklı -> eşleşme teyit edilmeli")
 
-    for rel_d, d in os_dirs:
-        mcp = next(f for f in sorted(os.listdir(d)) if f.lower().endswith(".mcp"))
-        s = _summarize_os(d)
-        res.n_files += s["n_files"]
+    # OS projeleri: kök seviyesinde .mcp olan klasör
+    os_dirs = sorted(d for d, files in by_dir.items() if any(f.name.lower().endswith(".mcp") for f in files))
+    os_dirs = [d for d in os_dirs if not any(d != o and d.startswith(o + "/") for o in os_dirs)]
+    for d in os_dirs:
+        files = [e for e in src.entries if e.rel.startswith(d + "/")]
+        mcp = next(f for f in sorted(by_dir[d], key=lambda x: x.name) if f.name.lower().endswith(".mcp"))
+        m = _WINCC_BUILD.search(src.read_bytes(mcp.rel)) if mcp.size < 50_000_000 else None
+        s = _summarize_os(files, d)
         res.os_projects.append(OsProjectInfo(
-            path=rel_d.as_posix(), project=_owner_project(rel_d, project_dirs), mcp=mcp,
-            wincc_build=wincc_build(d / mcp), n_files=s["n_files"],
+            path=d, project=owner_project(d, project_dirs), mcp=mcp.name,
+            wincc_build=m.group().decode() if m else "", n_files=s["n_files"],
             custom_pictures=s["custom_pictures"], faceplates_and_templates=s["faceplates_and_templates"],
             vbs_modules=s["vbs_modules"], vbs_actions=s["vbs_actions"], c_actions=s["c_actions"],
+            newest_mtime=_iso(s["newest"]),
         ))
 
     names = defaultdict(list)
     for p in res.projects:
-        names[Path(p).name.lower()].append(p)
+        names[p.rsplit("/", 1)[-1].lower()].append(p)
     for n, paths in names.items():
         if len(paths) > 1:
             res.warnings.append(f"Aynı proje dosyası birden fazla yerde ({n}): {', '.join(paths)} -> farklı tarihli backup?")
     if res.archives:
-        res.warnings.append(f"{len(res.archives)} arşiv dosyası var: açılmadı. Açarken path yapısı korunmalı (düzleşme riski).")
+        res.warnings.append(f"{len(res.archives)} iç içe arşiv var: okunmadı. Açarken path yapısı korunmalı (düzleşme riski).")
     if not res.cfg_exports and res.s7h_files:
         res.warnings.append("HW Config .cfg export'u yok -> .s7h binary fallback kullanılacak (F-I/O ve detay eksik olabilir)")
     return res
 
 
+def discover(path: Path, progress=None) -> DiscoveryResult:
+    with open_source(path, progress) as src:
+        return discover_source(src)
+
+
 def render_markdown(r: DiscoveryResult) -> str:
-    out = [f"# Keşif raporu", "", f"- Klasör: `{r.root}`",
+    out = ["# Keşif raporu", "", f"- Kaynak: `{r.root}`",
            f"- {r.n_files} dosya, {r.total_bytes / 1e6:.1f} MB", ""]
 
     def lst(title: str, items: list[str]) -> None:
@@ -234,7 +221,6 @@ def render_markdown(r: DiscoveryResult) -> str:
 
     lst("Multiproject (*.s7f)", r.multiprojects)
     lst("Proje (*.s7p)", r.projects)
-
     out.append(f"## Block klasörleri ({len(r.block_folders)})")
     if r.block_folders:
         out += ["| Klasör | Proje | Kayıt | DBF MB | DBT MB | DBF tarih | DBT tarih |", "|---|---|---|---|---|---|---|"]
@@ -245,23 +231,20 @@ def render_markdown(r: DiscoveryResult) -> str:
     else:
         out.append("- yok")
     out.append("")
-
     lst("HW Config .cfg export", r.cfg_exports)
     lst("HW Config .s7h", r.s7h_files)
     lst("Symbol table (SYMLIST.DBF)", r.symbol_tables)
     lst("Symbol export (.asc/.sdf)", r.symbol_exports)
-
     out.append(f"## WinCC OS projeleri ({len(r.os_projects)})")
     if r.os_projects:
-        out += ["| Klasör | .mcp | WinCC build | Dosya | Custom picture | @pdl | .bmo | .bac | .pas |",
-                "|---|---|---|---|---|---|---|---|---|"]
+        out += ["| Klasör | Proje | WinCC build | Dosya | Custom picture | @pdl | .bmo | .bac | .pas | En yeni |",
+                "|---|---|---|---|---|---|---|---|---|---|"]
         for o in r.os_projects:
-            out.append(f"| `{o.path}` | {o.mcp} | {o.wincc_build or '?'} | {o.n_files} | {o.custom_pictures} | "
-                       f"{o.faceplates_and_templates} | {o.vbs_modules} | {o.vbs_actions} | {o.c_actions} |")
+            out.append(f"| `{o.path}` | `{o.project}` | {o.wincc_build or '?'} | {o.n_files} | {o.custom_pictures} | "
+                       f"{o.faceplates_and_templates} | {o.vbs_modules} | {o.vbs_actions} | {o.c_actions} | {o.newest_mtime} |")
     else:
         out.append("- yok")
     out.append("")
-
-    lst("Arşivler", r.archives)
+    lst("İç içe arşivler", r.archives)
     lst("Uyarılar", r.warnings)
     return "\n".join(out)

@@ -69,6 +69,20 @@ def test_discover(project_tree):
     assert "arşiv" in w
 
 
+def test_discover_zip_equals_folder(project_tree, tmp_path):
+    import zipfile
+    z = tmp_path / "b.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        for p in sorted(project_tree.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(project_tree).as_posix())
+    a, b = discover(project_tree), discover(z)
+    for attr in ("multiprojects", "projects", "s7h_files", "cfg_exports", "symbol_tables", "symbol_exports", "archives"):
+        assert sorted(getattr(a, attr)) == sorted(getattr(b, attr)), attr
+    assert [(x.path, x.n_records, x.dbt_size) for x in a.block_folders] == [(x.path, x.n_records, x.dbt_size) for x in b.block_folders]
+    assert [(o.path, o.custom_pictures, o.wincc_build) for o in a.os_projects] == [(o.path, o.custom_pictures, o.wincc_build) for o in b.os_projects]
+
+
 def test_discover_is_read_only(project_tree):
     def snapshot():
         return sorted((p, os.stat(os.path.join(d, p)).st_mtime_ns)

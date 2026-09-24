@@ -4,11 +4,15 @@
 Bir SIMATIC PCS 7 proje backup'ını (STEP 7 V5.x tabanlı multiproject klasörü) **SIMATIC Manager açmadan**
 offline okuyup upgrade ön değerlendirmesi için gereken bilgileri çıkaran bir CLI aracı.
 
-Kullanım hedefi:
+Kullanıcının **kendi bilgisayarında** çalışır (backup 5+ GB, hiçbir yere yüklenmez). Girdi: klasör veya .zip.
 ```
-python -m pcs7_analyzer <proje_klasoru> [--out rapor.md] [--json rapor.json] [--target V10.0SP2]
+python -m pcs7_analyzer                      # pencere (GUI)
+python -m pcs7_analyzer <klasör|zip> [-o çıktı_klasörü] [--target V10.0SP2] [--released csv] [--discover] [--open]
+python -m pcs7_analyzer --demo <klasör>      # sahte proje üret + analiz
 ```
-Çıktı: Markdown rapor (+ JSON). İleride Word template'ine aktarılacak, o yüzden veri modeli rapordan ayrı olsun.
+Çıktı: rapor.html (Siemens renkleri) + rapor.md + rapor.json. Word template'i için aynı doküman modeli kullanılacak.
+Dağıtım: `Baslat.bat` (Python 3.11+, ek paket yok: dbfread `_vendor/` altında) veya GitHub Actions'ın ürettiği
+`PCS7Analyzer.exe` (`.github/workflows/windows.yml`, testler Windows'ta da koşar).
 
 Kullanıcı: PCS 7 otomasyon mühendisi. Raporda Türkçe metin, İngilizce teknik terimler
 (firewall, block, library, faceplate…) **çevrilmeden** kalır. Kısa, madde madde, gereksiz metin yok.
@@ -16,14 +20,20 @@ Kullanıcı: PCS 7 otomasyon mühendisi. Raporda Türkçe metin, İngilizce tekn
 ## Kod yapısı
 ```
 pcs7_analyzer/
-  parsers/        subblk.py, hwconfig.py, symbols.py, wincc.py  (gerçek projeyle test edilmiş referans mantık)
-  discovery.py    salt okunur keşif (--discover)
-  checks.py       TÜM kontrollerin tek tanım yeri (CHECKS listesi)
-  model.py        rapordan bağımsız veri modeli (Finding, Severity, Confidence)
-  released_modules.py  data/released_modules_<ver>.csv yükleyici; listede yok -> "bulunamadı"
-  cli.py          python -m pcs7_analyzer
-tests/            pytest; dbfwriter.py sentetik SUBBLK.DBF/.DBT üretir
+  source.py       klasör / zip kaynağı: dosya indeksi + gerektiğinde temp'e çıkarma (kaynağa yazmaz)
+  discovery.py    indeksten keşif (proje, block klasörü, cfg/s7h, symbol, OS projesi)
+  parsers/        subblk.py, hwconfig.py, symbols.py (ASC + SYMLIST.DBF), wincc.py
+  analyze.py      Analysis modeli: versiyon, AS envanteri, released eşleşme, block klasörleri, OS, tutarlılık
+  checks.py       TÜM kontrollerin tek tanım yeri (CHECKS)
+  report.py       doküman modeli -> Markdown / HTML / JSON; SIEMENS_TOKENS renkleri
+  gui.py, cli.py  pencere ve komut satırı
+  demo.py         sahte ama gerçekçi PCS 7 backup üreticisi (test ortamı)
+  released_extract.py  Released Modules manual -> CSV taslağı
+  data/           released_modules_<ver>.csv (müşteriden bağımsız)
+  _vendor/dbfread gömülü bağımlılık (MIT)
+tests/            pytest; test_analyze.py demo projesiyle uçtan uca (klasör + zip)
 ```
+Test: `pytest`
 Test: `pip install -e .[test] && pytest`
 
 ## Proje klasör yapısı (STEP 7 V5.x)
@@ -57,7 +67,8 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
 - F-block'ların header'ı boştur (korumalı) → numara aralığı ve symbol table ile tanınır.
 - **Instance → FB eşlemesi:** DB kaydının `SSBPART` memo'su: byte0 `0x0A`=FB instance / `0x0B`=SFB instance,
   byte1-2 little-endian FB numarası. DBT gerektirir. Saçma numaralar (≥ 8192) filtrelenir ve `unresolved_instances`'ta sayılır.
-  Önceki saçma numaraların muhtemel sebebi yukarıdaki encoding hatası. **Açık:** DBT'nin DB3 mü DB4 mü olduğu teyit edilmedi;
+  Önceki saçma numaraların muhtemel sebebi yukarıdaki encoding hatası. SSBPART artık özel FieldParser ile HAM byte
+  okunur (decode yok); MC5CODE/ADDINFO memo'ları hiç okunmaz (büyük DBT'de hız). **Açık:** DBT'nin DB3 mü DB4 mü olduğu teyit edilmedi;
   DB3 memo 0x1A'da, dbfread'in DB4 okuyucusu 0x1F'de keser -> FB26 / FB31 instance'ları kaybolabilir.
 - **Boş block klasörü:** DBF 834 byte, 0 kayıt. Normaldir (kullanılmayan program), hata değil.
 
@@ -84,7 +95,7 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
    (aynı library'nin farklı author sürümleri), custom block listesi (numara, isim, family, author, dil), instance sayıları.
 5. **Riskli içerik tespiti:** SFC, Logic Matrix, Modbus TCP, PCS 7 Library V7.1 block'ları, F-System,
    STL/SCL custom block'lar, header'sız block'lar, symbol'ü olup block'u olmayan (ve tersi) block'lar.
-6. **Block klasörü ↔ AS eşlemesi:** **Çözülmemiş problem.** Şimdiye kadar symbol table'daki FB listesi ile
+6. **Block klasörü ↔ AS eşlemesi:** **Çözülmemiş problem.** (Şu an: proje adı + SYMLIST FB seti Jaccard ≥ %50, heuristic.) Şimdiye kadar symbol table'daki FB listesi ile
    block klasörünün FB setini karşılaştırarak elle eşledik. Proje dosyalarında (S7CONTAI.DBF, BSTCNTOF.DBF, HOBJECT1.DBF,
    S7RESOFF.DBF …) doğrudan eşlemeyi bul; bulamazsan FB seti benzerliğiyle eşle ve raporda "heuristic" diye işaretle.
 7. **OS yapısı:** server / standby / client / ES projeleri, custom picture sayısı, script'ler, custom typicals,
@@ -111,3 +122,9 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
 Müşteri backup'ı ve müşteriye özel beklenen değerler **repoya girmez (repo public).** Regression testleri
 `tests/test_regression.py`: `PCS7_TEST_PROJECT=<klasör>` ve gitignore'daki `tests/regression/expected_local.json`
 (şablon: `expected_example.json`) ile çalışır. Müşteri projesi kullanmadan önce veri kullanım kuralları teyit edilmeli.
+
+## Heuristic'ler (gerçek projeyle teyit edilecek)
+- SYMLIST.DBF alan adları (`_SKZ`, `_OPIEC`, `_KOMMENTAR`) anahtar kelimeyle eşleniyor.
+- OS rolü proje adından (SRV/STBY/OSC/CLIENT…). ES ↔ server çifti: aynı isimli OS projesi, biri .s7p içinde, diğeri dışında.
+- Aynı .s7p adı birden fazla yerde -> en yeni mtime'lı kopya analiz edilir, diğerleri analiz dışı (raporda not).
+- WinCC build -> PCS 7 ailesi eşlemesi (7.3 -> V8.1 …) `confidence: low`.

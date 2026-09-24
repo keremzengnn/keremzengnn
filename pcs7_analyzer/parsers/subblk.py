@@ -9,7 +9,8 @@ import collections
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import dbfread
+from .._vendor import dbfread
+from .._vendor.dbfread.field_parser import FieldParser
 
 # SUBBLKTYP kodları (doğrulananlar)
 SUBBLK_FB = "00004"
@@ -102,7 +103,26 @@ def _to_bytes(v) -> bytes:
     return v if isinstance(v, bytes) else v.encode(DBF_ENCODING, "ignore")
 
 
-def parse_subblk(dbf_path: Path, with_instances: bool = True) -> BlockFolder:
+class _SubblkFieldParser(FieldParser):
+    """
+    Sadece SSBPART memo'sunu okur ve HAM byte döndürür (decode yok -> encoding'den bağımsız).
+    MC5CODE / ADDINFO (block kodu, DBT'nin büyük kısmı) hiç okunmaz: 400+ MB DBT'de ciddi hız farkı.
+    """
+
+    def parseM(self, field, data):
+        if field.name != "SSBPART":
+            return None
+        memo = self.get_memo(self._parse_memo_index(data))
+        return bytes(memo) if memo is not None else None
+
+
+def dbf_record_count(dbf_path: Path) -> int:
+    with open(dbf_path, "rb") as f:
+        head = f.read(8)
+    return int.from_bytes(head[4:8], "little") if len(head) == 8 else 0
+
+
+def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> BlockFolder:
     """
     SUBBLK.DBF okur.
     - Boş block klasöründe DBF 834 byte'tır (sadece header) -> n_records = 0.
@@ -118,12 +138,16 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True) -> BlockFolder:
         encoding=DBF_ENCODING,
         ignore_missing_memofile=not memo,
         char_decode_errors="ignore",
+        parserclass=_SubblkFieldParser,
     )
+    total = dbf_record_count(dbf_path)
     bf = BlockFolder(path=dbf_path.parent, memo_available=memo)
     present = set()
     headers: dict[tuple, dict] = {}
     for rec in table:
         bf.n_records += 1
+        if progress and bf.n_records % 20000 == 0:
+            progress(bf.n_records, total)
         ty = rec["SUBBLKTYP"]
         nr = int(rec["BLKNUMBER"])
         if ty in _KIND:

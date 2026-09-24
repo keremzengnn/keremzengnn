@@ -1,0 +1,46 @@
+name: Windows test + exe
+
+on:
+  push:
+    branches: ["claude/**", "main", "master"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest
+      - run: python -m pytest -q
+
+  exe:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pyinstaller
+      - name: Build
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name PCS7Analyzer
+          --add-data "pcs7_analyzer/data;pcs7_analyzer/data"
+          pcs7_analyzer_app.py
+      - name: Smoke test (demo, headless)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\PCS7Analyzer.exe -ArgumentList "--demo","$env:RUNNER_TEMP\demo" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode)" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.html")) { throw "rapor yok" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PCS7Analyzer-windows
+          path: dist/PCS7Analyzer.exe
