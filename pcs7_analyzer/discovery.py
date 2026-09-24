@@ -198,8 +198,12 @@ def discover_source(src: Source) -> DiscoveryResult:
     for n, paths in names.items():
         if len(paths) > 1:
             res.warnings.append(f"Aynı proje dosyası birden fazla yerde ({n}): {', '.join(paths)} -> farklı tarihli backup?")
-    if res.archives:
-        res.warnings.append(f"{len(res.archives)} iç içe arşiv var: okunmadı. Açarken path yapısı korunmalı (düzleşme riski).")
+    expanded = set(getattr(src, "expanded", []))
+    if expanded:
+        res.warnings.append(f"İç içe arşivler açılıp tarandı: {', '.join(sorted(expanded))}")
+    unread = [a for a in res.archives if a not in expanded]
+    if unread:
+        res.warnings.append(f"{len(unread)} iç arşiv okunmadı ({', '.join(unread)}): klasöre açılmalı (path yapısı korunarak).")
     if not res.cfg_exports and res.s7h_files:
         res.warnings.append("HW Config .cfg export'u yok -> .s7h binary fallback kullanılacak (F-I/O ve detay eksik olabilir)")
     return res

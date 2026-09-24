@@ -40,13 +40,16 @@ def data_dirs() -> list[Path]:
 # Versiyon eşlemeleri
 # ---------------------------------------------------------------------------
 
-# STEP 7 (USED_S7_VERSIONS ilk token'ı major.minor.sp) -> PCS 7 ailesi. Sadece doğrulananlar.
+# STEP 7 (USED_S7_VERSIONS ilk token'ı major.minor.sp) -> aday PCS 7 ailesi.
+# PCS 7 V8.1 = STEP 7 V5.5 SP4 (PCS 7 Readme V8.1 SP1, Bölüm 5). V5.5 SP4 sonraki sürümlerde de kullanılmış
+# olabileceğinden tek başına kesin kabul edilmez.
 STEP7_TO_PCS7 = {"5.5.4": "V8.1"}
 
-# WinCC build (mcp) major.minor -> (WinCC adı, PCS 7 ailesi). PCS 7 eşlemesi teyit edilmeli.
+# WinCC build (mcp) major.minor -> (WinCC adı, PCS 7 ailesi, doğrulandı mı)
 WINCC_TO_PCS7 = {
-    "07.02": ("WinCC V7.2", "V8.0"), "07.03": ("WinCC V7.3", "V8.1"), "07.04": ("WinCC V7.4", "V8.2"),
-    "07.05": ("WinCC V7.5", "V9.x"), "08.00": ("WinCC V8.0", "V10.x"),
+    "07.03": ("WinCC V7.3", "V8.1", True),     # PCS 7 Readme V8.1 SP1, Bölüm 5
+    "07.02": ("WinCC V7.2", "V8.0", False), "07.04": ("WinCC V7.4", "V8.2", False),
+    "07.05": ("WinCC V7.5", "V9.x", False), "08.00": ("WinCC V8.0", "V10.x", False),
 }
 
 # İç prosedür: kademeli yol
@@ -105,6 +108,7 @@ class Station:
     pdm_used: bool | None = None
     f_modules: int = 0
     used_s7_versions: str = ""
+    station_text: str = ""                                               # STATION satırı + modül isimleri
     inventory: Counter = field(default_factory=Counter)                  # {(order, fw): n}
 
 
@@ -149,6 +153,8 @@ class BlockFolderResult:
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
+    block_names: list[str] = field(default_factory=list)   # header'daki FB/FC isimleri
+    fb_by_name: dict = field(default_factory=dict)          # {isim: FB no}
     f_blocks_from_symbols: list[str] = field(default_factory=list)
     symbol_source: str = ""
     symbol_only: list[str] = field(default_factory=list)   # symbol'de var, block klasöründe yok
@@ -166,6 +172,7 @@ class OsProject:
     f_faceplates: list[str] = field(default_factory=list)
     scripts: list[str] = field(default_factory=list)
     opc: list[str] = field(default_factory=list)
+    cas_packages: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -211,6 +218,7 @@ class Analysis:
     discovery: DiscoveryResult
     versions: list[VersionInfo] = field(default_factory=list)
     pcs7_family: str | None = None
+    pcs7_family_confidence: str = Confidence.LOW.value
     stations: list[Station] = field(default_factory=list)
     hw_matches: list[HwMatch] = field(default_factory=list)
     released_list: str = ""
@@ -224,6 +232,18 @@ class Analysis:
     open_items: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stale_dirs: list[str] = field(default_factory=list)   # analiz dışı bırakılan eski kopyalar
+
+    def mp_of(self, rel_dir: str) -> str:
+        """Bir proje klasörünün multiproject adı (s7f klasörü ata ise; tek MP varsa o)."""
+        best = None
+        for m in self.discovery.multiprojects:
+            d = m.rsplit("/", 1)[0] if "/" in m else ""
+            if (d == "" or rel_dir == d or rel_dir.startswith(d + "/")) and (best is None or len(d) > len(best[0])):
+                best = (d, m)
+        if best:
+            return Path(best[1]).stem
+        mps = [m for m in self.discovery.multiprojects]
+        return Path(mps[0]).stem if len(mps) == 1 else "-"
 
     @property
     def project_name(self) -> str:
@@ -292,6 +312,7 @@ def _analyze_stations(src: Source, d: DiscoveryResult, an: Analysis, log) -> Non
                 st.project = pd
                 projects_with_cfg.add(pd)
                 break
+        st.station_text = cfg["station"] + " " + " ".join(m.name for m in cfg["modules"])
         for mod in cfg["modules"]:
             if mod.is_internal:
                 continue
@@ -392,6 +413,8 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     bf = parse_subblk(src.materialize(info.dbf), progress=prog)
     res.counts = bf.counts
     res.fb_numbers = sorted(b.number for b in bf.blocks if b.kind == "FB")
+    res.block_names = sorted({b.name for b in bf.blocks if b.name})
+    res.fb_by_name = {b.name: b.number for b in bf.blocks if b.kind == "FB" and b.name}
     res.memo_available = bf.memo_available
     res.unresolved_instances = bf.unresolved_instances
     summary = library_summary(bf)
@@ -510,6 +533,8 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
                 op.custom_typicals.append(display.get(rel, rel).rsplit("/", 1)[-1])
             elif k == "f_faceplate":
                 op.f_faceplates.append(display.get(rel, rel).rsplit("/", 1)[-1])
+            if rel.endswith(".pck") and "cas" in rel.rsplit("/", 1)[-1]:
+                op.cas_packages.append(display.get(rel, rel))
             if rel.startswith(("scriptlib/", "scriptact/")) and rel.endswith((".bmo", ".bac", ".act")):
                 op.scripts.append(display.get(rel, rel))
         opc = sorted({"/".join(r.split("/")[:2]) for r in lst if r.startswith("opc/")} |
@@ -595,19 +620,20 @@ def _without_stale_copies(d: DiscoveryResult, an: Analysis) -> DiscoveryResult:
 
 
 def _versions(an: Analysis) -> None:
-    fams = []
+    """Versiyon kaynakları: WinCC build (en güvenilir), APL author çoğunluğu, STEP 7 USED_S7_VERSIONS."""
+    cands: list[tuple[str, str, bool]] = []      # (aile, kaynak türü, doğrulanmış)
     for st in an.stations:
-        if st.used_s7_versions:
-            tok = re.match(r"(\d+)\.(\d+)\.(\d+)", st.used_s7_versions)
-            if tok:
-                key = ".".join(tok.groups())
-                sp = f" SP{tok.group(3)}" if tok.group(3) != "0" else ""
-                fam = STEP7_TO_PCS7.get(key)
-                an.versions.append(VersionInfo(f"STEP 7 ({st.name})", f"V{tok.group(1)}.{tok.group(2)}{sp}"
-                                               + (f" -> PCS 7 {fam} ailesi" if fam else " (PCS 7 eşlemesi teyit edilmeli)"),
-                                               st.source, Confidence.HIGH.value if fam else Confidence.LOW.value))
-                if fam:
-                    fams.append(fam)
+        tok = re.match(r"(\d+)\.(\d+)\.(\d+)", st.used_s7_versions or "")
+        if not tok:
+            continue
+        key = ".".join(tok.groups())
+        sp = f" SP{tok.group(3)}" if tok.group(3) != "0" else ""
+        fam = STEP7_TO_PCS7.get(key)
+        an.versions.append(VersionInfo(f"STEP 7 ({st.name})", f"V{tok.group(1)}.{tok.group(2)}{sp}"
+                                       + (f" -> PCS 7 {fam} ailesi ile uyumlu" if fam else ""),
+                                       st.source, Confidence.LOW.value))
+        if fam:
+            cands.append((fam, "STEP 7", False))
     seen = set()
     for op in an.os_projects:
         b = op.info.wincc_build
@@ -616,23 +642,38 @@ def _versions(an: Analysis) -> None:
         seen.add(b)
         mm = re.match(r"V0?(\d+)\.(\d\d)", b)
         key = f"{int(mm.group(1)):02d}.{mm.group(2)}" if mm else ""
-        wn, fam = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None))
+        wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
         an.versions.append(VersionInfo("WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" if fam else ""),
-                                       f"{op.info.path}/{op.info.mcp}", Confidence.LOW.value))
-        if fam and not fams:
-            fams.append(fam)
+                                       f"{op.info.path}/{op.info.mcp}", Confidence.HIGH.value if ok else Confidence.LOW.value))
+        if fam:
+            cands.append((fam, "WinCC", ok))
     libs = Counter()
+    apl_fams = Counter()
     for bfr in an.block_folders:
         for lib in ("APL", "Basis Library", "S7 F Systems Failsafe Blocks"):
             for a, n in bfr.libraries.get(lib, {}).items():
                 libs[(lib, author_version(a) or a, bfr.as_label)] += n
+                if lib == "APL" and author_version(a):
+                    apl_fams[author_version(a)] += n
     per_lib = defaultdict(lambda: defaultdict(list))
     for (lib, v, asl), n in libs.items():
         per_lib[lib][v].append(asl)
     for lib, vs in per_lib.items():
         val = "; ".join(f"{v} ({', '.join(sorted(set(a)))})" for v, a in sorted(vs.items()))
         an.versions.append(VersionInfo(lib, val, "block header author (SUBBLK.DBF)"))
-    an.pcs7_family = Counter(fams).most_common(1)[0][0] if fams else None
+    if apl_fams:
+        cands.append((apl_fams.most_common(1)[0][0], "APL", False))
+
+    # Öncelik: doğrulanmış WinCC > APL çoğunluğu > diğer WinCC > STEP 7
+    order = sorted(cands, key=lambda c: (0 if c[1] == "WinCC" and c[2] else 1 if c[1] == "APL" else 2 if c[1] == "WinCC" else 3))
+    an.pcs7_family = order[0][0] if order else None
+    fams = {c[0] for c in cands}
+    if len(fams) > 1:
+        an.open_items.append("Versiyon kaynakları çelişiyor: " + ", ".join(f"{k}: {f}" for f, k, _ in cands)
+                             + f" -> '{an.pcs7_family}' kabul edildi, teyit edilmeli")
+    an.pcs7_family_confidence = (Confidence.HIGH.value if order and (order[0][1] == "WinCC" and order[0][2]
+                                                                   or len(fams) == 1 and len(cands) > 1)
+                                 else Confidence.LOW.value)
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--out-dir", type=Path, help="Rapor klasörü (varsayılan: ./pcs7_rapor/<isim>_<tarih>)")
     p.add_argument("--target", default=DEFAULT_TARGET, help=f"Hedef PCS 7 versiyonu (varsayılan {DEFAULT_TARGET})")
     p.add_argument("--released", type=Path, help="Released Modules CSV (varsayılan: paket içindeki data/)")
+    p.add_argument("--template", type=Path, help="Word template (.dotx); verilmezse ayarlardaki / data/ içindeki")
+    p.add_argument("--author", help="Header'da ad (ayarlara kaydedilir)")
+    p.add_argument("--department", help="Header'da departman (ayarlara kaydedilir)")
+    p.add_argument("--customer", help="Kapak üst satırı (varsayılan: multiproject adları)")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
     p.add_argument("--open", action="store_true", help="Bitince HTML raporu tarayıcıda aç")
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
@@ -58,11 +62,13 @@ def default_out_dir(source: Path) -> Path:
 
 
 def run(source: Path, out_dir: Path | None = None, target: str = DEFAULT_TARGET, released: Path | None = None,
-        discover_only: bool = False, log=print) -> Path:
+        discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
+        department: str | None = None, customer: str | None = None) -> Path:
     """Analizi çalıştırır, raporları yazar ve ana rapor dosyasının yolunu döndürür."""
+    from . import settings
     from .analyze import analyze
     from .discovery import discover, render_markdown as render_discovery
-    from .report import build_document, render_html, render_json, render_markdown
+    from .report import ReportMeta, build_document, render_html, render_json, render_markdown
 
     source = Path(source)
     out_dir = Path(out_dir) if out_dir else default_out_dir(source)
@@ -77,12 +83,26 @@ def run(source: Path, out_dir: Path | None = None, target: str = DEFAULT_TARGET,
         log(f"Keşif raporu: {p}")
         return p
 
+    st = settings.load()
+    meta = ReportMeta(author=author if author is not None else st.get("author", ""),
+                      department=department if department is not None else st.get("department", ""),
+                      customer=customer or "")
     an = analyze(source, target=target, released_csv=released, log=log)
     doc = build_document(an)
     html_p = out_dir / "rapor.html"
-    html_p.write_text(render_html(an, doc), encoding="utf-8")
-    (out_dir / "rapor.md").write_text(render_markdown(an, doc), encoding="utf-8")
+    html_p.write_text(render_html(an, doc, meta), encoding="utf-8")
+    (out_dir / "rapor.md").write_text(render_markdown(an, doc, meta), encoding="utf-8")
     (out_dir / "rapor.json").write_text(render_json(an), encoding="utf-8")
+    tpl = settings.find_template(str(template) if template else None)
+    if tpl:
+        from .word import TemplateError, render_docx
+        try:
+            p = render_docx(an, build_document(an, full=False), meta, tpl, out_dir / "rapor.docx")
+            log(f"Word rapor: {p}")
+        except TemplateError as e:
+            log(f"Word rapor üretilemedi: {e}")
+    else:
+        log("Word template (.dotx) seçilmedi: rapor.docx üretilmedi (HTML/MD/JSON üretildi).")
     log(f"Rapor: {html_p}")
     return html_p
 
@@ -120,8 +140,12 @@ def main(argv: list[str] | None = None) -> int:
     def log(msg):
         print(msg, file=sys.stderr)
 
+    from . import settings
+    settings.save({k: v for k, v in (("author", args.author), ("department", args.department),
+                                       ("template", str(args.template) if args.template else None)) if v})
     try:
-        out = run(src, args.out_dir, args.target, args.released, args.discover, log)
+        out = run(src, args.out_dir, args.target, args.released, args.discover, log, args.template,
+                  args.author, args.department, args.customer)
     except ValueError as e:
         parser.error(str(e))
     if args.open:

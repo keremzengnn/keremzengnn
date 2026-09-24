@@ -24,6 +24,8 @@ class Finding:
     detail: str
     sources: list[str] = field(default_factory=list)   # dosya yolları ve/veya manual bölümleri
     confidence: Confidence = Confidence.HIGH
+    scope: str = ""          # AS etiketi (AS bazlı bulgu) veya "" (genel)
+    blocking: bool = False   # upgrade'i engelleyen bulgu
 
     def to_dict(self) -> dict:
         d = asdict(self)

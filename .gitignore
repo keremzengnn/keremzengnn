@@ -11,3 +11,6 @@ local/
 *.7z
 PROMPT_claude_code.md
 tests/regression/expected_local.json
+
+# Kurum içi Word template repoya girmez
+*.dotx

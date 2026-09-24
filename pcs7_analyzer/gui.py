@@ -10,7 +10,7 @@ import traceback
 import webbrowser
 from pathlib import Path
 
-from . import __version__
+from . import __version__, settings
 from .cli import DEFAULT_TARGET, default_out_dir, run
 from .report import SIEMENS_TOKENS as T
 
@@ -21,7 +21,7 @@ def main() -> int:
 
     root = tk.Tk()
     root.title(f"PCS 7 Upgrade Analyzer {__version__}")
-    root.geometry("860x620")
+    root.geometry("900x720")
     root.minsize(700, 480)
     root.configure(bg=T["light-sand"])
 
@@ -52,10 +52,15 @@ def main() -> int:
     body.pack(fill="both", expand=True)
     body.columnconfigure(1, weight=1)
 
+    st = settings.load()
     src_var = tk.StringVar()
     out_var = tk.StringVar()
-    tgt_var = tk.StringVar(value=DEFAULT_TARGET)
-    rel_var = tk.StringVar()
+    tgt_var = tk.StringVar(value=st.get("target", DEFAULT_TARGET))
+    rel_var = tk.StringVar(value=st.get("released", ""))
+    tpl_var = tk.StringVar(value=st.get("template", ""))
+    author_var = tk.StringVar(value=st.get("author", ""))
+    dept_var = tk.StringVar(value=st.get("department", ""))
+    cust_var = tk.StringVar()
     disc_var = tk.BooleanVar(value=False)
 
     def pick_dir():
@@ -76,6 +81,11 @@ def main() -> int:
         p = filedialog.askdirectory(title="Rapor klasörü")
         if p:
             out_var.set(p)
+
+    def pick_tpl():
+        p = filedialog.askopenfilename(title="Word template (.dotx)", filetypes=[("Word template", "*.dotx"), ("Tümü", "*.*")])
+        if p:
+            tpl_var.set(p)
 
     def pick_rel():
         p = filedialog.askopenfilename(title="Released Modules CSV", filetypes=[("CSV", "*.csv")])
@@ -101,6 +111,19 @@ def main() -> int:
     ttk.Entry(body, textvariable=rel_var).grid(row=r, column=1, sticky="ew", padx=8)
     ttk.Button(body, text="Seç…", command=pick_rel).grid(row=r, column=2, sticky="e")
     r += 1
+    ttk.Label(body, text="Word template (.dotx)").grid(row=r, column=0, sticky="w", pady=4)
+    ttk.Entry(body, textvariable=tpl_var).grid(row=r, column=1, sticky="ew", padx=8)
+    ttk.Button(body, text="Seç…", command=pick_tpl).grid(row=r, column=2, sticky="e")
+    r += 1
+    who = ttk.Frame(body)
+    who.grid(row=r, column=1, sticky="ew", padx=8, pady=4)
+    ttk.Label(body, text="Hazırlayan / departman").grid(row=r, column=0, sticky="w")
+    ttk.Entry(who, textvariable=author_var, width=24).pack(side="left")
+    ttk.Entry(who, textvariable=dept_var, width=24).pack(side="left", padx=6)
+    r += 1
+    ttk.Label(body, text="Müşteri / proje (kapak)").grid(row=r, column=0, sticky="w", pady=4)
+    ttk.Entry(body, textvariable=cust_var).grid(row=r, column=1, sticky="ew", padx=8)
+    r += 1
     ttk.Checkbutton(body, text="Sadece keşif (klasör yapısı)", variable=disc_var).grid(row=r, column=1, sticky="w", padx=8)
     r += 1
 
@@ -110,6 +133,8 @@ def main() -> int:
     run_btn.pack(side="left")
     open_btn = ttk.Button(actions, text="Raporu aç", state="disabled")
     open_btn.pack(side="left", padx=8)
+    word_btn = ttk.Button(actions, text="Word'ü aç", state="disabled")
+    word_btn.pack(side="left")
     bar = ttk.Progressbar(actions, mode="indeterminate", length=200)
     bar.pack(side="right")
     r += 1
@@ -127,9 +152,10 @@ def main() -> int:
     def log(msg):
         q.put(("log", str(msg)))
 
-    def worker(src, out, tgt, rel, disc):
+    def worker(src, out, tgt, rel, disc, tpl, author, dept, cust):
         try:
-            p = run(Path(src), Path(out) if out else None, tgt or DEFAULT_TARGET, Path(rel) if rel else None, disc, log)
+            p = run(Path(src), Path(out) if out else None, tgt or DEFAULT_TARGET, Path(rel) if rel else None, disc, log,
+                    Path(tpl) if tpl else None, author, dept, cust or None)
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))
@@ -147,6 +173,8 @@ def main() -> int:
                     run_btn.configure(state="normal")
                     result["path"] = val
                     open_btn.configure(state="normal")
+                    if (Path(val).parent / "rapor.docx").exists():
+                        word_btn.configure(state="normal")
                     logbox.insert("end", f"\nTamamlandı: {val}\n")
                     logbox.see("end")
                     webbrowser.open(Path(val).resolve().as_uri())
@@ -166,17 +194,32 @@ def main() -> int:
         logbox.delete("1.0", "end")
         run_btn.configure(state="disabled")
         open_btn.configure(state="disabled")
+        word_btn.configure(state="disabled")
+        settings.save({"author": author_var.get().strip(), "department": dept_var.get().strip(),
+                       "template": tpl_var.get().strip(), "released": rel_var.get().strip(),
+                       "target": tgt_var.get().strip()})
         bar.start(12)
         threading.Thread(target=worker, daemon=True,
                          args=(src, out_var.get().strip(), tgt_var.get().strip(), rel_var.get().strip(),
-                               disc_var.get())).start()
+                               disc_var.get(), tpl_var.get().strip(), author_var.get().strip(),
+                               dept_var.get().strip(), cust_var.get().strip())).start()
 
     def open_report():
         if result["path"]:
             webbrowser.open(Path(result["path"]).resolve().as_uri())
 
+    def open_word():
+        if result["path"]:
+            p = Path(result["path"]).parent / "rapor.docx"
+            try:
+                import os
+                os.startfile(str(p))  # type: ignore[attr-defined]  # Windows
+            except (AttributeError, OSError):
+                webbrowser.open(p.resolve().as_uri())
+
     run_btn.configure(command=start)
     open_btn.configure(command=open_report)
+    word_btn.configure(command=open_word)
     root.after(150, poll)
     root.mainloop()
     return 0

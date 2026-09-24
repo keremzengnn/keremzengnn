@@ -144,12 +144,70 @@ class ZipSource(Source):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
 
-def open_source(path: Path, progress=None) -> Source:
+NESTED_SEP = "!/"
+
+
+class NestedSource(Source):
+    """
+    Temel kaynağın içindeki .zip'leri de açar (1 seviye). İç arşivin dosyaları
+    '<arşiv yolu>!/<iç yol>' olarak indekse eklenir; böylece farklı backup'lar path'leriyle ayrı kalır.
+    """
+
+    def __init__(self, base: Source, progress=None):
+        self.base = base
+        self.label = base.label
+        self.warnings = list(base.warnings)
+        self.subs: dict[str, ZipSource] = {}
+        self.expanded: list[str] = []
+        entries = list(base.entries)
+        for e in base.entries:
+            if not e.rel.lower().endswith(".zip"):
+                continue
+            try:
+                zs = ZipSource(base.materialize(e.rel))
+            except (zipfile.BadZipFile, OSError, RuntimeError) as ex:
+                self.warnings.append(f"İç arşiv açılamadı: {e.rel} ({ex})")
+                continue
+            self.subs[e.rel] = zs
+            self.expanded.append(e.rel)
+            entries += [Entry(f"{e.rel}{NESTED_SEP}{x.rel}", x.size, x.mtime) for x in zs.entries]
+            self.warnings += [f"{e.rel}: {w}" for w in zs.warnings]
+            if progress:
+                progress(f"İç arşiv açıldı: {e.rel} ({len(zs.entries)} dosya)")
+        self.entries = sorted(entries, key=lambda x: x.rel)
+
+    def _route(self, rel: str):
+        if NESTED_SEP in rel:
+            outer, inner = rel.split(NESTED_SEP, 1)
+            if outer in self.subs:
+                return self.subs[outer], inner
+        return self.base, rel
+
+    def materialize(self, rel: str) -> Path:
+        src, r = self._route(rel)
+        return src.materialize(r)
+
+    def read_head(self, rel: str, n: int) -> bytes:
+        src, r = self._route(rel)
+        return src.read_head(r, n)
+
+    def close(self) -> None:
+        for s in self.subs.values():
+            s.close()
+        self.base.close()
+
+
+def open_source(path: Path, progress=None, nested: bool = True) -> Source:
     path = Path(path)
+    base: Source | None = None
     if path.is_dir():
-        return FolderSource(path, progress)
-    if path.is_file() and zipfile.is_zipfile(path):
-        return ZipSource(path, progress)
+        base = FolderSource(path, progress)
+    elif path.is_file() and zipfile.is_zipfile(path):
+        base = ZipSource(path, progress)
+    if base is not None:
+        if nested and any(e.rel.lower().endswith(".zip") for e in base.entries):
+            return NestedSource(base, progress)
+        return base
     if path.suffix.lower() in (".7z", ".rar"):
         raise ValueError(f"{path.suffix} desteklenmiyor: önce klasöre açın (path yapısını koruyarak) veya .zip verin")
     raise ValueError(f"Klasör veya .zip değil: {path}")

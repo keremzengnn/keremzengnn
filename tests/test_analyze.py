@@ -104,11 +104,16 @@ def test_expected_checks(an):
 
 def test_report_structure(an):
     md = render_markdown(an)
-    for h in ("## 1. Özet", "Tablo 1: Genel değerlendirme", "## 2. Proje bilgileri", "## 3. Zorluklar",
-              "## 4. Teklif öncesi netleşmesi gerekenler", "## 5. Referans dokümanlar"):
-        assert h in md
+    order = ["**ÖZET**", "## Sonuç: Proje upgrade edilebilir, zorluklar var", "Tablo 1: Genel değerlendirme",
+             "Planlı duruş", "**PROJE ENVANTERİ**", "## Proje bilgileri", "Tablo 2: AS envanteri", "Tablo 3: OS yapısı",
+             "Tablo 4: Yazılım içeriği", "**RİSKLER**", "## Zorluklar", "Tablo 5: Zorluklar ve etkileri",
+             "## Teklif öncesi netleşmesi gerekenler", "## Referans dokümanlar"]
+    pos = [md.index(h) for h in order]
+    assert pos == sorted(pos)
     assert "Upgrade yaklaşımı" not in md
-    assert md.index("Tablo 1") < md.index("Planlı duruş") < md.index("## 2. Proje bilgileri")
+    assert "| AS02 F-System | Yüksek |" in md
+    assert "| AS01 opsiyonları | Orta–Yüksek |" in md
+    assert "| AS02 F-System | Detaylı İnceleme |" in md
     html = render_html(an)
     assert "#000028" in html and "#009999" in html
     assert 'class="badge high"' in html
@@ -144,10 +149,49 @@ def test_without_released_list(demo):
 def test_empty_source(tmp_path):
     a = analyze(tmp_path)
     md = render_markdown(a)
-    assert "PCS 7 versiyonu otomatik tespit edilemedi" in md
+    assert "Sonuç: Mevcut versiyon tespit edilemedi" in md
 
 
 @pytest.mark.parametrize("fam, path", [("V8.1", ["V8.2.4", "V9.1", "V10.0 SP2"]), ("V8.2", ["V9.1", "V10.0 SP2"]),
                                        ("V9.1", ["V10.0 SP2"]), (None, ["V8.2.4", "V9.1", "V10.0 SP2"])])
 def test_staged_path(fam, path):
     assert staged_path_from(fam) == path
+
+
+def test_nested_zip_backup(tmp_path):
+    """Eski backup bir iç zip'in içinde: açılıp taranmalı, farklı tarihli kopya olarak ayrılmalı."""
+    import shutil
+    import zipfile
+    bk = build_demo_project(tmp_path)
+    old = bk / "ESKI_BACKUP"
+    with zipfile.ZipFile(bk / "eski.zip", "w") as zf:
+        for p in sorted(old.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(old).as_posix())
+    shutil.rmtree(old)
+    outer = tmp_path / "outer.zip"
+    with zipfile.ZipFile(outer, "w") as zf:
+        for p in sorted(bk.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(bk).as_posix())
+    for src in (bk, outer):
+        a = analyze(src, released_csv=tmp_path / "released_demo.csv")
+        assert a.stale_dirs == ["eski.zip!/DEMO_MP/AS01"], src
+        assert any("İç içe arşivler açılıp tarandı" in w for w in a.warnings)
+        assert sorted(b.as_label for b in a.block_folders if b.counts) == ["AS01", "AS02"]
+
+
+def test_interface_change_check(an):
+    f = [x for x in an.findings if x.check_id == "LIB_INTERFACE" and x.scope == "AS01"]
+    assert f and "Intlk16 ×5" in f[0].detail and "APL:" in f[0].detail
+
+
+def test_im_drv_and_box_rtx(an):
+    import copy
+    from pcs7_analyzer.checks import box_rtx, get_check, im_drv
+    a = copy.deepcopy(an)
+    a.block_folders[0].block_names.append("IM_DRV")
+    a.stations[0].station_text += " SIMATIC PCS 7 BOX RTX"
+    assert im_drv(get_check("IM_DRV"), a)[0].scope == a.block_folders[0].as_label
+    f = box_rtx(get_check("HW_BOX_RTX"), a)[0]
+    assert f.blocking

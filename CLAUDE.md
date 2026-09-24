@@ -10,7 +10,7 @@ python -m pcs7_analyzer                      # pencere (GUI)
 python -m pcs7_analyzer <klasör|zip> [-o çıktı_klasörü] [--target V10.0SP2] [--released csv] [--discover] [--open]
 python -m pcs7_analyzer --demo <klasör>      # sahte proje üret + analiz
 ```
-Çıktı: rapor.html (Siemens renkleri) + rapor.md + rapor.json. Word template'i için aynı doküman modeli kullanılacak.
+Çıktı: rapor.docx (Word template'i ile) + rapor.html (Siemens renkleri) + rapor.md + rapor.json. Word template'i için aynı doküman modeli kullanılacak.
 Dağıtım: `Baslat.bat` (Python 3.11+, ek paket yok: dbfread `_vendor/` altında) veya GitHub Actions'ın ürettiği
 `PCS7Analyzer.exe` (`.github/workflows/windows.yml`, testler Windows'ta da koşar).
 
@@ -128,3 +128,30 @@ Müşteri backup'ı ve müşteriye özel beklenen değerler **repoya girmez (rep
 - OS rolü proje adından (SRV/STBY/OSC/CLIENT…). ES ↔ server çifti: aynı isimli OS projesi, biri .s7p içinde, diğeri dışında.
 - Aynı .s7p adı birden fazla yerde -> en yeni mtime'lı kopya analiz edilir, diğerleri analiz dışı (raporda not).
 - WinCC build -> PCS 7 ailesi eşlemesi (7.3 -> V8.1 …) `confidence: low`.
+
+## Manuel'den doğrulanan kurallar -> kontrol (yanlış bilgi vermemek için kaynaklı)
+| Kural | Kaynak | Check |
+|---|---|---|
+| V7.1 SP4+ proje V10.0 SP2'ye update edilebilir; V9.1'den eski software doğrudan güncellenemez (PC sıfırdan kurulum) | [1] 4.3 | rapor: Proje migration notu |
+| V9.0 SP3+ proje AS library update'siz (AS STOP'suz) update edilebilir | [1] dokümantasyon tablosu | rapor: version_note |
+| V10.0 SP2 faceplate'leri sadece APL V9.0.x / V9.1.x ile mixed operation | [1] 9.10.4 | LIB_APL_V8 |
+| Logic Matrix: upgrade without new functionality desteklenmez | [1] 9.9.4 | LIB_LOGIC_MATRIX |
+| SFC system block'ları (FB245/246/300, FC240…250) elle kopyalanır, complete compile zorunlu | [1] 9.5 | LIB_SFC |
+| PCS 7 Library V7.1 kullanılacaksa ES: Library V7.1 SP3 Upd4, ES+OS: Faceplates V7.1 SP3 Upd1 | [1] 8.5 | LIB_PCS7_V71, LIB_STD_LIB |
+| Standard block -> APL dönüşümü yeni konfigürasyon gerektirir | [1] 9.11 | LIB_STD_LIB |
+| OB_DIAG / OR_M_16 / OR_M_32 master data'dan silinmeli | [1] 4.3 | LIB_MASTERDATA_DELETE |
+| OS RT PO sayısı artabilir; lisans upgrade paketleri kademeli | [1] 4.3 | OS_PO_INCREASE, LICENSES |
+| CAS desteklenmiyor, arşivi PH'ye aktarılamaz, .PCK silinmeli | [1] 4.2, 9.8 | CAS_PH |
+| IM_DRV block'ları update öncesi system chart'tan taşınmalı | [1] 6.1 | IM_DRV |
+| PCS 7 BOX RTX update edilemez | [1] 4.1 | HW_BOX_RTX (blocking) |
+| Basis TCiR sadece CPU 410-5H >= V8.2; APL TCiR ≤V9.1 SP2 -> ≥V10 sadece 410-5H | Basis Readme 5.2, APL Readme 4.4 | AS_STOP_NO_TCIR |
+| V10.0/SP1/SP2'de interface'i değişen block listesi | APL Readme 5.x, Basis Readme 6.x | LIB_INTERFACE (data/block_changes_V10.0SP2.csv) |
+| PCS 7 V8.1 = STEP 7 V5.5 SP4 + WinCC V7.3 | PCS 7 Readme V8.1 SP1, Bölüm 5 | versiyon tespiti (diğer eşlemeler confidence low) |
+
+Veri dosyası yeniden üretimi: `python tools/extract_block_changes.py --apl <AdvLib-Readme.md> --basis <BasLib-Readme.md> -o pcs7_analyzer/data/block_changes_V10.0SP2.csv`
+
+## Word raporu
+`word.py`: kullanıcının .dotx template'i doldurulur (template repoda YOK, kurum içi dosya). Kapak (TitleTopline/Title/TitleSubline),
+header "Ad | Departman | Tarih", footer "Restricted | © Siemens yıl". İçerik `build_document(full=False)`: ÖZET, PROJE ENVANTERİ,
+RİSKLER, Referanslar (müşteri raporu). HTML/MD `full=True`: + teklif öncesi açık konular + ekler (çalışma raporu).
+Ayarlar (ad, departman, template yolu) `%APPDATA%/pcs7_analyzer/settings.json`.

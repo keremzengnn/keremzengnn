@@ -1,0 +1,542 @@
+library,section,name,kind,number,version,interface_change,sfc_contact,code_change
+APL,10.0,Byt2DigV,FC,478,10,new,no,new
+APL,10.0,CntOhSc,FB,1803,6,yes,no,yes
+APL,10.0,ConPerMon,FB,1805,6,yes,no,yes
+APL,10.0,CountOh,FB,1864,6,yes,no,yes
+APL,10.0,CountScL,FB,1806,6,yes,no,yes
+APL,10.0,DigV2Byt,FC,477,10,new,no,new
+APL,10.0,DoseL,FB,1809,6,yes,no,yes
+APL,10.0,Event16Ts,FB,1887,6,no,no,yes
+APL,10.0,FbAnIn,FB,1813,10,yes,no,yes
+APL,10.0,FbAnOu,FB,1814,10,yes,no,yes
+APL,10.0,FbAnTot,FB,1817,10,yes,no,yes
+APL,10.0,FbDiIn,FB,1815,10,yes,no,yes
+APL,10.0,FbDiOu,FB,1816,10,yes,no,yes
+APL,10.0,FbDrive,FB,1905,10,yes,no,yes
+APL,10.0,FbEnMe,FB,1908,10,yes,no,yes
+APL,10.0,FbSwtMMS,FB,1907,10,yes,no,yes
+APL,10.0,FmCont,FB,1818,10,yes,no,yes
+APL,10.0,FmTemp,FB,1819,10,yes,no,yes
+APL,10.0,Intlk02,FB,1824,6,yes,no,yes
+APL,10.0,Intlk04,FB,1825,6,yes,no,yes
+APL,10.0,Intlk08,FB,1826,6,yes,no,yes
+APL,10.0,Intlk16,FB,1827,6,yes,no,yes
+APL,10.0,MBComm,FB,1941,10,yes,no,yes
+APL,10.0,MBPdReg,FB,1947,10,yes,no,yes
+APL,10.0,MBRcvReg,FB,1946,10,yes,no,yes
+APL,10.0,MBRdCoil,FB,1942,10,yes,no,yes
+APL,10.0,MBRdReg,FB,1943,10,yes,no,yes
+APL,10.0,MBWrCoil,FB,1944,10,yes,no,no
+APL,10.0,MBWrReg,FB,1945,10,yes,no,yes
+APL,10.0,ModPreCon,FB,1843,6,yes,no,yes
+APL,10.0,MonAnL,FB,1845,6,yes,no,yes
+APL,10.0,MonAnS,FB,1912,6,yes,no,yes
+APL,10.0,MonDi08,FB,1847,6,yes,no,yes
+APL,10.0,MonDiL,FB,1848,6,yes,no,yes
+APL,10.0,MonDiS,FB,1913,6,yes,no,yes
+APL,10.0,MotL,FB,1850,6,yes,no,yes
+APL,10.0,MotRevL,FB,1851,6,yes,no,yes
+APL,10.0,MotS,FB,1910,6,yes,no,yes
+APL,10.0,MotSpd3L,FB,1857,6,new,no,new
+APL,10.0,MotSpdCL,FB,1854,6,yes,no,yes
+APL,10.0,MotSpdL,FB,1856,6,yes,no,yes
+APL,10.0,MuxAn08,FB,1831,6,yes,no,yes
+APL,10.0,OpAnL,FB,1865,6,yes,no,yes
+APL,10.0,OpAnS,FB,1915,6,yes,no,yes
+APL,10.0,OpDi01,FB,1866,6,yes,no,yes
+APL,10.0,OpDi03,FB,1867,6,yes,no,yes
+APL,10.0,OpDi08,FB,1919,6,new,no,new
+APL,10.0,OpTrig,FB,1868,6,yes,no,yes
+APL,10.0,Pcs7AITC,FB,1933,10,yes,no,yes
+APL,10.0,Pcs7AnIn,FB,1869,10,yes,no,yes
+APL,10.0,Pcs7AnOu,FB,1870,10,yes,no,yes
+APL,10.0,Pcs7Cnt1,FB,1833,10,yes,no,yes
+APL,10.0,Pcs7Cnt2,FB,1834,10,yes,no,yes
+APL,10.0,Pcs7Cnt3,FB,1835,10,yes,no,yes
+APL,10.0,Pcs7Cnt4,FB,1836,10,yes,no,yes
+APL,10.0,Pcs7DiCnt,FB,1935,10,yes,no,yes
+APL,10.0,Pcs7DiIn,FB,1871,10,yes,no,yes
+APL,10.0,Pcs7DiIT,FB,1872,10,yes,no,yes
+APL,10.0,Pcs7DiOu,FB,1873,10,yes,no,yes
+APL,10.0,Pcs7HaAI,FB,1931,10,yes,no,yes
+APL,10.0,Pcs7HaAO,FB,1932,10,yes,no,yes
+APL,10.0,Pcs7MS,FB,1934,10,new,no,new
+APL,10.0,Pcs7ReIn,FB,1837,10,yes,no,yes
+APL,10.0,PIDConL,FB,1874,6,yes,no,yes
+APL,10.0,PIDConR,FB,1875,6,yes,no,yes
+APL,10.0,PIDConS,FB,1830,6,yes,no,yes
+APL,10.0,PIDStepL,FB,1878,6,yes,no,yes
+APL,10.0,PrDrpMon,FB,1952,6,yes,no,yes
+APL,10.0,PST,FB,1956,6,yes,no,yes
+APL,10.0,PumpMon,FB,1950,6,yes,no,yes
+APL,10.0,Ratio,FB,1883,6,yes,no,yes
+APL,10.0,Smooth,FB,1890,6,yes,no,yes
+APL,10.0,SelA16In,FB,1888,6,no,no,yes
+APL,10.0,SelAn16L,FB,1889,6,no,no,yes
+APL,10.0,TimerP,FB,1810,6,yes,no,yes
+APL,10.0,TimeTrig,FB,1802,6,yes,no,yes
+APL,10.0,TotalL,FB,1906,6,yes,no,yes
+APL,10.0,Vlv2WayL,FB,1897,6,yes,no,yes
+APL,10.0,VlvAnL,FB,1896,6,yes,no,yes
+APL,10.0,VlvL,FB,1899,6,yes,no,yes
+APL,10.0,VlvMon,FB,1951,6,yes,no,yes
+APL,10.0,VlvMotL,FB,1900,6,yes,no,yes
+APL,10.0,VlvPosL,FB,1918,6,yes,no,yes
+APL,10.0,VlvS,FB,1911,6,yes,no,yes
+APL,10.0,KalFilt,FB,1925,10,yes,no,yes
+APL,10.0,MPC10x10,FB,1920,6,yes,no,yes
+APL,10.0 SP1,FbAnIn,FB,1813,10.1,no,no,yes
+APL,10.0 SP1,FbAnOu,FB,1814,10.1,no,no,yes
+APL,10.0 SP1,FbDiIn,FB,1815,10.1,no,no,yes
+APL,10.0 SP1,FbDiOu,FB,1816,10.1,no,no,yes
+APL,10.0 SP1,FbAnTot,FB,1817,10.1,no,no,yes
+APL,10.0 SP1,Pcs7Cnt1,FB,1833,10.1,no,no,no
+APL,10.0 SP1,Pcs7Cnt2,FB,1834,10.1,no,no,no
+APL,10.0 SP1,Pcs7Cnt3,FB,1835,10.1,no,no,no
+APL,10.0 SP1,Pcs7Cnt4,FB,1836,10.1,no,no,no
+APL,10.0 SP1,Pcs7ReIn,FB,1837,10.1,no,no,no
+APL,10.0 SP1,Pcs7AnIn,FB,1869,10.1,no,no,no
+APL,10.0 SP1,Pcs7AnOn,FB,1870,10.1,no,no,no
+APL,10.0 SP1,Pcs7DiIn,FB,1871,10.1,no,no,no
+APL,10.0 SP1,Pcs7DiIT,FB,1872,10.1,no,no,no
+APL,10.0 SP1,Pcs7DiOu,FB,1873,10.1,no,no,no
+APL,10.0 SP1,FbDrive,FB,1905,10.1,no,no,yes
+APL,10.0 SP1,FbSwtMMS,FB,1907,10.1,no,no,no
+APL,10.0 SP1,FbEnMe,FB,1908,10.1,no,no,yes
+APL,10.0 SP1,Pcs7HaAI,FB,1931,10.1,no,no,no
+APL,10.0 SP1,Pcs7HaAO,FB,1932,10.1,no,no,no
+APL,10.0 SP1,Pcs7AITC,FB,1933,10.1,no,no,no
+APL,10.0 SP1,Pcs7MS,FB,1934,10.1,no,no,yes
+APL,10.0 SP1,Pcs7DiCnt,FB,1935,10.1,no,no,no
+APL,10.0 SP1,MBComm,FB,1941,10.1,no,no,no
+APL,10.0 SP1,PumpMon,FB,1950,6.1,no,no,yes
+APL,10.0 SP1,VlvMon,FB,1951,6.1,no,no,yes
+APL,10.0 SP1,PrDrpMon,FB,1952,6.1,no,no,yes
+APL,10.0 SP1,SteadyState,FB,1955,6.1,no,no,yes
+APL,10.0 SP1,PST,FB,1956,6.1,no,no,yes
+APL,10.0 SP1,ConPerMon,FB,1805,6.1,no,no,yes
+APL,10.0 SP1,FmCont,FB,1818,10.1,no,no,yes
+APL,10.0 SP1,FmTemp,FB,1819,10.1,no,no,yes
+APL,10.0 SP1,PIDConS,FB,1830,6.1,no,no,yes
+APL,10.0 SP1,PIDConL,FB,1874,6.1,no,no,yes
+APL,10.0 SP1,PIDConR,FB,1875,6.1,no,no,yes
+APL,10.0 SP1,PIDStepL,FB,1878,6.1,no,no,yes
+APL,10.0 SP1,Ratio,FB,1883,6.1,no,no,yes
+APL,10.0 SP1,ModPreCon,FB,1843,6.1,no,no,yes
+APL,10.0 SP1,CntOhSc,FB,1803,6.1,no,no,yes
+APL,10.0 SP1,CountScL,FB,1806,6.1,no,no,yes
+APL,10.0 SP1,CountOh,FB,1864,6.1,no,no,yes
+APL,10.0 SP1,TotalL,FB,1906,6.1,no,no,yes
+APL,10.0 SP1,DoseL,FB,1809,6.1,no,no,yes
+APL,10.0 SP1,MotL,FB,1850,6.1,no,no,yes
+APL,10.0 SP1,MotRevL,FB,1851,6.1,no,no,yes
+APL,10.0 SP1,MotSpdCL,FB,1854,6.1,no,no,yes
+APL,10.0 SP1,MotSpdL,FB,1856,6.1,no,no,yes
+APL,10.0 SP1,MotSpd3L,FB,1857,6.1,no,no,yes
+APL,10.0 SP1,VlvAnL,FB,1896,6.1,no,no,yes
+APL,10.0 SP1,Vlv2WayL,FB,1897,6.1,no,no,yes
+APL,10.0 SP1,VlvL,FB,1899,6.1,no,no,yes
+APL,10.0 SP1,VlvMotL,FB,1900,6.1,no,no,yes
+APL,10.0 SP1,MotS,FB,1910,6.1,no,no,yes
+APL,10.0 SP1,VlvS,FB,1911,6.1,no,no,yes
+APL,10.0 SP1,ShrdResS,FB,1914,6.1,no,no,yes
+APL,10.0 SP1,ShrdResL,FB,1917,6.1,no,no,yes
+APL,10.0 SP1,VlvPosL,FB,1918,6.1,no,no,yes
+APL,10.0 SP1,Intlk02,FB,1824,6.1,no,no,yes
+APL,10.0 SP1,Intlk04,FB,1825,6.1,no,no,yes
+APL,10.0 SP1,Intlk08,FB,1826,6.1,no,no,yes
+APL,10.0 SP1,Intlk16,FB,1827,6.1,no,no,yes
+APL,10.0 SP1,SelA16In,FB,1888,6.1,no,no,yes
+APL,10.0 SP1,SelA16L,FB,1889,6.1,no,no,yes
+APL,10.0 SP1,Smooth,FB,1890,6.1,no,no,yes
+APL,10.0 SP1,MonAnL,FB,1845,6.1,no,no,yes
+APL,10.0 SP1,MonDi08,FB,1847,6.1,no,no,yes
+APL,10.0 SP1,MonDiL,FB,1848,6.1,no,no,yes
+APL,10.0 SP1,MonAnS,FB,1912,6.1,no,no,yes
+APL,10.0 SP1,MonDiS,FB,1913,6.1,no,no,yes
+APL,10.0 SP1,OpAnL,FB,1865,6.1,no,no,yes
+APL,10.0 SP1,OpDi01,FB,1866,6.1,no,no,yes
+APL,10.0 SP1,OpDi03,FB,1867,6.1,no,no,yes
+APL,10.0 SP1,OpDi08,FB,1919,6.1,no,no,yes
+APL,10.0 SP1,OpTrig,FB,1868,6.1,no,no,yes
+APL,10.0 SP1,OpAnS,FB,1915,6.1,no,no,yes
+APL,10.0 SP1,OpStations,FB,1901,6.1,no,no,yes
+APL,10.0 SP1,MPC10x10,FB,1920,6.1,no,no,yes
+APL,10.0 SP1,KalFilt,FB,1925,10.1,no,no,yes
+APL,10.0 SP1 Update 1,FbDiOu,FB,1816,10.1,no,no,yes
+APL,10.0 SP1 Update 1,FbDrive,FB,1905,10.1,no,no,yes
+APL,10.0 SP1 Update 1,PIDConL,FB,1874,6.1,no,no,yes
+APL,10.0 SP1 Update 1,PIDConR,FB,1875,6.1,no,no,yes
+APL,10.0 SP1 Update 1,PIDStepL,FB,1878,6.1,no,no,yes
+APL,10.0 SP1 Update 1,MotSpdCL,FB,1854,6.1,no,no,yes
+APL,10.0 SP1 Update 1,VlvAnL,FB,1896,6.1,no,no,yes
+APL,10.0 SP1 Update 1,VlvPosL,FB,1918,6.1,no,no,yes
+APL,10.0 SP2,AV,FB,1903,6.1,no,no,yes
+APL,10.0 SP2,FbAnOu,FB,1814,10.2,no,no,yes
+APL,10.0 SP2,FbDiOu,FB,1816,10.2,no,no,yes
+APL,10.0 SP2,FbEnMe,FB,1908,10.2,no,no,yes
+APL,10.0 SP2,Intlk02,FB,1824,6.2,no,no,yes
+APL,10.0 SP2,Intlk04,FB,1825,6.2,no,no,yes
+APL,10.0 SP2,Intlk08,FB,1826,6.2,no,no,yes
+APL,10.0 SP2,Intlk16,FB,1827,6.2,no,no,yes
+APL,10.0 SP2,MotSpd3L,FB,1857,6.2,no,no,yes
+APL,10.0 SP2,MotSpdCL,FB,1854,6.2,no,no,yes
+APL,10.0 SP2,MotSpdL,FB,1856,6.2,no,no,yes
+APL,10.0 SP2,OpAnL,FB,1865,6.2,no,no,yes
+APL,10.0 SP2,OpAnS,FB,1915,6.2,no,no,yes
+APL,10.0 SP2,OpDi01,FB,1866,6.2,no,no,yes
+APL,10.0 SP2,OpDi03,FB,1867,6.2,no,no,yes
+APL,10.0 SP2,OpDi08,FB,1919,6.2,no,no,yes
+APL,10.0 SP2,PIDConL,FB,1874,6.2,no,no,yes
+APL,10.0 SP2,PIDConR,FB,1875,6.2,no,no,yes
+APL,10.0 SP2,PIDStepL,FB,1878,6.2,no,no,yes
+APL,10.0 SP2,VlvAnL,FB,1896,6.2,no,no,yes
+APL,10.0 SP2,VlvPosL,FB,1918,6.2,no,no,yes
+Basis,10.0,CPU_RES,FB,446,10.0,new,,no
+Basis,10.0,MOD_MS_PN,FB,212,10.0,new,,no
+Basis,10.0,DIAG_PAPN,FB,215,10.0,new,,no
+Basis,10.0,MOD_PA32,FB,213,10.0,new,,no
+Basis,10.0,MOD_PA256,FB,214,10.0,new,,no
+Basis,10.0,ChkREAL,FC,260,10.0,no,,yes
+Basis,10.0,CONEC,FB,88,10.0,no,,yes
+Basis,10.0,CPU_RT,FB,128,10.0,yes,,yes
+Basis,10.0,DIAG_AB,FB,414,10.0,no,,yes
+Basis,10.0,DPAY_V0,FB,108,10.0,yes,,yes
+Basis,10.0,DPAY_V1,FB,115,10.0,no,,yes
+Basis,10.0,DPAY_V1_PN,FB,204,10.0,no,,yes
+Basis,10.0,DPDIAGV0,FB,117,10.0,yes,,yes
+Basis,10.0,DREP,FB,113,10.0,yes,,yes
+Basis,10.0,DREP_L,FB,125,10.0,yes,,yes
+Basis,10.0,FF_MOD32,FB,124,10.0,yes,,yes
+Basis,10.0,FFD_CIF,FB,145,10.0,yes,,yes
+Basis,10.0,FFDP_L1,FB,139,10.0,no,,yes
+Basis,10.0,FM_CNT,FB,126,10.0,yes,,yes
+Basis,10.0,FM_CO,FB,79,10.0,yes,,yes
+Basis,10.0,IM_TS_PN,FB,420,10.0,yes,,yes
+Basis,10.0,IMDRV_TS,FB,129,10.0,yes,,yes
+Basis,10.0,LED_STAT,FC,267,10.0,no,,yes
+Basis,10.0,MHA_CO,FB,426,10.0,yes,,yes
+Basis,10.0,MOD_1,FB,91,10.0,yes,,yes
+Basis,10.0,MOD_2,FB,92,10.0,yes,,yes
+Basis,10.0,MOD_3,FB,95,10.0,yes,,yes
+Basis,10.0,MOD_4,FB,119,10.0,yes,,yes
+Basis,10.0,MOD_64,FB,137,10.0,yes,,yes
+Basis,10.0,MOD_CENTRAL,FB,206,10.0,yes,,yes
+Basis,10.0,MOD_CM,FB,221,10.0,yes,,yes
+Basis,10.0,MOD_CP,FB,98,10.0,yes,,yes
+Basis,10.0,MOD_CP_PN,FB,201,10.0,yes,,yes
+Basis,10.0,MOD_D1,FB,93,10.0,yes,,yes
+Basis,10.0,MOD_D16_PN,FB,198,10.0,yes,,yes
+Basis,10.0,MOD_D16_S7P,FB,434,10.0,yes,,yes
+Basis,10.0,MOD_D2,FB,94,10.0,yes,,yes
+Basis,10.0,MOD_D24_PN,FB,199,10.0,yes,,yes
+Basis,10.0,MOD_D3,FB,134,10.0,yes,,yes
+Basis,10.0,MOD_D32_PN,FB,421,10.0,yes,,yes
+Basis,10.0,MOD_D8,FB,424,10.0,yes,,yes
+Basis,10.0,MOD_D8_PN,FB,197,10.0,yes,,yes
+Basis,10.0,MOD_D8_S7P,FB,433,10.0,yes,,yes
+Basis,10.0,MOD_DRV,FB,148,10.0,yes,,yes
+Basis,10.0,MOD_DRVL,FB,32,10.0,yes,,yes
+Basis,10.0,MOD_ENME,FB,419,10.0,yes,,yes
+Basis,10.0,MOD_ENME_S7P,FB,449,10.0,yes,,yes
+Basis,10.0,MOD_HA,FB,97,10.0,yes,,yes
+Basis,10.0,MOD_HA_PN,FB,200,10.0,yes,,yes
+Basis,10.0,MOD_HA_PN1,FB,417,10.0,yes,,yes
+Basis,10.0,MOD_HA_S7P,FB,435,10.0,yes,,yes
+Basis,10.0,MOD_MS,FB,96,10.0,yes,,yes
+Basis,10.0,MOD_PAL0,FB,99,10.0,yes,,yes
+Basis,10.0,MOD_PAX0,FB,112,10.0,yes,,yes
+Basis,10.0,MOD_SWT,FB,149,10.0,yes,,yes
+Basis,10.0,MOD_SWTL,FB,33,10.0,yes,,yes
+Basis,10.0,OB_BEGIN,FB,100,10.0,yes,,yes
+Basis,10.0,OB_BEGIN_HPN,FB,205,10.0,yes,,yes
+Basis,10.0,OB_BEGIN_PN,FB,130,10.0,yes,,yes
+Basis,10.0,OB_DIAG_NC,FB,439,10.0,yes,,yes
+Basis,10.0,OB_DIAG1,FB,118,10.0,yes,,yes
+Basis,10.0,OB_DIAG1_PN,FB,202,10.0,yes,,yes
+Basis,10.0,OB_DIAG2,FB,416,10.0,yes,,yes
+Basis,10.0,OB_DIAGF,FB,146,10.0,yes,,yes
+Basis,10.0,OB_DIAGF2,FB,418,10.0,yes,,yes
+Basis,10.0,OB_END,FC,280,10.0,no,,yes
+Basis,10.0,OB5X2OB5,FC,265,10.0,no,,yes
+Basis,10.0,OR_16_PN,FB,428,10.0,yes,,yes
+Basis,10.0,OR_32_PN,FB,429,10.0,yes,,yes
+Basis,10.0,OR_32_TS,FB,138,10.0,no,,yes
+Basis,10.0,OR_32TPN,FB,431,10.0,no,,yes
+Basis,10.0,OR_8_PN,FB,430,10.0,yes,,yes
+Basis,10.0,OR_H16PN,FB,423,10.0,yes,,yes
+Basis,10.0,OR_HA16C,FB,133,10.0,yes,,yes
+Basis,10.0,OR_M_16C,FB,84,10.0,yes,,yes
+Basis,10.0,OR_M_32C,FB,85,10.0,yes,,yes
+Basis,10.0,OR_M_8C,FB,83,10.0,yes,,yes
+Basis,10.0,OR_MHA_CO,FB,427,10.0,yes,,yes
+Basis,10.0,OR_MHA1_CO,FB,440,10.0,yes,,yes
+Basis,10.0,PADP_L00,FB,109,10.0,yes,,yes
+Basis,10.0,PADP_L01,FB,110,10.0,yes,,yes
+Basis,10.0,PADP_L02,FB,111,10.0,yes,,yes
+Basis,10.0,PADP_L10,FB,116,10.0,yes,,yes
+Basis,10.0,PADP_L10_PN,FB,203,10.0,yes,,yes
+Basis,10.0,PDM_MS,FB,81,10.0,no,,yes
+Basis,10.0,PNTS2BCD,FC,266,10.0,no,,yes
+Basis,10.0,PNTS2DT,FC,261,10.0,no,,yes
+Basis,10.0,PNTS2ISP,FC,264,10.0,no,,yes
+Basis,10.0,PO_UPDAT,FC,279,10.0,no,,yes
+Basis,10.0,PS,FB,89,10.0,yes,,yes
+Basis,10.0,QC_CHNG,FB,135,10.0,no,,yes
+Basis,10.0,RACK,FB,107,10.0,yes,,yes
+Basis,10.0,RACK_CFU,FB,425,10.0,yes,,yes
+Basis,10.0,RACK_PN,FB,90,10.0,yes,,yes
+Basis,10.0,RACK_PN1,FB,415,10.0,yes,,yes
+Basis,10.0,RACK_PNT,FB,432,10.0,yes,,yes
+Basis,10.0,RED_AI,FB,444,10.0,yes,,yes
+Basis,10.0,RED_AIH,FB,447,10.0,yes,,yes
+Basis,10.0,RED_AQ,FB,445,10.0,yes,,yes
+Basis,10.0,RED_AQH,FB,448,10.0,yes,,yes
+Basis,10.0,RED_DI,FB,442,10.0,yes,,yes
+Basis,10.0,RED_DQ,FB,443,10.0,yes,,yes
+Basis,10.0,RED_F,FC,289,10.0,no,,yes
+Basis,10.0,RED_MF,FB,441,10.0,yes,,yes
+Basis,10.0,SUBNET,FB,106,10.0,yes,,yes
+Basis,10.0,SUBNET_PN,FB,82,10.0,yes,,yes
+Basis,10.0,WRDS_CO,FB,147,10.0,yes,,yes
+Basis,10.0 Update 1,OB_BEGIN,FB,100,10.0,no,,no
+Basis,10.0 Update 1,OB_BEGIN_HPN,FB,205,10.0,no,,no
+Basis,10.0 Update 1,OB_BEGIN_PN,FB,130,10.0,no,,no
+Basis,10.0 Update 1,SUBNET_PN,FB,82,10.0,no,,no
+Basis,10.0 Update 1,OB_DIAG1,FB,118,10.0,no,,yes
+Basis,10.0 Update 1,OB_DIAG1_PN,FB,202,10.0,no,,yes
+Basis,10.0 SP1,CONEC,FB,88,10.1,no,,no
+Basis,10.0 SP1,CPU_RES,FB,446,10.1,no,,yes
+Basis,10.0 SP1,CPU_RT,FB,128,10.1,no,,yes
+Basis,10.0 SP1,DIAG_AB,FB,414,10.1,no,,no
+Basis,10.0 SP1,DIAG_PAPN,FB,215,10.1,no,,yes
+Basis,10.0 SP1,DPAY_V0,FB,108,10.1,no,,no
+Basis,10.0 SP1,DPAY_V1,FB,115,10.1,no,,no
+Basis,10.0 SP1,DPAY_V1_PN,FB,204,10.1,no,,no
+Basis,10.0 SP1,DPDIAGV0,FB,117,10.1,no,,no
+Basis,10.0 SP1,DREP,FB,113,10.1,no,,yes
+Basis,10.0 SP1,DREP_L,FB,125,10.1,no,,yes
+Basis,10.0 SP1,FF_MOD32,FB,124,10.1,no,,no
+Basis,10.0 SP1,FFD_CIF,FB,145,10.1,no,,yes
+Basis,10.0 SP1,FFDP_L1,FB,139,10.1,no,,no
+Basis,10.0 SP1,FM_CNT,FB,126,10.1,no,,yes
+Basis,10.0 SP1,FM_CO,FB,79,10.1,no,,no
+Basis,10.0 SP1,IM_TS_PN,FB,420,10.1,no,,no
+Basis,10.0 SP1,IMDRV_TS,FB,129,10.1,no,,no
+Basis,10.0 SP1,MHA_CO,FB,426,10.1,no,,no
+Basis,10.0 SP1,MOD_1,FB,91,10.1,no,,no
+Basis,10.0 SP1,MOD_2,FB,92,10.1,no,,no
+Basis,10.0 SP1,MOD_3,FB,95,10.1,no,,no
+Basis,10.0 SP1,MOD_4,FB,119,10.1,no,,no
+Basis,10.0 SP1,MOD_64,FB,137,10.1,no,,no
+Basis,10.0 SP1,MOD_CENTRAL,FB,206,10.1,no,,yes
+Basis,10.0 SP1,MOD_CM,FB,221,10.1,no,,yes
+Basis,10.0 SP1,MOD_CP,FB,98,10.1,no,,no
+Basis,10.0 SP1,MOD_CP_PN,FB,201,10.1,no,,yes
+Basis,10.0 SP1,MOD_D1,FB,93,10.1,no,,yes
+Basis,10.0 SP1,MOD_D16_PN,FB,198,10.1,no,,yes
+Basis,10.0 SP1,MOD_D16_S7P,FB,434,10.1,no,,yes
+Basis,10.0 SP1,MOD_D2,FB,94,10.1,no,,yes
+Basis,10.0 SP1,MOD_D24_PN,FB,199,10.1,no,,yes
+Basis,10.0 SP1,MOD_D3,FB,134,10.1,no,,yes
+Basis,10.0 SP1,MOD_D32_PN,FB,421,10.1,no,,yes
+Basis,10.0 SP1,MOD_D8,FB,424,10.1,no,,yes
+Basis,10.0 SP1,MOD_D8_PN,FB,197,10.1,no,,yes
+Basis,10.0 SP1,MOD_D8_S7P,FB,433,10.1,no,,yes
+Basis,10.0 SP1,MOD_DRV,FB,148,10.1,no,,yes
+Basis,10.0 SP1,MOD_DRV_L,FB,32,10.1,no,,yes
+Basis,10.0 SP1,MOD_ENME,FB,419,10.1,no,,yes
+Basis,10.0 SP1,MOD_ENME_S7P,FB,449,10.1,no,,yes
+Basis,10.0 SP1,MOD_HA,FB,97,10.1,no,,no
+Basis,10.0 SP1,MOD_HA_PN,FB,200,10.1,no,,no
+Basis,10.0 SP1,MOD_HA_PN1,FB,417,10.1,no,,no
+Basis,10.0 SP1,MOD_HA_S7P,FB,435,10.1,no,,no
+Basis,10.0 SP1,MOD_MS,FB,96,10.1,no,,no
+Basis,10.0 SP1,MOD_MS_PN,FB,212,10.1,no,,yes
+Basis,10.0 SP1,MOD_PA256,FB,214,10.1,no,,no
+Basis,10.0 SP1,MOD_PA32,FB,213,10.1,no,,no
+Basis,10.0 SP1,MOD_PAL0,FB,99,10.1,no,,no
+Basis,10.0 SP1,MOD_PAX0,FB,112,10.1,no,,no
+Basis,10.0 SP1,MOD_SWT,FB,149,10.1,no,,no
+Basis,10.0 SP1,MOD_SWTL,FB,33,10.1,no,,yes
+Basis,10.0 SP1,OB_BEGIN,FB,100,10.1,no,,no
+Basis,10.0 SP1,OB_BEGIN_HPN,FB,2005,10.1,no,,yes
+Basis,10.0 SP1,OB_BEGIN_PN,FB,130,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAG_NC,FB,439,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAG_NC_64,FB,217,10.1,new,,no
+Basis,10.0 SP1,OB_DIAG1,FB,118,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAG1_PN,FB,202,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAG2,FB,416,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAGF,FB,146,10.1,no,,yes
+Basis,10.0 SP1,OB_DIAGF2,FB,148,10.1,no,,yes
+Basis,10.0 SP1,OB_END,FC,280,10.1,no,,no
+Basis,10.0 SP1,OB5X2OB5,FC,265,10.1,no,,no
+Basis,10.0 SP1,OR_16_PN,FB,428,10.1,no,,no
+Basis,10.0 SP1,OR_32_PN,FB,429,10.1,no,,no
+Basis,10.0 SP1,OR_32_TS,FB,138,10.1,no,,no
+Basis,10.0 SP1,OR_32TPN,FB,431,10.1,no,,no
+Basis,10.0 SP1,OR_8_PN,FB,430,10.1,no,,no
+Basis,10.0 SP1,OR_H16PN,FB,423,10.1,no,,no
+Basis,10.0 SP1,OR_HA16C,FB,133,10.1,no,,no
+Basis,10.0 SP1,OR_M_16C,FB,84,10.1,no,,no
+Basis,10.0 SP1,OR_M_32C,FB,85,10.1,no,,no
+Basis,10.0 SP1,OR_M_8C,FB,83,10.1,no,,no
+Basis,10.0 SP1,OR_MHA_CO,FB,427,10.1,no,,no
+Basis,10.0 SP1,OR_MHA1_CO,FB,440,10.1,no,,no
+Basis,10.0 SP1,PADP_L00,FB,109,10.1,no,,no
+Basis,10.0 SP1,PADP_L01,FB,110,10.1,no,,no
+Basis,10.0 SP1,PADP_L02,FB,111,10.1,no,,no
+Basis,10.0 SP1,PADP_L10,FB,116,10.1,no,,yes
+Basis,10.0 SP1,PADP_L10_PN,FB,203,10.1,no,,no
+Basis,10.0 SP1,PDM_MS,FB,81,10.1,no,,no
+Basis,10.0 SP1,PO_UPDAT,FC,279,10.1,no,,no
+Basis,10.0 SP1,PS,FB,89,10.1,no,,yes
+Basis,10.0 SP1,QC_CHNG,FB,135,10.1,no,,no
+Basis,10.0 SP1,RACK,FB,107,10.1,no,,yes
+Basis,10.0 SP1,RACK_CFU,FB,425,10.1,no,,yes
+Basis,10.0 SP1,RACK_PN,FB,90,10.1,no,,yes
+Basis,10.0 SP1,RACK_PN1,FB,415,10.1,no,,yes
+Basis,10.0 SP1,RACK_PNT,FB,432,10.1,no,,yes
+Basis,10.0 SP1,RED_AI,FB,444,10.1,no,,no
+Basis,10.0 SP1,RED_AIH,FB,447,10.1,no,,no
+Basis,10.0 SP1,RED_AQ,FB,445,10.1,no,,no
+Basis,10.0 SP1,RED_AQH,FB,448,10.1,no,,no
+Basis,10.0 SP1,RED_DI,FB,442,10.1,no,,no
+Basis,10.0 SP1,RED_DQ,FB,443,10.1,no,,no
+Basis,10.0 SP1,RED_F,FC,289,10.1,no,,no
+Basis,10.0 SP1,RED_MF,FB,441,10.1,no,,no
+Basis,10.0 SP1,SUBNET,FB,106,10.1,no,,yes
+Basis,10.0 SP1,SUBNET_PN,FB,82,10.1,no,,yes
+Basis,10.0 SP1,WRDS_CO,FB,147,10.1,no,,no
+Basis,10.0 SP1 Update 1,OB_DIAG_NC,FB,439,10.1,no,,yes
+Basis,10.0 SP1 Update 1,OB_DIAG_NC_64,FB,217,10.1,no,,yes
+Basis,10.0 SP1 Update 2,DPAY_V1_PN,FB,204,10.1,no,,yes
+Basis,10.0 SP1 Update 2,DREP,FB,113,10.1,no,,yes
+Basis,10.0 SP1 Update 2,DREP_L,FB,125,10.1,no,,yes
+Basis,10.0 SP1 Update 2,FFD_CIF,FB,145,10.1,no,,yes
+Basis,10.0 SP1 Update 2,FM_CNT,FB,126,10.1,no,,yes
+Basis,10.0 SP1 Update 2,MOD_DRVL,FB,32,10.1,no,,yes
+Basis,10.0 SP1 Update 2,MOD_SWTL,FB,33,10.1,no,,yes
+Basis,10.0 SP1 Update 2,MOD_PAX0,FB,112,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAG_NC,FB,439,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAG_NC_64,FB,217,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAG1,FB,118,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAG1_PN,FB,202,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAG2,FB,416,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAGF,FB,146,10.1,no,,yes
+Basis,10.0 SP1 Update 2,OB_DIAGF2,FB,418,10.1,no,,yes
+Basis,10.0 SP1 Update 2,PADP_L10_PN,FB,203,10.1,no,,yes
+Basis,10.0 SP1 Update 2,PS,FB,89,10.1,no,,yes
+Basis,10.0 SP1 Update 2,RACK,FB,107,10.1,no,,yes
+Basis,10.0 SP1 Update 2,RACK_CFU,FB,425,10.1,no,,yes
+Basis,10.0 SP1 Update 2,RACK_PN,FB,90,10.1,no,,yes
+Basis,10.0 SP1 Update 2,RACK_PN1,FB,415,10.1,no,,yes
+Basis,10.0 SP1 Update 2,RACK_PNT,FB,432,10.1,no,,yes
+Basis,10.0 SP1 Update 2,SUBNET_PN,FB,82,10.1,no,,yes
+Basis,10.0 SP2,DIAG_NC_APL,FB,218,10.2,no,,no
+Basis,10.0 SP2,MOD_PAL32,FB,219,10.2,no,,no
+Basis,10.0 SP2,MOD_PAL256,FB,222,10.2,no,,no
+Basis,10.0 SP2,OB_DIAG2_PN,FB,224,10.2,no,,no
+Basis,10.0 SP2,CONEC,FB,88,10.2,no,,no
+Basis,10.0 SP2,CPU_RES,FB,446,10.2,no,,no
+Basis,10.0 SP2,CPU_RT,FB,128,10.2,no,,no
+Basis,10.0 SP2,DIAG_AB,FB,414,10.2,no,,no
+Basis,10.0 SP2,DIAG_PAPN,FB,215,10.2,no,,yes
+Basis,10.0 SP2,DPAY_V0,FB,108,10.2,no,,no
+Basis,10.0 SP2,DPAY_V1,FB,115,10.2,no,,no
+Basis,10.0 SP2,DPAY_V1_PN,FB,204,10.2,no,,no
+Basis,10.0 SP2,DPDIAGV0,FB,117,10.2,no,,no
+Basis,10.0 SP2,DREP,FB,113,10.2,no,,no
+Basis,10.0 SP2,DREP_L,FB,125,10.2,no,,no
+Basis,10.0 SP2,FF_MOD32,FB,124,10.2,no,,no
+Basis,10.0 SP2,FFD_CIF,FB,145,10.2,no,,no
+Basis,10.0 SP2,FFDP_L1,FB,139,10.2,no,,no
+Basis,10.0 SP2,FM_CNT,FB,126,10.2,no,,no
+Basis,10.0 SP2,FM_CO,FB,79,10.2,no,,no
+Basis,10.0 SP2,IM_TS_PN,FB,420,10.2,no,,no
+Basis,10.0 SP2,IMDRV_TS,FB,129,10.2,no,,no
+Basis,10.0 SP2,MHA_CO,FB,426,10.2,no,,yes
+Basis,10.0 SP2,MOD_1,FB,91,10.2,no,,no
+Basis,10.0 SP2,MOD_2,FB,92,10.2,no,,no
+Basis,10.0 SP2,MOD_3,FB,95,10.2,no,,no
+Basis,10.0 SP2,MOD_4,FB,119,10.2,no,,no
+Basis,10.0 SP2,MOD_64,FB,137,10.2,no,,no
+Basis,10.0 SP2,MOD_CENTRAL,FB,206,10.2,no,,yes
+Basis,10.0 SP2,MOD_CM,FB,221,10.2,no,,no
+Basis,10.0 SP2,MOD_CP,FB,98,10.2,no,,no
+Basis,10.0 SP2,MOD_CP_PN,FB,201,10.2,no,,no
+Basis,10.0 SP2,MOD_D1,FB,93,10.2,no,,yes
+Basis,10.0 SP2,MOD_D16_PN,FB,198,10.2,no,,yes
+Basis,10.0 SP2,MOD_D16_S7P,FB,434,10.2,no,,yes
+Basis,10.0 SP2,MOD_D2,FB,94,10.2,no,,yes
+Basis,10.0 SP2,MOD_D24_PN,FB,199,10.2,no,,yes
+Basis,10.0 SP2,MOD_D3,FB,134,10.2,no,,yes
+Basis,10.0 SP2,MOD_D32_PN,FB,421,10.2,no,,yes
+Basis,10.0 SP2,MOD_D8,FB,424,10.2,no,,yes
+Basis,10.0 SP2,MOD_D8_PN,FB,197,10.2,no,,yes
+Basis,10.0 SP2,MOD_D8_S7P,FB,433,10.2,no,,yes
+Basis,10.0 SP2,MOD_DRV,FB,148,10.2,no,,no
+Basis,10.0 SP2,MOD_DRVL,FB,32,10.2,no,,no
+Basis,10.0 SP2,MOD_ENME,FB,419,10.2,no,,no
+Basis,10.0 SP2,MOD_ENME_S7P,FB,449,10.2,no,,no
+Basis,10.0 SP2,MOD_HA,FB,97,10.2,no,,no
+Basis,10.0 SP2,MOD_HA_PN,FB,200,10.2,no,,no
+Basis,10.0 SP2,MOD_HA_PN1,FB,417,10.2,no,,no
+Basis,10.0 SP2,MOD_HA_S7P,FB,435,10.2,no,,no
+Basis,10.0 SP2,MOD_MS,FB,96,10.2,no,,no
+Basis,10.0 SP2,MOD_MS_PN,FB,212,10.2,no,,no
+Basis,10.0 SP2,MOD_PA256,FB,214,10.2,no,,no
+Basis,10.0 SP2,MOD_PA32,FB,213,10.2,no,,no
+Basis,10.0 SP2,MOD_PAL0,FB,99,10.2,no,,no
+Basis,10.0 SP2,MOD_PAX0,FB,112,10.2,no,,no
+Basis,10.0 SP2,MOD_SWT,FB,149,10.2,no,,no
+Basis,10.0 SP2,MOD_SWTL,FB,33,10.2,no,,no
+Basis,10.0 SP2,OB_BEGIN,FB,100,10.2,no,,yes
+Basis,10.0 SP2,OB_BEGIN_HPN,FB,205,10.2,no,,yes
+Basis,10.0 SP2,OB_BEGIN_PN,FB,130,10.2,no,,no
+Basis,10.0 SP2,OB_DIAG_NC,FB,439,10.2,no,,yes
+Basis,10.0 SP2,OB_DIAG_NC_64,FB,217,10.2,no,,yes
+Basis,10.0 SP2,OB_DIAG1,FB,118,10.2,no,,no
+Basis,10.0 SP2,OB_DIAG1_PN,FB,202,10.2,no,,yes
+Basis,10.0 SP2,OB_DIAG2,FB,416,10.2,no,,no
+Basis,10.0 SP2,OB_DIAGF,FB,146,10.2,no,,no
+Basis,10.0 SP2,OB_DIAGF2,FB,418,10.2,no,,no
+Basis,10.0 SP2,OB_END,FC,280,10.2,no,,no
+Basis,10.0 SP2,OB5X2OB5,FC,265,10.2,no,,no
+Basis,10.0 SP2,OR_16_PN,FB,428,10.2,no,,no
+Basis,10.0 SP2,OR_32_PN,FB,429,10.2,no,,no
+Basis,10.0 SP2,OR_32_TS,FB,138,10.2,no,,no
+Basis,10.0 SP2,OR_32TPN,FB,431,10.2,no,,no
+Basis,10.0 SP2,OR_8_PN,FB,430,10.2,no,,no
+Basis,10.0 SP2,OR_H16PN,FB,423,10.2,no,,no
+Basis,10.0 SP2,OR_HA16C,FB,133,10.2,no,,no
+Basis,10.0 SP2,OR_M_16C,FB,84,10.2,no,,no
+Basis,10.0 SP2,OR_M_32C,FB,85,10.2,no,,no
+Basis,10.0 SP2,OR_M_8C,FB,83,10.2,no,,no
+Basis,10.0 SP2,OR_MHA_CO,FB,427,10.2,no,,no
+Basis,10.0 SP2,OR_MHA1_CO,FB,440,10.2,no,,no
+Basis,10.0 SP2,PADP_L00,FB,109,10.2,no,,no
+Basis,10.0 SP2,PADP_L01,FB,110,10.2,no,,no
+Basis,10.0 SP2,PADP_L02,FB,111,10.2,no,,no
+Basis,10.0 SP2,PADP_L10,FB,116,10.2,no,,yes
+Basis,10.0 SP2,PADP_L10_PN,FB,203,10.2,no,,yes
+Basis,10.0 SP2,PDM_MS,FB,81,10.2,no,,no
+Basis,10.0 SP2,PO_UPDAT,FC,279,10.2,no,,no
+Basis,10.0 SP2,PS,FB,89,10.2,no,,no
+Basis,10.0 SP2,QC_CHNG,FB,135,10.2,no,,no
+Basis,10.0 SP2,RACK,FB,107,10.2,no,,yes
+Basis,10.0 SP2,RACK_CFU,FB,425,10.2,no,,yes
+Basis,10.0 SP2,RACK_PN,FB,90,10.2,no,,no
+Basis,10.0 SP2,RACK_PN1,FB,415,10.2,no,,yes
+Basis,10.0 SP2,RACK_PNT,FB,432,10.2,no,,yes
+Basis,10.0 SP2,RED_AI,FB,444,10.2,no,,no
+Basis,10.0 SP2,RED_AIH,FB,447,10.2,no,,no
+Basis,10.0 SP2,RED_AQ,FB,445,10.2,no,,no
+Basis,10.0 SP2,RED_AQH,FB,448,10.2,no,,no
+Basis,10.0 SP2,RED_DI,FB,442,10.2,no,,no
+Basis,10.0 SP2,RED_DQ,FB,443,10.2,no,,no
+Basis,10.0 SP2,RED_F,FC,289,10.2,no,,no
+Basis,10.0 SP2,RED_MF,FB,441,10.2,no,,yes
+Basis,10.0 SP2,SUBNET,FB,106,10.2,no,,no
+Basis,10.0 SP2,SUBNET_PN,FB,82,10.2,no,,yes
+Basis,10.0 SP2,WRDS_CO,FB,147,10.2,no,,no
