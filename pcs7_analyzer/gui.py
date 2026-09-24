@@ -24,7 +24,8 @@ def _open_file(p: Path) -> None:
         webbrowser.open(Path(p).resolve().as_uri())
 
 
-def main() -> int:
+def main(mode: str = "analysis", fixed: bool = False) -> int:
+    """mode: 'analysis' | 'inventory'; fixed=True -> mod seçimi gizli (ayrı envanter exe'si)."""
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
@@ -55,9 +56,11 @@ def main() -> int:
 
     header = tk.Frame(root, bg=T["deep-blue"])
     header.pack(fill="x")
-    tk.Label(header, text="SIMATIC PCS 7 · UPGRADE ÖN DEĞERLENDİRME", bg=T["deep-blue"], fg=T["bold-green"],
+    topline = "SIMATIC PCS 7 · PROJE ENVANTERİ" if fixed and mode == "inventory" else "SIMATIC PCS 7 · UPGRADE ÖN DEĞERLENDİRME"
+    tk.Label(header, text=topline, bg=T["deep-blue"], fg=T["bold-green"],
              font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=22, pady=(14, 0))
-    tk.Label(header, text=f"Proje backup analizi → {TARGET_LABEL}", bg=T["deep-blue"], fg=T["white"],
+    title = "Proje backup envanteri" if fixed and mode == "inventory" else f"Proje backup analizi → {TARGET_LABEL}"
+    tk.Label(header, text=title, bg=T["deep-blue"], fg=T["white"],
              font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=22, pady=(0, 12))
     tk.Frame(root, bg=T["petrol"], height=4).pack(fill="x")
 
@@ -73,6 +76,7 @@ def main() -> int:
     dept_var = tk.StringVar(value=st.get("department", ""))
     cust_var = tk.StringVar()
     disc_var = tk.BooleanVar(value=False)
+    mode_var = tk.StringVar(value=mode)
 
     def set_source(p: str) -> None:
         src_var.set(p)
@@ -106,19 +110,51 @@ def main() -> int:
     ttk.Label(body, textvariable=src_show, style="Path.TLabel").grid(row=r, column=0, columnspan=3, sticky="ew", pady=(8, 14))
     r += 1
 
-    # 2) Rapor bilgileri
-    ttk.Label(body, text="2  Rapor bilgileri", font=("Segoe UI", 11, "bold")).grid(row=r, column=0, sticky="w", pady=(0, 6))
+    # 2) Mod ve rapor bilgileri
+    ttk.Label(body, text="2  Ayarlar" if fixed else "2  Ne yapılsın?", font=("Segoe UI", 11, "bold")) \
+        .grid(row=r, column=0, sticky="w", pady=(0, 6))
     r += 1
-    for label, var in (("Hazırlayan", author_var), ("Departman", dept_var), ("Müşteri / proje (kapak)", cust_var)):
-        ttk.Label(body, text=label).grid(row=r, column=0, sticky="w", pady=3)
-        ttk.Entry(body, textvariable=var).grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
+    info_rows = []
+    if not fixed:
+        mf = ttk.Frame(body)
+        mf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        ttk.Radiobutton(mf, text=f"Analiz: {TARGET_LABEL} upgrade değerlendirmesi (Word + HTML)", value="analysis",
+                        variable=mode_var).pack(anchor="w")
+        ttk.Radiobutton(mf, text="Envanter: backup'taki her şeyi listele, değerlendirme yapma (Excel + HTML)",
+                        value="inventory", variable=mode_var).pack(anchor="w")
         r += 1
+    for label, var in (("Hazırlayan", author_var), ("Departman", dept_var), ("Müşteri / proje (kapak)", cust_var)):
+        lab = ttk.Label(body, text=label)
+        lab.grid(row=r, column=0, sticky="w", pady=3)
+        ent = ttk.Entry(body, textvariable=var)
+        ent.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
+        info_rows.append((lab, ent))
+        r += 1
+
+    def on_mode(*_):
+        for lab, ent in info_rows:
+            if mode_var.get() == "inventory":
+                lab.grid_remove()
+                ent.grid_remove()
+            else:
+                lab.grid()
+                ent.grid()
+        inv = mode_var.get() == "inventory"
+        word_btn.configure(text="Excel'i aç" if inv else "Word'ü aç")
+        run_btn.configure(text="3  Envanteri çıkar" if inv else "3  Analizi başlat")
+        if inv:
+            disc_chk.grid_remove()
+        else:
+            disc_chk.grid()
+        hint.configure(text="Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
+                            + ("Envanter değerlendirme içermez; yapi_tanisi.txt müşteri verisi içermez." if inv
+                               else f"Hedef: {TARGET_LABEL}."))
     ttk.Label(body, text="Rapor klasörü").grid(row=r, column=0, sticky="w", pady=3)
     ttk.Entry(body, textvariable=out_var).grid(row=r, column=1, sticky="ew", padx=8)
     ttk.Button(body, text="Değiştir…", command=pick_out).grid(row=r, column=2, sticky="e")
     r += 1
-    ttk.Checkbutton(body, text="Sadece keşif (klasör yapısını raporla, analiz yapma)", variable=disc_var) \
-        .grid(row=r, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
+    disc_chk = ttk.Checkbutton(body, text="Sadece keşif (klasör yapısını raporla, analiz yapma)", variable=disc_var)
+    disc_chk.grid(row=r, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
     r += 1
 
     # 3) Çalıştır
@@ -140,9 +176,8 @@ def main() -> int:
                      font=("Consolas", 9), relief="flat", padx=8, pady=6)
     logbox.grid(row=r, column=0, columnspan=3, sticky="nsew")
     body.rowconfigure(r, weight=1)
-    ttk.Label(body, text=f"Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
-                         f"Hedef: {TARGET_LABEL}.", style="Hint.TLabel") \
-        .grid(row=r + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+    hint = ttk.Label(body, style="Hint.TLabel")
+    hint.grid(row=r + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     q: queue.Queue = queue.Queue()
     result = {"path": None}
@@ -150,10 +185,10 @@ def main() -> int:
     def log(msg):
         q.put(("log", str(msg)))
 
-    def worker(src, out, disc, author, dept, cust):
+    def worker(src, out, disc, author, dept, cust, inv):
         try:
             p = run(Path(src), Path(out) if out else None, discover_only=disc, log=log,
-                    author=author, department=dept, customer=cust or None)
+                    author=author, department=dept, customer=cust or None, inventory=inv)
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))
@@ -172,7 +207,7 @@ def main() -> int:
                     result["path"] = Path(val)
                     open_btn.configure(state="normal")
                     folder_btn.configure(state="normal")
-                    if (Path(val).parent / "rapor.docx").exists():
+                    if (Path(val).parent / "rapor.docx").exists() or (Path(val).parent / "envanter.xlsx").exists():
                         word_btn.configure(state="normal")
                     logbox.insert("end", f"\nTamamlandı: {val}\n")
                     logbox.see("end")
@@ -199,11 +234,21 @@ def main() -> int:
         bar.start(12)
         threading.Thread(target=worker, daemon=True,
                          args=(src, out, disc_var.get(), author_var.get().strip(), dept_var.get().strip(),
-                               cust_var.get().strip())).start()
+                               cust_var.get().strip(), mode_var.get() == "inventory")).start()
 
     run_btn.configure(command=start)
     open_btn.configure(command=lambda: result["path"] and webbrowser.open(result["path"].resolve().as_uri()))
-    word_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent / "rapor.docx"))
+    def open_second():
+        if not result["path"]:
+            return
+        for n in ("envanter.xlsx", "rapor.docx") if mode_var.get() == "inventory" else ("rapor.docx",):
+            if (result["path"].parent / n).exists():
+                _open_file(result["path"].parent / n)
+                return
+
+    word_btn.configure(command=open_second)
+    mode_var.trace_add("write", on_mode)
+    on_mode()
     folder_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent))
     root.after(150, poll)
     root.mainloop()

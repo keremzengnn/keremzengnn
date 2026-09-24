@@ -164,3 +164,8 @@ değişen kısımlar: kademeli yol (`staged_path_from`), `version_note`, APL V8/
 `data/released_modules_V10.0SP2.csv` gömülü (Released Modules V10.0 SP2 List Manual, A5E52547920-AD, Markdown'dan
 `released_extract.extract_rows_markdown`). FW: `V6.x` joker, FW'siz satır = her FW. Aksesuarlar (6ES7 960-1AA… H-Sync)
 listede yok -> `ACCESSORIES` notu, Düşük etki.
+
+## Envanter modu (`inventory.py`, `--inventory`, PCS7Envanter.exe)
+Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
+(`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
+(rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.

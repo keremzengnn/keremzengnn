@@ -8,10 +8,21 @@ Girdi: backup **klasörü** veya doğrudan **.zip** (açmaya gerek yok; sadece g
 Çıktı: `rapor.docx` (Word template'inizle; müşteri raporu), `rapor.html` (Siemens renkleri, detaylı çalışma raporu),
 `rapor.md`, `rapor.json`.
 
+## İki program
+| Program | Ne yapar | Çıktı |
+|---|---|---|
+| **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi (pencerede "Envanter" modu da seçilebilir) | rapor.docx, rapor.html (+ md, json) |
+| **PCS7Envanter.exe** | Sadece backup'taki her şeyi okur ve listeler, değerlendirme yapmaz | envanter.xlsx, envanter.html, yapi_tanisi.txt |
+
+Envanter, export almadan backup içinden okur: symbol table'lar (`YDBs/.../SYMLIST.DBF`, tüm semboller),
+HW (`.s7h` ve `hOmSave7` DBF'lerinden MLFB + FW; rack/slot yok), tüm FB/FC listesi ve instance sayıları, OS picture/script
+listeleri. `.cfg` / `.asc` export'ları varsa onlar da okunur. `yapi_tanisi.txt` müşteri verisi içermez (sadece DBF alan
+adları ve kayıt sayıları); formatı çözülmemiş dosyalar için geliştiriciyle paylaşılabilir.
+
 ## Kullanım (Windows)
 
 **A) Exe (Python gerekmez):** GitHub → Actions → "Windows test + exe" → son çalışmanın *Artifacts* kısmından
-`PCS7Analyzer-windows` indirin → `PCS7Analyzer.exe`'yi çift tıklayın.
+`PCS7Analyzer-windows` indirin → `PCS7Analyzer.exe` veya `PCS7Envanter.exe`'yi çift tıklayın.
 
 **B) Python ile (3.11+, ek paket gerekmez):** repo klasöründe `Baslat.bat`'a çift tıklayın.
 
@@ -23,6 +34,7 @@ Zip içindeki zip'ler (ör. farklı tarihli ikinci backup) de açılıp taranır
 Komut satırı:
 ```
 python -m pcs7_analyzer D:\Backup\Proje.zip -o D:\Raporlar\Proje --author "Ad Soyad" --department "Departman" --open
+python -m pcs7_analyzer D:\Backup\Proje.zip --inventory  # sadece envanter (Excel)
 python -m pcs7_analyzer D:\Backup\Proje --discover        # sadece klasör yapısı
 python -m pcs7_analyzer --demo C:\Temp\demo               # sahte demo projesiyle dene
 python -m pcs7_analyzer --list-checks                     # tanımlı kontroller

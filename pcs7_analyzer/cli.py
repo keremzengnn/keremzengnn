@@ -37,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--author", help="Header'da ad (ayarlara kaydedilir)")
     p.add_argument("--department", help="Header'da departman (ayarlara kaydedilir)")
     p.add_argument("--customer", help="Kapak üst satırı (varsayılan: multiproject adları)")
+    p.add_argument("--inventory", action="store_true",
+                   help="Envanter modu: backup'taki her şeyi listele (Excel + HTML), değerlendirme yapma")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
     p.add_argument("--open", action="store_true", help="Bitince HTML raporu tarayıcıda aç")
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
@@ -69,8 +71,8 @@ def default_out_dir(source: Path, root: Path | None = None) -> Path:
 
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
-        department: str | None = None, customer: str | None = None) -> Path:
-    """Analizi çalıştırır, raporları yazar ve ana rapor dosyasının yolunu döndürür."""
+        department: str | None = None, customer: str | None = None, inventory: bool = False) -> Path:
+    """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür."""
     from . import settings
     from .analyze import analyze
     from .discovery import discover, render_markdown as render_discovery
@@ -81,6 +83,14 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     if source.is_dir() and _inside(out_dir, source):
         raise ValueError(f"Çıktı kaynak klasörün içine yazılamaz (salt okuma kuralı): {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if inventory:
+        from .inventory import build_inventory, write_outputs
+        inv = build_inventory(source, log)
+        p = write_outputs(inv, out_dir)
+        log(f"Envanter: {out_dir / 'envanter.xlsx'}")
+        log(f"Yapı tanısı (müşteri verisi içermez): {out_dir / 'yapi_tanisi.txt'}")
+        return p
 
     if discover_only:
         r = discover(source, progress=log)
@@ -150,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                                        ("template", str(args.template) if args.template else None)) if v})
     try:
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
-                  args.author, args.department, args.customer)
+                  args.author, args.department, args.customer, args.inventory)
     except ValueError as e:
         parser.error(str(e))
     if args.open:
