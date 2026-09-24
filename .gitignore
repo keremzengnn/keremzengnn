@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+out/
+
+# Müşteri verisi ve müşteriye özel dosyalar ASLA repoya girmez (repo public).
+projects/
+local/
+*.zip
+*.7z
+PROMPT_claude_code.md
+tests/regression/expected_local.json
