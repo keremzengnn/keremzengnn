@@ -108,8 +108,9 @@ def as_stop(c, an):
     non410 = sorted(o for o in cpus if not re.match(r"6ES7 ?410-", o))
     if not non410:
         return []
-    return [_f(c, "Basis Library update TCiR ile sadece CPU 410-5H'de yapılabilir; bu CPU'larda AS STOP: "
-                  + ", ".join(non410) + ". (Duruş zaten kapsamda.)")]
+    return [_f(c, "Basis Library update TCiR ile sadece CPU 410-5H (FW >= V8.2) ile yapılabilir; APL'de de ≤V9.1 SP2 -> ≥V10.0 "
+                  "geçişinde TCiR sadece 410-5H'de var. Bu CPU'larda library update AS STOP gerektirir: "
+                  + ", ".join(non410) + ". (Duruş zaten kapsamda.)", [BASIS_README + ", 5.2", "APL Readme V10.0 SP2, 4.4"])]
 
 
 # ---------------------------------------------------------------------------
