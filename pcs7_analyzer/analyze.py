@@ -381,7 +381,7 @@ def _analyze_released(an: Analysis, released_csv: Path | None) -> None:
     rm = ReleasedModules.load(Path(csv_path))
     for (order, fw), (n, sts) in sorted(agg.items()):
         r = rm.match(order, fw)
-        note = "; ".join(e.status for e in r.entries if e.status)
+        note = r.note or "; ".join(sorted({f"{e.fw or 'FW belirtilmemiş'}: {e.status}" for e in r.entries}))
         an.hw_matches.append(HwMatch(order, fw, n, sorted(sts), r.status.value, note))
 
 

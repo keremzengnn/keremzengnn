@@ -69,6 +69,12 @@ def hw_released(c, an):
             f"{m.order} {m.fw} ×{m.count} ({', '.join(m.stations)}; {m.note})" for m in blocked) + " -> değişim gerekli.",
             [an.released_list], blocking=True))
     bad = [m for m in an.hw_matches if m not in blocked and ("bulunamadı" in m.status or "FW" in m.status)]
+    acc = [m for m in bad if "aksesuar" in m.note]
+    bad = [m for m in bad if m not in acc]
+    if acc:
+        out.append(_f(c, "Aksesuar(lar) Released Modules listesinde yer almaz, teyit edilmeli: " + _short(
+            f"{m.order} ×{m.count} ({m.note.split(':')[0]}; {', '.join(m.stations)})" for m in acc),
+            [an.released_list], severity=L))
     if bad:
         lines = [f"{m.order} {m.fw} ×{m.count} ({m.status}; {', '.join(m.stations)})".replace("  ", " ") for m in bad]
         out.append(_f(c, f"{len(bad)} MLFB/FW Released Modules listesinde bulunamadı, teyit edilmeli: " + _short(lines, 6),

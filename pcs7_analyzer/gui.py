@@ -1,9 +1,11 @@
 """
-Basit masaüstü penceresi: backup (klasör veya .zip) seç -> Çalıştır -> rapor tarayıcıda açılır.
+Masaüstü penceresi: backup (klasör veya .zip) seç -> Analizi başlat -> HTML rapor açılır, Word raporu hazır.
+Hedef sabit: PCS 7 V10.0 SP2. Word template ve Released Modules listesi program içinde gömülü.
 Sadece standart kütüphane (tkinter). Renkler rapordaki Siemens token'larıyla aynı.
 """
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import traceback
@@ -11,8 +13,15 @@ import webbrowser
 from pathlib import Path
 
 from . import __version__, settings
-from .cli import DEFAULT_TARGET, default_out_dir, run
+from .cli import TARGET_LABEL, default_out_dir, run
 from .report import SIEMENS_TOKENS as T
+
+
+def _open_file(p: Path) -> None:
+    try:
+        os.startfile(str(p))  # type: ignore[attr-defined]  # Windows: ilişkili programla aç
+    except (AttributeError, OSError):
+        webbrowser.open(Path(p).resolve().as_uri())
 
 
 def main() -> int:
@@ -21,8 +30,8 @@ def main() -> int:
 
     root = tk.Tk()
     root.title(f"PCS 7 Upgrade Analyzer {__version__}")
-    root.geometry("900x720")
-    root.minsize(700, 480)
+    root.geometry("900x700")
+    root.minsize(720, 560)
     root.configure(bg=T["light-sand"])
 
     style = ttk.Style(root)
@@ -30,120 +39,109 @@ def main() -> int:
         style.theme_use("clam")
     except tk.TclError:
         pass
-    font = ("Segoe UI", 10)
-    style.configure(".", font=font, background=T["light-sand"], foreground=T["deep-blue"])
+    style.configure(".", font=("Segoe UI", 10), background=T["light-sand"], foreground=T["deep-blue"])
     style.configure("TLabel", background=T["light-sand"], foreground=T["deep-blue"])
+    style.configure("Hint.TLabel", foreground=T["deep-blue-500"])
+    style.configure("Path.TLabel", background=T["white"], foreground=T["deep-blue"], padding=(10, 8), relief="flat")
     style.configure("TEntry", fieldbackground=T["white"])
-    style.configure("Primary.TButton", background=T["petrol"], foreground=T["white"], borderwidth=0, padding=(18, 8),
-                    font=("Segoe UI", 10, "bold"))
+    style.configure("Primary.TButton", background=T["petrol"], foreground=T["white"], borderwidth=0, padding=(22, 10),
+                    font=("Segoe UI", 11, "bold"))
     style.map("Primary.TButton", background=[("active", T["deep-blue-700"]), ("disabled", T["deep-blue-300"])])
-    style.configure("TButton", background=T["white"], foreground=T["deep-blue"], padding=(10, 5))
+    style.configure("Pick.TButton", background=T["deep-blue"], foreground=T["white"], borderwidth=0, padding=(16, 10),
+                    font=("Segoe UI", 10, "bold"))
+    style.map("Pick.TButton", background=[("active", T["petrol"])])
+    style.configure("TButton", background=T["white"], foreground=T["deep-blue"], padding=(12, 6))
     style.configure("Horizontal.TProgressbar", background=T["petrol"], troughcolor=T["deep-blue-50"])
 
     header = tk.Frame(root, bg=T["deep-blue"])
     header.pack(fill="x")
     tk.Label(header, text="SIMATIC PCS 7 · UPGRADE ÖN DEĞERLENDİRME", bg=T["deep-blue"], fg=T["bold-green"],
-             font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(14, 0))
-    tk.Label(header, text="Proje backup analizi", bg=T["deep-blue"], fg=T["white"],
-             font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=20, pady=(0, 12))
+             font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=22, pady=(14, 0))
+    tk.Label(header, text=f"Proje backup analizi → {TARGET_LABEL}", bg=T["deep-blue"], fg=T["white"],
+             font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=22, pady=(0, 12))
     tk.Frame(root, bg=T["petrol"], height=4).pack(fill="x")
 
-    body = ttk.Frame(root, padding=20)
+    body = ttk.Frame(root, padding=22)
     body.pack(fill="both", expand=True)
     body.columnconfigure(1, weight=1)
 
     st = settings.load()
     src_var = tk.StringVar()
+    src_show = tk.StringVar(value="Henüz backup seçilmedi")
     out_var = tk.StringVar()
-    tgt_var = tk.StringVar(value=st.get("target", DEFAULT_TARGET))
-    rel_var = tk.StringVar(value=st.get("released", ""))
-    tpl_var = tk.StringVar(value=st.get("template", ""))
     author_var = tk.StringVar(value=st.get("author", ""))
     dept_var = tk.StringVar(value=st.get("department", ""))
     cust_var = tk.StringVar()
     disc_var = tk.BooleanVar(value=False)
 
+    def set_source(p: str) -> None:
+        src_var.set(p)
+        src_show.set(p)
+        out_var.set(str(default_out_dir(Path(p), Path(st.get("out_root")) if st.get("out_root") else None)))
+
     def pick_dir():
-        p = filedialog.askdirectory(title="Backup klasörü")
+        p = filedialog.askdirectory(title="Backup klasörünü seçin")
         if p:
-            src_var.set(p)
-            if not out_var.get():
-                out_var.set(str(default_out_dir(Path(p))))
+            set_source(p)
 
     def pick_zip():
-        p = filedialog.askopenfilename(title="Backup .zip", filetypes=[("Zip", "*.zip"), ("Tümü", "*.*")])
+        p = filedialog.askopenfilename(title="Backup .zip dosyasını seçin", filetypes=[("Zip", "*.zip"), ("Tümü", "*.*")])
         if p:
-            src_var.set(p)
-            if not out_var.get():
-                out_var.set(str(default_out_dir(Path(p))))
+            set_source(p)
 
     def pick_out():
-        p = filedialog.askdirectory(title="Rapor klasörü")
+        p = filedialog.askdirectory(title="Raporların kaydedileceği klasör")
         if p:
             out_var.set(p)
 
-    def pick_tpl():
-        p = filedialog.askopenfilename(title="Word template (.dotx)", filetypes=[("Word template", "*.dotx"), ("Tümü", "*.*")])
-        if p:
-            tpl_var.set(p)
-
-    def pick_rel():
-        p = filedialog.askopenfilename(title="Released Modules CSV", filetypes=[("CSV", "*.csv")])
-        if p:
-            rel_var.set(p)
-
+    # 1) Backup seçimi
     r = 0
-    ttk.Label(body, text="Backup").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=src_var).grid(row=r, column=1, sticky="ew", padx=8)
-    bf = ttk.Frame(body)
-    bf.grid(row=r, column=2, sticky="e")
-    ttk.Button(bf, text="Klasör…", command=pick_dir).pack(side="left", padx=2)
-    ttk.Button(bf, text="Zip…", command=pick_zip).pack(side="left", padx=2)
+    ttk.Label(body, text="1  Backup", font=("Segoe UI", 11, "bold")).grid(row=r, column=0, sticky="w", pady=(0, 6))
     r += 1
-    ttk.Label(body, text="Rapor klasörü").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=out_var).grid(row=r, column=1, sticky="ew", padx=8)
-    ttk.Button(body, text="Seç…", command=pick_out).grid(row=r, column=2, sticky="e")
+    picks = ttk.Frame(body)
+    picks.grid(row=r, column=0, columnspan=3, sticky="w")
+    ttk.Button(picks, text="Backup klasörü seç…", style="Pick.TButton", command=pick_dir).pack(side="left")
+    ttk.Button(picks, text="Backup .zip seç…", style="Pick.TButton", command=pick_zip).pack(side="left", padx=8)
     r += 1
-    ttk.Label(body, text="Hedef versiyon").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=tgt_var, width=16).grid(row=r, column=1, sticky="w", padx=8)
-    r += 1
-    ttk.Label(body, text="Released Modules CSV").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=rel_var).grid(row=r, column=1, sticky="ew", padx=8)
-    ttk.Button(body, text="Seç…", command=pick_rel).grid(row=r, column=2, sticky="e")
-    r += 1
-    ttk.Label(body, text="Word template (.dotx)").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=tpl_var).grid(row=r, column=1, sticky="ew", padx=8)
-    ttk.Button(body, text="Seç…", command=pick_tpl).grid(row=r, column=2, sticky="e")
-    r += 1
-    who = ttk.Frame(body)
-    who.grid(row=r, column=1, sticky="ew", padx=8, pady=4)
-    ttk.Label(body, text="Hazırlayan / departman").grid(row=r, column=0, sticky="w")
-    ttk.Entry(who, textvariable=author_var, width=24).pack(side="left")
-    ttk.Entry(who, textvariable=dept_var, width=24).pack(side="left", padx=6)
-    r += 1
-    ttk.Label(body, text="Müşteri / proje (kapak)").grid(row=r, column=0, sticky="w", pady=4)
-    ttk.Entry(body, textvariable=cust_var).grid(row=r, column=1, sticky="ew", padx=8)
-    r += 1
-    ttk.Checkbutton(body, text="Sadece keşif (klasör yapısı)", variable=disc_var).grid(row=r, column=1, sticky="w", padx=8)
+    ttk.Label(body, textvariable=src_show, style="Path.TLabel").grid(row=r, column=0, columnspan=3, sticky="ew", pady=(8, 14))
     r += 1
 
+    # 2) Rapor bilgileri
+    ttk.Label(body, text="2  Rapor bilgileri", font=("Segoe UI", 11, "bold")).grid(row=r, column=0, sticky="w", pady=(0, 6))
+    r += 1
+    for label, var in (("Hazırlayan", author_var), ("Departman", dept_var), ("Müşteri / proje (kapak)", cust_var)):
+        ttk.Label(body, text=label).grid(row=r, column=0, sticky="w", pady=3)
+        ttk.Entry(body, textvariable=var).grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
+        r += 1
+    ttk.Label(body, text="Rapor klasörü").grid(row=r, column=0, sticky="w", pady=3)
+    ttk.Entry(body, textvariable=out_var).grid(row=r, column=1, sticky="ew", padx=8)
+    ttk.Button(body, text="Değiştir…", command=pick_out).grid(row=r, column=2, sticky="e")
+    r += 1
+    ttk.Checkbutton(body, text="Sadece keşif (klasör yapısını raporla, analiz yapma)", variable=disc_var) \
+        .grid(row=r, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
+    r += 1
+
+    # 3) Çalıştır
     actions = ttk.Frame(body)
-    actions.grid(row=r, column=0, columnspan=3, sticky="ew", pady=(12, 8))
-    run_btn = ttk.Button(actions, text="Analizi başlat", style="Primary.TButton")
+    actions.grid(row=r, column=0, columnspan=3, sticky="ew", pady=(14, 8))
+    run_btn = ttk.Button(actions, text="3  Analizi başlat", style="Primary.TButton")
     run_btn.pack(side="left")
-    open_btn = ttk.Button(actions, text="Raporu aç", state="disabled")
-    open_btn.pack(side="left", padx=8)
+    open_btn = ttk.Button(actions, text="Raporu aç (HTML)", state="disabled")
+    open_btn.pack(side="left", padx=(12, 6))
     word_btn = ttk.Button(actions, text="Word'ü aç", state="disabled")
     word_btn.pack(side="left")
-    bar = ttk.Progressbar(actions, mode="indeterminate", length=200)
+    folder_btn = ttk.Button(actions, text="Klasörü aç", state="disabled")
+    folder_btn.pack(side="left", padx=6)
+    bar = ttk.Progressbar(actions, mode="indeterminate", length=160)
     bar.pack(side="right")
     r += 1
 
-    logbox = tk.Text(body, height=14, bg=T["deep-blue"], fg=T["deep-blue-50"], insertbackground=T["white"],
+    logbox = tk.Text(body, height=10, bg=T["deep-blue"], fg=T["deep-blue-50"], insertbackground=T["white"],
                      font=("Consolas", 9), relief="flat", padx=8, pady=6)
     logbox.grid(row=r, column=0, columnspan=3, sticky="nsew")
     body.rowconfigure(r, weight=1)
-    ttk.Label(body, text="Backup sadece okunur; hiçbir dosyası değiştirilmez.", foreground=T["deep-blue-500"]) \
+    ttk.Label(body, text=f"Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
+                         f"Hedef: {TARGET_LABEL}.", style="Hint.TLabel") \
         .grid(row=r + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     q: queue.Queue = queue.Queue()
@@ -152,10 +150,10 @@ def main() -> int:
     def log(msg):
         q.put(("log", str(msg)))
 
-    def worker(src, out, tgt, rel, disc, tpl, author, dept, cust):
+    def worker(src, out, disc, author, dept, cust):
         try:
-            p = run(Path(src), Path(out) if out else None, tgt or DEFAULT_TARGET, Path(rel) if rel else None, disc, log,
-                    Path(tpl) if tpl else None, author, dept, cust or None)
+            p = run(Path(src), Path(out) if out else None, discover_only=disc, log=log,
+                    author=author, department=dept, customer=cust or None)
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))
@@ -171,8 +169,9 @@ def main() -> int:
                 elif kind == "done":
                     bar.stop()
                     run_btn.configure(state="normal")
-                    result["path"] = val
+                    result["path"] = Path(val)
                     open_btn.configure(state="normal")
+                    folder_btn.configure(state="normal")
                     if (Path(val).parent / "rapor.docx").exists():
                         word_btn.configure(state="normal")
                     logbox.insert("end", f"\nTamamlandı: {val}\n")
@@ -189,37 +188,23 @@ def main() -> int:
     def start():
         src = src_var.get().strip()
         if not src or not Path(src).exists():
-            messagebox.showwarning("Backup", "Önce backup klasörünü veya .zip dosyasını seçin.")
+            messagebox.showwarning("Backup", "Önce 'Backup klasörü seç' veya 'Backup .zip seç' ile backup'ı seçin.")
             return
         logbox.delete("1.0", "end")
-        run_btn.configure(state="disabled")
-        open_btn.configure(state="disabled")
-        word_btn.configure(state="disabled")
+        for b in (run_btn, open_btn, word_btn, folder_btn):
+            b.configure(state="disabled")
+        out = out_var.get().strip()
         settings.save({"author": author_var.get().strip(), "department": dept_var.get().strip(),
-                       "template": tpl_var.get().strip(), "released": rel_var.get().strip(),
-                       "target": tgt_var.get().strip()})
+                       "out_root": str(Path(out).parent) if out else ""})
         bar.start(12)
         threading.Thread(target=worker, daemon=True,
-                         args=(src, out_var.get().strip(), tgt_var.get().strip(), rel_var.get().strip(),
-                               disc_var.get(), tpl_var.get().strip(), author_var.get().strip(),
-                               dept_var.get().strip(), cust_var.get().strip())).start()
-
-    def open_report():
-        if result["path"]:
-            webbrowser.open(Path(result["path"]).resolve().as_uri())
-
-    def open_word():
-        if result["path"]:
-            p = Path(result["path"]).parent / "rapor.docx"
-            try:
-                import os
-                os.startfile(str(p))  # type: ignore[attr-defined]  # Windows
-            except (AttributeError, OSError):
-                webbrowser.open(p.resolve().as_uri())
+                         args=(src, out, disc_var.get(), author_var.get().strip(), dept_var.get().strip(),
+                               cust_var.get().strip())).start()
 
     run_btn.configure(command=start)
-    open_btn.configure(command=open_report)
-    word_btn.configure(command=open_word)
+    open_btn.configure(command=lambda: result["path"] and webbrowser.open(result["path"].resolve().as_uri()))
+    word_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent / "rapor.docx"))
+    folder_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent))
     root.after(150, poll)
     root.mainloop()
     return 0

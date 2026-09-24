@@ -12,5 +12,6 @@ local/
 PROMPT_claude_code.md
 tests/regression/expected_local.json
 
-# Kurum içi Word template repoya girmez
+# Word template: sadece gömülü olan
 *.dotx
+!pcs7_analyzer/data/report_template.dotx

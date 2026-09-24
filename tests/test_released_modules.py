@@ -39,3 +39,24 @@ IM 153-2 6ES7153-2BA10-0XB0 V4.0"""
     assert next(r for r in rows if r["mlfb"].startswith("6ES7 321"))["status"] == "discontinued 10/2004"
     assert any(r["mlfb"] == "6ES7153-2BA10-0XB0" for r in rows)
     assert not any("960-1AA06" in r["mlfb"] for r in rows)
+
+
+def test_fw_matches():
+    from pcs7_analyzer.released_modules import fw_matches
+    assert fw_matches("V6.0", "V6.x") and fw_matches("V8.2.3", "V8.2.x") and fw_matches("V2.0", "V2.0")
+    assert not fw_matches("V5.3", "V6.x") and not fw_matches("V8.1.0", "V8.2.x")
+
+
+def test_markdown_extract():
+    from pcs7_analyzer.released_extract import extract_rows_markdown
+    md = """### **21.6 H-CPU as of 12/11 (as of PCS 7 V8.0)**
+|**Product name**|**Article no.**|**Brief**|**F**|**C**|
+|CPU 414-5H PN/DP|6ES7 414-5HM06-0AB0<br>V6.x|S7 CPU|W<br>P|X||
+|SM321|6ES7 321-1BH01-0AA0|DI|W|X|10/<br>04|
+||6ES7652-0XX00-1XD2|chip card||
+1) Orderable via article number 6ES7155-6BA01-0CN0
+"""
+    rows = {(r["mlfb"], r["fw"]): r for r in extract_rows_markdown(md)}
+    assert rows[("6ES7 414-5HM06-0AB0", "V6.x")]["note"].startswith("21.6 H-CPU")
+    assert rows[("6ES7 321-1BH01-0AA0", "")]["status"] == "discontinued 10/04"
+    assert ("6ES7652-0XX00-1XD2", "") in rows and ("6ES7155-6BA01-0CN0", "") in rows

@@ -33,7 +33,7 @@ def save(values: dict) -> None:
 
 
 def find_template(explicit: str | None = None) -> Path | None:
-    """Açık yol > ayarlardaki yol > exe/çalışma klasörü yanındaki data/*.dotx."""
+    """Açık yol > ayarlardaki yol > data/*.dotx (exe/çalışma klasörü yanı, sonra gömülü report_template.dotx)."""
     from .analyze import data_dirs
     for c in (explicit, load().get("template")):
         if c and Path(c).is_file():

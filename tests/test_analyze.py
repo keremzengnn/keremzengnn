@@ -139,7 +139,9 @@ def test_source_not_modified(tmp_path):
     assert sorted((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in bk.rglob("*")) == snap
 
 
-def test_without_released_list(demo):
+def test_without_released_list(demo, monkeypatch):
+    import pcs7_analyzer.analyze as A
+    monkeypatch.setattr(A, "data_dirs", lambda: [])
     bk, _ = demo
     a = analyze(bk)
     assert ("HW_RELEASED", "data/released_modules_<versiyon>.csv yok") in a.not_checked
@@ -195,3 +197,14 @@ def test_im_drv_and_box_rtx(an):
     assert im_drv(get_check("IM_DRV"), a)[0].scope == a.block_folders[0].as_label
     f = box_rtx(get_check("HW_BOX_RTX"), a)[0]
     assert f.blocking
+
+
+def test_shipped_released_list(demo):
+    """Gömülü Released Modules V10.0 SP2 listesi: demo'daki gerçek MLFB'ler listede, H-Sync aksesuar notuyla bulunamadı."""
+    bk, _ = demo
+    a = analyze(bk)
+    st = {m.order: m for m in a.hw_matches}
+    assert st["6ES7 414-5HM06-0AB0"].status == "listede"          # V6.0 ~ V6.x
+    assert st["6GK7 443-1EX30-0XE0"].status == "listede"          # V3.0 ~ V3.x
+    assert st["6ES7 960-1AA06-0XA0"].status.startswith("bulunamadı")
+    assert "aksesuar" in st["6ES7 960-1AA06-0XA0"].note

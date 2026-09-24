@@ -21,7 +21,10 @@ from pathlib import Path
 from . import __version__
 from .checks import CHECKS
 
-DEFAULT_TARGET = "V10.0SP2"
+# Program PCS 7 V10.0 SP2'ye upgrade için özelleşmiştir (hangi versiyondan gelinirse gelinsin hedef budur).
+TARGET = "V10.0SP2"
+TARGET_LABEL = "PCS 7 V10.0 SP2"
+DEFAULT_TARGET = TARGET
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,9 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
                                 description="PCS 7 proje backup'ı (klasör veya .zip) offline upgrade ön değerlendirmesi")
     p.add_argument("source", type=Path, nargs="?", help="Proje / multiproject backup klasörü veya .zip (salt okunur)")
     p.add_argument("-o", "--out-dir", type=Path, help="Rapor klasörü (varsayılan: ./pcs7_rapor/<isim>_<tarih>)")
-    p.add_argument("--target", default=DEFAULT_TARGET, help=f"Hedef PCS 7 versiyonu (varsayılan {DEFAULT_TARGET})")
-    p.add_argument("--released", type=Path, help="Released Modules CSV (varsayılan: paket içindeki data/)")
-    p.add_argument("--template", type=Path, help="Word template (.dotx); verilmezse ayarlardaki / data/ içindeki")
+    p.add_argument("--released", type=Path, help="Released Modules CSV (varsayılan: gömülü V10.0 SP2 listesi)")
+    p.add_argument("--template", type=Path, help="Word template (.dotx) (varsayılan: gömülü template)")
     p.add_argument("--author", help="Header'da ad (ayarlara kaydedilir)")
     p.add_argument("--department", help="Header'da departman (ayarlara kaydedilir)")
     p.add_argument("--customer", help="Kapak üst satırı (varsayılan: multiproject adları)")
@@ -56,12 +58,16 @@ def _list_checks() -> str:
     return "\n".join(rows)
 
 
-def default_out_dir(source: Path) -> Path:
+def default_out_dir(source: Path, root: Path | None = None) -> Path:
+    """Varsayılan: Belgeler/PCS7_Raporlar/<isim>_<tarih> (Belgeler yoksa çalışma klasörü)."""
     name = re.sub(r"[^\w.-]+", "_", source.stem or "proje")
-    return Path.cwd() / "pcs7_rapor" / f"{name}_{datetime.now():%Y%m%d_%H%M}"
+    if root is None:
+        docs = Path.home() / "Documents"
+        root = (docs if docs.is_dir() else Path.cwd()) / "PCS7_Raporlar"
+    return Path(root) / f"{name}_{datetime.now():%Y%m%d_%H%M}"
 
 
-def run(source: Path, out_dir: Path | None = None, target: str = DEFAULT_TARGET, released: Path | None = None,
+def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None) -> Path:
     """Analizi çalıştırır, raporları yazar ve ana rapor dosyasının yolunu döndürür."""
@@ -128,7 +134,6 @@ def main(argv: list[str] | None = None) -> int:
         src = build_demo_project(args.demo)
         print(f"Demo backup: {src}")
         args.source = src
-        args.released = args.released or (args.demo / "released_demo.csv")
         args.out_dir = args.out_dir or (args.demo / "rapor")
 
     src: Path = args.source
@@ -144,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     settings.save({k: v for k, v in (("author", args.author), ("department", args.department),
                                        ("template", str(args.template) if args.template else None)) if v})
     try:
-        out = run(src, args.out_dir, args.target, args.released, args.discover, log, args.template,
+        out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
                   args.author, args.department, args.customer)
     except ValueError as e:
         parser.error(str(e))

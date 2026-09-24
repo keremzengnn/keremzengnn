@@ -7,7 +7,7 @@ offline okuyup upgrade ön değerlendirmesi için gereken bilgileri çıkaran bi
 Kullanıcının **kendi bilgisayarında** çalışır (backup 5+ GB, hiçbir yere yüklenmez). Girdi: klasör veya .zip.
 ```
 python -m pcs7_analyzer                      # pencere (GUI)
-python -m pcs7_analyzer <klasör|zip> [-o çıktı_klasörü] [--target V10.0SP2] [--released csv] [--discover] [--open]
+python -m pcs7_analyzer <klasör|zip> [-o çıktı_klasörü] [--author ..] [--department ..] [--customer ..] [--discover] [--open]
 python -m pcs7_analyzer --demo <klasör>      # sahte proje üret + analiz
 ```
 Çıktı: rapor.docx (Word template'i ile) + rapor.html (Siemens renkleri) + rapor.md + rapor.json. Word template'i için aynı doküman modeli kullanılacak.
@@ -151,7 +151,16 @@ Müşteri backup'ı ve müşteriye özel beklenen değerler **repoya girmez (rep
 Veri dosyası yeniden üretimi: `python tools/extract_block_changes.py --apl <AdvLib-Readme.md> --basis <BasLib-Readme.md> -o pcs7_analyzer/data/block_changes_V10.0SP2.csv`
 
 ## Word raporu
-`word.py`: kullanıcının .dotx template'i doldurulur (template repoda YOK, kurum içi dosya). Kapak (TitleTopline/Title/TitleSubline),
+`word.py`: gömülü `data/report_template.dotx` (kullanıcı public olduğunu belirtti; thumbnail çıkarıldı) doldurulur. Kapak (TitleTopline/Title/TitleSubline),
 header "Ad | Departman | Tarih", footer "Restricted | © Siemens yıl". İçerik `build_document(full=False)`: ÖZET, PROJE ENVANTERİ,
 RİSKLER, Referanslar (müşteri raporu). HTML/MD `full=True`: + teklif öncesi açık konular + ekler (çalışma raporu).
 Ayarlar (ad, departman, template yolu) `%APPDATA%/pcs7_analyzer/settings.json`.
+
+## Hedef versiyon
+Program **PCS 7 V10.0 SP2'ye özel** (`cli.TARGET`). Hangi versiyondan gelinirse gelinsin hedef budur; mevcut versiyona göre
+değişen kısımlar: kademeli yol (`staged_path_from`), `version_note`, APL V8/V9 kontrolü. `--target` seçeneği yok.
+
+## Released Modules
+`data/released_modules_V10.0SP2.csv` gömülü (Released Modules V10.0 SP2 List Manual, A5E52547920-AD, Markdown'dan
+`released_extract.extract_rows_markdown`). FW: `V6.x` joker, FW'siz satır = her FW. Aksesuarlar (6ES7 960-1AA… H-Sync)
+listede yok -> `ACCESSORIES` notu, Düşük etki.

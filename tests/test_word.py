@@ -115,3 +115,13 @@ def test_bad_template(tmp_path):
     p.write_bytes(b"not a zip")
     with pytest.raises(TemplateError):
         render_docx(None, [], ReportMeta(), p, tmp_path / "o.docx")
+
+
+def test_embedded_template_is_found_and_valid(tmp_path):
+    from pcs7_analyzer.settings import find_template
+    from pcs7_analyzer.word import DocxBuilder
+    p = find_template()
+    assert p is not None and p.name == "report_template.dotx"
+    b = DocxBuilder(p)
+    assert b.sid("title topline") and b.sid("table head") and b.sid("heading 1") and b.sid("list paragraph")
+    assert "docProps/thumbnail.emf" not in b.files

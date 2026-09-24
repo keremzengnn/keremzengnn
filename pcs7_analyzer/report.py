@@ -238,8 +238,11 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
     hw = by_id.get("HW_RELEASED", [])
     if any(f.blocking for f in hw):
         rows.append(["AS hardware (CPU, CP, I/O)", STATUS_CHANGE, next(f.detail for f in hw if f.blocking)])
+    elif hw and all(f.severity is Severity.LOW for f in hw):
+        rows.append(["AS hardware (CPU, CP, I/O)", STATUS_OK,
+                     f"Tüm modüller {tgt} Released Modules listesinde [2]. " + " ".join(f.detail for f in hw)])
     elif hw:
-        rows.append(["AS hardware (CPU, CP, I/O)", STATUS_ATTN, hw[0].detail])
+        rows.append(["AS hardware (CPU, CP, I/O)", STATUS_ATTN, next(f.detail for f in hw if f.severity is not Severity.LOW)])
     elif "HW_RELEASED" in nc:
         rows.append(["AS hardware (CPU, CP, I/O)", STATUS_NOT_CHECKED, nc["HW_RELEASED"]])
     else:

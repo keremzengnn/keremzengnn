@@ -40,6 +40,7 @@ jobs:
           $p = Start-Process -FilePath dist\PCS7Analyzer.exe -ArgumentList "--demo","$env:RUNNER_TEMP\demo" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.html")) { throw "rapor yok" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.docx")) { throw "Word rapor yok (gömülü template?)" }
       - uses: actions/upload-artifact@v4
         with:
           name: PCS7Analyzer-windows
