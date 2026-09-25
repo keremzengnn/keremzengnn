@@ -169,3 +169,25 @@ listede yok -> `ACCESSORIES` notu, Düşük etki.
 Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
+
+## Ek prompt: WinCC / OS / alarm / arşiv / SFC / Logic Matrix / lisans
+**Düzeltmeler (uyulmalı):**
+- ENG (Eng alt projesindeki OS) SRV1'in master kopyası DEĞİL; ES üzerinde çalışan ayrı, tam OS (connection'lar `ASn_ES` / `ASn_SRV`).
+  ENG↔SRV1 farkı "iki OS projesi ayrışmış" (`OsDiff.kind == "os_pair"`), online değişiklik yorumu yok; "reconciliation şart" yok.
+  ES projesi ↔ OS PC'den alınmış kopya (`kind == "copy"`) ayrı karşılaştırmadır.
+- Client grupları dosya **isim setine** göre (boyut farkı ayrıca `size_diff`). `*_Ref*` referans (client sayılmaz), `*_StBy` standby.
+- Analizi yapan PC'nin yazılımı tesis versiyonu değildir; versiyon proje dosyalarından.
+- Star import yok (test ediliyor); parse hataları yutulmaz, uyarı olarak loglanır (`list_os_project_from_csv`).
+
+**Modüller:** `parsers/wincc_export.py` (Configuration Studio export: UTF-16 bölümler, DmConnection/DmTag/DmStructtag/ALG_Alarm,
+connection sınıflandırma named/tcpip/opc + ProgID->üretici, `compare_exports`: aynı AS'e giden farklı adlı named connection eş sayılır),
+`parsers/wincc.py` (`sfc_visualization` SfcRtBase/ChartLst, `archive_files`), `excel_report.py` (8 sayfa), `wincc_db.py`
+(DENEYSEL .mdf şema tarayıcı: kopya + attach + şema + detach; gerçek SQL Server ile test edilmedi).
+**Checks:** WINCC_DIFF, OPC_3RD_PARTY, OS_CONN_REDUNDANCY, SFC_VISU, ARCHIVES; LIB_LOGIC_MATRIX "kurulu, kullanılmıyor" ayrımı
+(LM_Matrix/Cause/Effect/Node instance + WinCC `(?<![A-Za-z])LM_(Matrix|Cause|Effect|Node)`; `@PG_LM_*` kanıt değil).
+**Girdi:** export'lar backup içinde otomatik bulunur (`discovery.wincc_exports`) veya `--exports <klasör>`; OS'e atama dosya adındaki
+OS proje adıyla. Manuel girişler `--manual <json>` (şablon `data/manuel_giris_ornek.json`) veya pencerede (PO, PC station listesi).
+**Çıktı:** rapor.xlsx 8 sayfa (Ozet, AS_Envanter, HW_Moduller, Custom_Blocklar, Instance_Sayilari, OS_WinCC, ENG_SRV1_Farklar,
+Acik_Konular_Kaynak); Word'e Tablo 4 WinCC yapısı; HTML'e upgrade hazırlık listesi + manuel girişler.
+**Müşteriye özel regression değerleri** (tag/alarm sayıları, chart sayıları…) repoya girmez: `tests/regression/expected_local.json`.
+**Açık:** .mdf doğrudan okuma (şema bilinmiyor), compile OS wizard ayarlarının (area→OS) proje dosyasındaki yeri, PO tahmini.

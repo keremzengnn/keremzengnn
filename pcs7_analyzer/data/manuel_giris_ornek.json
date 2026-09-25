@@ -1,0 +1,12 @@
+{
+  "_aciklama": "Backup'tan okunamayan bilgiler. SIMATIC Manager -> multiproject seç -> Options -> PCS 7 License Information. Boş bırakılan alan raporda 'eksik' yazar.",
+  "per_mp": {
+    "MP_ADI_1": {"as_rt_po": "", "os_po": "", "archive_tags": ""}
+  },
+  "as_rt_po": "",
+  "os_po": "",
+  "archive_tags": "",
+  "license_keys": "Tesisteki lisans key'leri (ALM listesi)",
+  "pc_stations": ["OSC01", "OSC02"],
+  "notes": ""
+}

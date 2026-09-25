@@ -40,12 +40,16 @@ def test_list_os_project_from_csv(tmp_path):
         r'"D:\Proj\OS\wincproj\OS_SRV1\GraCS","","3/5/2024 1:02:03 PM"',
         r'"D:\Proj\OS\wincproj\OTHER\GraCS\X.PDL","1","3/5/2024 1:02:03 PM"',
         r'"D:\Proj\OS\wincproj\OS_SRV1\ScriptAct\a.bac","5","05.03.2024 13:02:03"',
+        r'"D:\Proj\OS\wincproj\OS_SRV1\ScriptAct\b.bac","6","dün öğlen"',
     ]
     p.write_bytes(("\r\n".join(rows)).encode("utf-8-sig"))
-    out = list_os_project_from_csv(p, "OS_SRV1")
+    warns = []
+    out = list_os_project_from_csv(p, "OS_SRV1", warns)
     assert out["gracs/tank_1.pdl"][0] == 123 and out["gracs/tank_1.pdl"][1] > 0
     assert "os_srv1.mcp" not in out and "gracs/x.pdl" not in out
-    assert out["scriptact/a.bac"] == (5, 0.0)     # tanınmayan locale -> mtime 0 (çökmez)
+    assert out["scriptact/a.bac"][1] > 0            # tr-TR tarih formatı da okunur
+    assert out["scriptact/b.bac"] == (6, 0.0)       # okunamayan tarih: 0 + uyarı (sessiz değil)
+    assert warns and "1 satırda tarih okunamadı" in warns[0]
     assert out["gracs"] == (0, out["gracs/tank_1.pdl"][1])
 
 

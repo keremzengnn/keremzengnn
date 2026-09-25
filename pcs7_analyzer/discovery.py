@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .parsers.wincc_export import looks_like_export
 from .source import Entry, Source, open_source
 
 _HEX8 = re.compile(r"^[0-9A-Fa-f]{8}$")
@@ -92,6 +93,7 @@ class DiscoveryResult:
     symbol_exports: list[str] = field(default_factory=list)
     os_projects: list[OsProjectInfo] = field(default_factory=list)
     archives: list[str] = field(default_factory=list)
+    wincc_exports: list[str] = field(default_factory=list)     # Configuration Studio tag/alarm export'ları (.txt)
     warnings: list[str] = field(default_factory=list)
     n_files: int = 0
     total_bytes: int = 0
@@ -152,6 +154,9 @@ def discover_source(src: Source) -> DiscoveryResult:
             res.symbol_tables.append(e.rel)
         elif low.endswith(_ARCHIVE_EXT):
             res.archives.append(e.rel)
+        elif low.endswith(".txt") and e.size > 64 and "/wincproj/" not in f"/{e.rel.lower()}":
+            if looks_like_export(src.read_head(e.rel, 16384)):
+                res.wincc_exports.append(e.rel)
     project_dirs = [p.rsplit("/", 1)[0] if "/" in p else "" for p in res.projects]
 
     # Block klasörleri
@@ -239,6 +244,7 @@ def render_markdown(r: DiscoveryResult) -> str:
     lst("HW Config .s7h", r.s7h_files)
     lst("Symbol table (SYMLIST.DBF)", r.symbol_tables)
     lst("Symbol export (.asc/.sdf)", r.symbol_exports)
+    lst("WinCC Configuration Studio export (.txt)", r.wincc_exports)
     out.append(f"## WinCC OS projeleri ({len(r.os_projects)})")
     if r.os_projects:
         out += ["| Klasör | Proje | WinCC build | Dosya | Custom picture | @pdl | .bmo | .bac | .pas | En yeni |",

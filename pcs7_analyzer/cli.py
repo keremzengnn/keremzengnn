@@ -39,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--customer", help="Kapak üst satırı (varsayılan: multiproject adları)")
     p.add_argument("--inventory", action="store_true",
                    help="Envanter modu: backup'taki her şeyi listele (Excel + HTML), değerlendirme yapma")
+    p.add_argument("--exports", type=Path, action="append", default=[],
+                   help="WinCC Configuration Studio export klasörü/dosyası (backup dışındaysa); birden fazla verilebilir")
+    p.add_argument("--manual", type=Path, help="Manuel girişler JSON (PO, archive tag, PC station listesi…); "
+                                              "şablon: data/manuel_giris_ornek.json")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
     p.add_argument("--open", action="store_true", help="Bitince HTML raporu tarayıcıda aç")
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
@@ -71,7 +75,8 @@ def default_out_dir(source: Path, root: Path | None = None) -> Path:
 
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
-        department: str | None = None, customer: str | None = None, inventory: bool = False) -> Path:
+        department: str | None = None, customer: str | None = None, inventory: bool = False,
+        manual=None, exports: list[Path] | None = None) -> Path:
     """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür."""
     from . import settings
     from .analyze import analyze
@@ -103,12 +108,17 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     meta = ReportMeta(author=author if author is not None else st.get("author", ""),
                       department=department if department is not None else st.get("department", ""),
                       customer=customer or "")
-    an = analyze(source, target=target, released_csv=released, log=log)
+    from .analyze import ManualInputs
+    an = analyze(source, target=target, released_csv=released, log=log,
+                 manual=manual if manual is not None else ManualInputs(), extra_exports=exports)
     doc = build_document(an)
     html_p = out_dir / "rapor.html"
     html_p.write_text(render_html(an, doc, meta), encoding="utf-8")
     (out_dir / "rapor.md").write_text(render_markdown(an, doc, meta), encoding="utf-8")
     (out_dir / "rapor.json").write_text(render_json(an), encoding="utf-8")
+    from .excel_report import write_excel
+    write_excel(an, out_dir / "rapor.xlsx", meta)
+    log(f"Excel rapor: {out_dir / 'rapor.xlsx'}")
     tpl = settings.find_template(str(template) if template else None)
     if tpl:
         from .word import TemplateError, render_docx
@@ -159,8 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     settings.save({k: v for k, v in (("author", args.author), ("department", args.department),
                                        ("template", str(args.template) if args.template else None)) if v})
     try:
+        from .analyze import ManualInputs
+        manual = ManualInputs.load(args.manual) if args.manual else None
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
-                  args.author, args.department, args.customer, args.inventory)
+                  args.author, args.department, args.customer, args.inventory, manual, args.exports)
     except ValueError as e:
         parser.error(str(e))
     if args.open:

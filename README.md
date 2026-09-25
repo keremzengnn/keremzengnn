@@ -11,7 +11,7 @@ Girdi: backup **klasörü** veya doğrudan **.zip** (açmaya gerek yok; sadece g
 ## İki program
 | Program | Ne yapar | Çıktı |
 |---|---|---|
-| **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi (pencerede "Envanter" modu da seçilebilir) | rapor.docx, rapor.html (+ md, json) |
+| **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi (pencerede "Envanter" modu da seçilebilir) | rapor.docx, rapor.xlsx (8 sayfa), rapor.html (+ md, json) |
 | **PCS7Envanter.exe** | Sadece backup'taki her şeyi okur ve listeler, değerlendirme yapmaz | envanter.xlsx, envanter.html, yapi_tanisi.txt |
 
 Envanter, export almadan backup içinden okur: symbol table'lar (`YDBs/.../SYMLIST.DBF`, tüm semboller),
@@ -39,6 +39,23 @@ python -m pcs7_analyzer D:\Backup\Proje --discover        # sadece klasör yapı
 python -m pcs7_analyzer --demo C:\Temp\demo               # sahte demo projesiyle dene
 python -m pcs7_analyzer --list-checks                     # tanımlı kontroller
 ```
+
+## WinCC tag / alarm (Configuration Studio export)
+Tag ve alarm konfigürasyonu OS projesinin `.mdf` veritabanındadır. Configuration Studio'da **Tag Management** ve **Alarm Logging**
+export edilip (`.txt`, dosya adında OS projesinin adı geçsin: ör. `SRV1_Tags.txt`, `ENG_Alarms.txt`) backup klasörüne konur ya da
+pencerede "WinCC export klasörü" seçilir. Program connection / tag / struct tag / alarm sayılarını, ENG↔SRV1 farklarını,
+3rd party OPC server'ları ve H-system'e tek IP'li TCP/IP bağlantıları raporlar.
+
+Deneysel: export'suz okumak için `.mdf` şema tarayıcı (WinCC/SQL Server kurulu PC'de, admin):
+```
+python -m pcs7_analyzer.wincc_db D:\Backup\...\wincproj\SRV1\SRV1.mdf
+```
+Orijinal dosyaya dokunmaz (kopya attach edilir, sonra detach + silinir); sadece tablo/kolon adı ve satır sayısı yazar.
+Çıkan `*_sema.txt` paylaşılırsa export'suz okuma eklenebilir.
+
+## Manuel girişler
+PO / archive tag (SIMATIC Manager → Options → PCS 7 License Information), PC station listesi pencerede girilebilir ya da
+`--manual manuel.json` (şablon: `pcs7_analyzer/data/manuel_giris_ornek.json`). Girilmeyenler raporda "eksik" yazar.
 
 ## Backup'ta olması iyi olanlar
 - ES multiproject'in tamamı (ombstx, hOmSave7, YDBs, wincproj …)

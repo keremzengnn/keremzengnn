@@ -13,6 +13,7 @@ import webbrowser
 from pathlib import Path
 
 from . import __version__, settings
+from .analyze import ManualInputs
 from .cli import TARGET_LABEL, default_out_dir, run
 from .report import SIEMENS_TOKENS as T
 
@@ -31,7 +32,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
 
     root = tk.Tk()
     root.title(f"PCS 7 Upgrade Analyzer {__version__}")
-    root.geometry("900x700")
+    root.geometry("900x780")
     root.minsize(720, 560)
     root.configure(bg=T["light-sand"])
 
@@ -118,7 +119,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     if not fixed:
         mf = ttk.Frame(body)
         mf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 6))
-        ttk.Radiobutton(mf, text=f"Analiz: {TARGET_LABEL} upgrade değerlendirmesi (Word + HTML)", value="analysis",
+        ttk.Radiobutton(mf, text=f"Analiz: {TARGET_LABEL} upgrade değerlendirmesi (Word + Excel + HTML)", value="analysis",
                         variable=mode_var).pack(anchor="w")
         ttk.Radiobutton(mf, text="Envanter: backup'taki her şeyi listele, değerlendirme yapma (Excel + HTML)",
                         value="inventory", variable=mode_var).pack(anchor="w")
@@ -131,14 +132,45 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         info_rows.append((lab, ent))
         r += 1
 
+    # Opsiyonel (sadece analiz): backup dışındaki WinCC export'ları ve manuel girişler (boş = raporda "eksik")
+    exp_var, po_as, po_os, po_arc, pcs_var = (tk.StringVar() for _ in range(5))
+
+    def pick_exports():
+        p = filedialog.askdirectory(title="WinCC Configuration Studio export klasörü (Tag / Alarm .txt)")
+        if p:
+            exp_var.set(p)
+
+    lab = ttk.Label(body, text="WinCC export klasörü (ops.)")
+    lab.grid(row=r, column=0, sticky="w", pady=3)
+    ent = ttk.Entry(body, textvariable=exp_var)
+    ent.grid(row=r, column=1, sticky="ew", padx=8)
+    btn = ttk.Button(body, text="Seç…", command=pick_exports)
+    btn.grid(row=r, column=2, sticky="e")
+    info_rows.append((lab, ent, btn))
+    r += 1
+    lab = ttk.Label(body, text="PO (ops.): AS RT / OS / archive")
+    lab.grid(row=r, column=0, sticky="w", pady=3)
+    pof = ttk.Frame(body)
+    pof.grid(row=r, column=1, columnspan=2, sticky="w", padx=8)
+    for v in (po_as, po_os, po_arc):
+        ttk.Entry(pof, textvariable=v, width=12).pack(side="left", padx=(0, 6))
+    ttk.Label(pof, text="(PCS 7 License Information)", style="Hint.TLabel").pack(side="left")
+    info_rows.append((lab, pof))
+    r += 1
+    lab = ttk.Label(body, text="PC station listesi (ops.)")
+    lab.grid(row=r, column=0, sticky="w", pady=3)
+    ent = ttk.Entry(body, textvariable=pcs_var)
+    ent.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
+    info_rows.append((lab, ent))
+    r += 1
+
     def on_mode(*_):
-        for lab, ent in info_rows:
-            if mode_var.get() == "inventory":
-                lab.grid_remove()
-                ent.grid_remove()
-            else:
-                lab.grid()
-                ent.grid()
+        for widgets in info_rows:
+            for w in widgets:
+                if mode_var.get() == "inventory":
+                    w.grid_remove()
+                else:
+                    w.grid()
         inv = mode_var.get() == "inventory"
         word_btn.configure(text="Excel'i aç" if inv else "Word'ü aç")
         run_btn.configure(text="3  Envanteri çıkar" if inv else "3  Analizi başlat")
@@ -185,10 +217,11 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     def log(msg):
         q.put(("log", str(msg)))
 
-    def worker(src, out, disc, author, dept, cust, inv):
+    def worker(src, out, disc, author, dept, cust, inv, manual, exports):
         try:
             p = run(Path(src), Path(out) if out else None, discover_only=disc, log=log,
-                    author=author, department=dept, customer=cust or None, inventory=inv)
+                    author=author, department=dept, customer=cust or None, inventory=inv,
+                    manual=manual, exports=exports)
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))
@@ -234,7 +267,12 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         bar.start(12)
         threading.Thread(target=worker, daemon=True,
                          args=(src, out, disc_var.get(), author_var.get().strip(), dept_var.get().strip(),
-                               cust_var.get().strip(), mode_var.get() == "inventory")).start()
+                               cust_var.get().strip(), mode_var.get() == "inventory",
+                               ManualInputs(as_rt_po=po_as.get().strip(), os_po=po_os.get().strip(),
+                                            archive_tags=po_arc.get().strip(),
+                                            pc_stations=[x.strip() for x in pcs_var.get().replace(";", ",").split(",")
+                                                         if x.strip()]),
+                               [Path(exp_var.get().strip())] if exp_var.get().strip() else [])).start()
 
     run_btn.configure(command=start)
     open_btn.configure(command=lambda: result["path"] and webbrowser.open(result["path"].resolve().as_uri()))

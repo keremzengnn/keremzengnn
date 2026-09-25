@@ -48,7 +48,7 @@ def test_stations_and_hsync_not_found(an):
 
 def test_block_folders(an):
     as01 = next(b for b in an.block_folders if b.as_label == "AS01")
-    assert as01.counts == {"FB": 11, "FC": 3, "DB": 23, "OB": 3}
+    assert as01.counts == {"FB": 12, "FC": 3, "DB": 23, "OB": 3}
     assert as01.fb_instances[1827] == 5
     assert as01.fb_instances[1990] == 1           # >= 0x80 byte'lı FB numarası
     assert set(as01.mixed_versions["APL"]) == {"V8.0 (1)", "V8.1 (2)", "V8.2 (1)"}
@@ -69,22 +69,23 @@ def test_f_system_detected_from_symbols(an):
 
 
 def test_os_consistency(an):
-    (d,) = an.os_diffs
+    (d,) = [x for x in an.os_diffs if x.kind == "copy"]
     assert d.b_label == "PC_KOPYALARI/SRV1"
     assert "GraCS/Tank_2.pdl" in d.newer_b
     assert {"GraCS/Tank_New.pdl", "GraCS/@ServerButtons.pdl", "ScriptAct/Global_new.bac"} <= set(d.only_b)
     assert "GraCS/Tank_3.pdl" in d.newer_a
     assert not any("pas" in x.lower() for x in d.only_a + d.only_b)   # PC adı klasörü normalize
-    f = next(x for x in an.findings if x.check_id == "CONS_ES_SERVER")
+    f = next(x for x in an.findings if x.check_id == "CONS_ES_SERVER" and "OS PC kopyası" in x.detail)
     assert f.severity is Severity.HIGH
+    assert "reconciliation" not in f.detail and "master" not in f.detail
 
 
 def test_client_groups(an):
-    assert len(an.client_groups) == 2
+    assert len(an.client_groups) == 3            # OSC01+OSC02 (ref), OSC03, OS1000
     ref = next(g for g in an.client_groups if g.is_reference)
     assert sorted(m.rsplit("/", 1)[-1] for m in ref.members) == ["OSC01", "OSC02"]
-    other = next(g for g in an.client_groups if not g.is_reference)
-    assert other.only_in_group == ["GraCS/@PG_APL_Message_AOTC.pdl"]
+    osc03 = next(g for g in an.client_groups if g.members[0].endswith("OSC03"))
+    assert osc03.only_in_group == ["GraCS/@PG_APL_Message_AOTC.pdl"]
 
 
 def test_os_details(an):
@@ -106,13 +107,14 @@ def test_report_structure(an):
     md = render_markdown(an)
     order = ["**ÖZET**", "## Sonuç: Proje upgrade edilebilir, zorluklar var", "Tablo 1: Genel değerlendirme",
              "Planlı duruş", "**PROJE ENVANTERİ**", "## Proje bilgileri", "Tablo 2: AS envanteri", "Tablo 3: OS yapısı",
-             "Tablo 4: Yazılım içeriği", "**RİSKLER**", "## Zorluklar", "Tablo 5: Zorluklar ve etkileri",
+             "Tablo 4: WinCC yapısı", "Tablo 5: Yazılım içeriği", "**RİSKLER**", "## Zorluklar",
+             "Tablo 6: Zorluklar ve etkileri", "## Upgrade hazırlık listesi", "## Manuel girişler",
              "## Teklif öncesi netleşmesi gerekenler", "## Referans dokümanlar"]
     pos = [md.index(h) for h in order]
     assert pos == sorted(pos)
     assert "Upgrade yaklaşımı" not in md
     assert "| AS02 F-System | Yüksek |" in md
-    assert "| AS01 opsiyonları | Orta–Yüksek |" in md
+    assert "| AS01 opsiyonları | Düşük–Orta |" in md       # Logic Matrix kurulu ama kullanılmıyor -> Düşük
     assert "| AS02 F-System | Detaylı İnceleme |" in md
     html = render_html(an)
     assert "#000028" in html and "#009999" in html

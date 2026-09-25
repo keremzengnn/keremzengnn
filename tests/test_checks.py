@@ -10,5 +10,5 @@ def test_check_ids_unique_and_complete():
 
 
 def test_consistency_is_separate_check():
-    assert get_check("CONS_ES_SERVER").severity is Severity.HIGH
+    assert get_check("CONS_ES_SERVER").severity is Severity.MEDIUM   # OS PC kopyası farkında Yüksek'e çıkar
     assert get_check("HW_RELEASED")

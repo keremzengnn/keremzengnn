@@ -21,8 +21,12 @@ from .parsers import (
     compare_os, hw_inventory, library_summary, parse_cfg, parse_subblk,
     parse_symbol_asc, parse_symlist_dbf, scan_s7h,
 )
-from .parsers.wincc import list_os_entries, picture_kind
-from .released_modules import ReleasedModules
+from .parsers.wincc import archive_files, list_os_entries, picture_kind, sfc_visualization
+from .parsers.wincc_export import (
+    alarms, assign_os, by_os, compare_exports, connections, lm_usage, looks_like_export, parse_export, sfc_struct_tags,
+    tag_totals,
+)
+from .released_modules import ReleasedModules, fw_matches
 from .source import Source, open_source
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -120,6 +124,10 @@ class HwMatch:
     stations: list[str]
     status: str
     note: str = ""
+    listed_fw: str = ""          # listedeki FW değerleri (ör. "V6.x")
+    fw_status: str = ""          # uyumlu / uyumsuz / belirsiz (…)
+    discontinued: str = ""       # listedeki discontinuation tarihi (hâlâ destekli olabilir)
+    kind: str = "modül"          # modül / GSD / 3rd party
 
 
 @dataclass
@@ -155,6 +163,7 @@ class BlockFolderResult:
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
     block_names: list[str] = field(default_factory=list)   # header'daki FB/FC isimleri
     fb_by_name: dict = field(default_factory=dict)          # {isim: FB no}
+    fb_library: dict = field(default_factory=dict)          # {FB no: (isim, library, author)}
     f_blocks_from_symbols: list[str] = field(default_factory=list)
     symbol_source: str = ""
     symbol_only: list[str] = field(default_factory=list)   # symbol'de var, block klasöründe yok
@@ -173,6 +182,10 @@ class OsProject:
     scripts: list[str] = field(default_factory=list)
     opc: list[str] = field(default_factory=list)
     cas_packages: list[str] = field(default_factory=list)
+    role_note: str = ""
+    apc_typicals: bool = False                         # @PCS7TypicalsAPC.pdl (iç prosedürde silinir)
+    sfc: dict = field(default_factory=dict)            # parsers.wincc.sfc_visualization
+    archives: dict = field(default_factory=dict)       # parsers.wincc.archive_files
 
 
 @dataclass
@@ -186,6 +199,7 @@ class OsDiff:
     newer_a: list[str]
     newer_b: list[str]
     n_size_diff: int
+    kind: str = "copy"          # copy: ES projesi <-> OS PC kopyası | os_pair: iki ayrı OS projesi (ör. ENG <-> SRV1)
 
     def relevant(self, lst: list[str]) -> list[str]:
         return [r for r in lst if picture_kind(r) != "other"
@@ -199,6 +213,51 @@ class ClientGroup:
     only_in_group: list[str] = field(default_factory=list)      # referansa göre
     missing_in_group: list[str] = field(default_factory=list)
     is_reference: bool = False
+    size_diff: int = 0          # referansla aynı isimli ama boyutu farklı dosya sayısı
+
+
+@dataclass
+class WinccOs:
+    """Bir OS projesinin Configuration Studio export özeti."""
+    name: str
+    files: list[str] = field(default_factory=list)
+    dm_tag: int = 0
+    dm_structtag: int = 0
+    connections: list = field(default_factory=list)          # parsers.wincc_export.Connection
+    alarms: int = 0
+    alarm_classes: Counter = field(default_factory=Counter)
+    alarm_areas: Counter = field(default_factory=Counter)
+    sfc_struct_tags: int = 0
+    lm_refs: int = 0
+
+    @property
+    def total_tags(self) -> int:
+        return self.dm_tag + self.dm_structtag
+
+
+@dataclass
+class ManualInputs:
+    """Backup'tan okunamayan, kullanıcının girdiği bilgiler (ek prompt bölüm 11). Boş = eksik."""
+    as_rt_po: str = ""
+    os_po: str = ""
+    archive_tags: str = ""
+    license_keys: str = ""
+    pc_stations: list[str] = field(default_factory=list)
+    notes: str = ""
+    per_mp: dict = field(default_factory=dict)      # {MP: {"as_rt_po": .., "os_po": .., "archive_tags": ..}}
+
+    @classmethod
+    def load(cls, path: Path | None) -> "ManualInputs":
+        if not path:
+            return cls()
+        import json
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        st = d.get("pc_stations", [])
+        if isinstance(st, str):
+            st = [x.strip() for x in re.split(r"[,;\n]", st) if x.strip()]
+        return cls(str(d.get("as_rt_po", "")), str(d.get("os_po", "")), str(d.get("archive_tags", "")),
+                   str(d.get("license_keys", "")), st, str(d.get("notes", "")),
+                   {k: {kk: str(vv) for kk, vv in v.items()} for k, v in (d.get("per_mp") or {}).items()})
 
 
 @dataclass
@@ -232,6 +291,12 @@ class Analysis:
     open_items: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stale_dirs: list[str] = field(default_factory=list)   # analiz dışı bırakılan eski kopyalar
+    wincc: dict = field(default_factory=dict)             # {OS adı: WinccOs}
+    export_diffs: list = field(default_factory=list)      # parsers.wincc_export.ExportDiff
+    lm_status: dict = field(default_factory=dict)         # {AS: {"blocks": n, "instances": n, "wincc": n, "status": str}}
+    manual: ManualInputs = field(default_factory=ManualInputs)
+    missing_os_projects: list[str] = field(default_factory=list)   # PC station'ı olup wincproj'u olmayan
+    extra_os_projects: list[str] = field(default_factory=list)     # wincproj'u olup PC station listesinde olmayan
 
     def mp_of(self, rel_dir: str) -> str:
         """Bir proje klasörünün multiproject adı (s7f klasörü ata ise; tek MP varsa o)."""
@@ -275,17 +340,19 @@ def _name_match(a: str, b: str) -> bool:
 
 
 def os_role(name: str) -> str:
+    """Rol isimden: *_StBy standby, SRV/SERVER server, *_Ref* referans (client sayılmaz), ENG/ES engineering OS,
+    OSC/CLIENT/OS(n) client; tanınmayan -> '?' (raporda 'client, teyit')."""
     n = name.upper()
     if re.search(r"STBY|STANDBY", n):
         return "standby"
+    if re.search(r"_REF|REF\(|\bREF\b|^REF", n):
+        return "reference"
     if re.search(r"SRV|SERVER", n):
         return "server"
-    if re.search(r"REF", n):
-        return "reference"
+    if re.search(r"^ENG|\bENG\b|\bES\b|ENGINEERING", n):
+        return "es"
     if re.search(r"OSC|CLIENT|CLT|^OS\s*\(?\d|^OS\d", n):
         return "client"
-    if re.search(r"\bES\b|ENG", n):
-        return "es"
     return "?"
 
 
@@ -381,8 +448,31 @@ def _analyze_released(an: Analysis, released_csv: Path | None) -> None:
     rm = ReleasedModules.load(Path(csv_path))
     for (order, fw), (n, sts) in sorted(agg.items()):
         r = rm.match(order, fw)
-        note = r.note or "; ".join(sorted({f"{e.fw or 'FW belirtilmemiş'}: {e.status}" for e in r.entries}))
-        an.hw_matches.append(HwMatch(order, fw, n, sorted(sts), r.status.value, note))
+        note = r.note or "; ".join(sorted({e.note.split(" | ")[0] for e in r.entries if e.note}))
+        listed = sorted({e.fw for e in r.entries if e.fw})
+        if not r.entries:
+            fws = "listede yok"
+        elif not fw:
+            fws = "belirsiz (projede FW yok)"
+        elif not listed:
+            fws = "belirsiz (listede FW belirtilmemiş)"
+        elif any(fw_matches(fw, x) for x in listed):
+            fws = "uyumlu"
+        else:
+            fws = "uyumsuz"
+        disc = sorted({e.status.replace("discontinued ", "") for e in r.entries if e.status.startswith("discontinued")})
+        an.hw_matches.append(HwMatch(order, fw, n, sorted(sts), r.status.value, note, ", ".join(listed), fws,
+                                     ", ".join(disc)))
+    # GSD / 3rd party cihazlar: Released Modules kapsamı dışında
+    gsd: dict[str, list] = {}
+    for st in an.stations:
+        for k, cnt in st.gsd.items():
+            a = gsd.setdefault(k, [0, set()])
+            a[0] += cnt
+            a[1].add(st.name)
+    for k, (cnt, sts) in sorted(gsd.items()):
+        an.hw_matches.append(HwMatch(k, "", cnt, sorted(sts), "GSD / 3rd party (liste kapsamı dışı)",
+                                     "GSD dosyası V10 ES'e yeniden yüklenmeli", "", "-", "", kind="GSD / 3rd party"))
 
 
 def _symbol_tables(src: Source, d: DiscoveryResult, an: Analysis) -> list[tuple[str, dict]]:
@@ -415,6 +505,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.fb_numbers = sorted(b.number for b in bf.blocks if b.kind == "FB")
     res.block_names = sorted({b.name for b in bf.blocks if b.name})
     res.fb_by_name = {b.name: b.number for b in bf.blocks if b.kind == "FB" and b.name}
+    res.fb_library = {b.number: (b.name, b.library, b.author) for b in bf.blocks if b.kind == "FB"}
     res.memo_available = bf.memo_available
     res.unresolved_instances = bf.unresolved_instances
     summary = library_summary(bf)
@@ -525,10 +616,16 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
             if e.rel.startswith(info.path + "/"):
                 display.setdefault(e.rel[len(info.path) + 1:].lower(), e.rel[len(info.path) + 1:])
         op = OsProject(info=info, role=os_role(info.name), in_es=info.project != "-")
+        if op.role == "?":
+            op.role, op.role_note = "client", "isimden tespit edilemedi"
+        op.sfc = sfc_visualization(src.entries, info.path, src.read_bytes)
+        op.archives = archive_files(src.entries, info.path, info.name)
         for rel in lst:
             k = picture_kind(rel)
             if k != "other":
                 op.pictures[k] += 1
+            if rel.endswith("@pcs7typicalsapc.pdl"):
+                op.apc_typicals = True
             if k == "custom_typicals":
                 op.custom_typicals.append(display.get(rel, rel).rsplit("/", 1)[-1])
             elif k == "f_faceplate":
@@ -558,22 +655,130 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
                                       disp(r["only_a"]), disp(r["only_b"]), disp(r["newer_in_a"]),
                                       disp(r["newer_in_b"]), len(r["size_diff"])))
 
-    # Client gruplama: içerik imzası (path + boyut)
-    clients = [o for o in an.os_projects if o.role == "client"]
+    # İki ayrı OS projesi: engineering OS (ENG) <-> OS server (SRV1). Master/kopya ilişkisi YOK (connection'lar
+    # farklı: AS2_ES / AS2_SRV); farklar "iki proje ayrışmış" olarak raporlanır, online değişiklik yorumu yapılmaz.
+    es_ops = [o for o in an.os_projects if o.in_es and o.role == "es"]
+    srv_ops = [o for o in an.os_projects if o.in_es and o.role == "server"]
+    for e in es_ops:
+        for s in srv_ops:
+            if an.mp_of(e.info.project) != an.mp_of(s.info.project):
+                continue
+            r = compare_os(listings[e.info.path], listings[s.info.path])
+            an.os_diffs.append(OsDiff(e.info.path, s.info.path, e.info.name, s.info.name,
+                                      disp(r["only_a"]), disp(r["only_b"]), disp(r["newer_in_a"]),
+                                      disp(r["newer_in_b"]), len(r["size_diff"]), kind="os_pair"))
+
+    # Client gruplama: içerik dosyalarının İSİM setine göre (boyut farkları ayrıca sayılır). Referans = en kalabalık grup.
+    clients = [o for o in an.os_projects if o.role == "client" and o.in_es]
     groups: dict[frozenset, list[OsProject]] = defaultdict(list)
     for o in clients:
-        sig = frozenset((r, s) for r, (s, _) in listings[o.info.path].items() if not r.startswith("<pc>/"))
+        sig = frozenset(r for r in listings[o.info.path] if not r.startswith("<pc>/"))
         groups[sig].append(o)
     if groups:
         ref_sig = max(groups, key=lambda s: (len(groups[s]), len(s)))
-        ref_paths = {r for r, _ in ref_sig}
+        ref_sizes = listings[groups[ref_sig][0].info.path]
         for sig, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-            paths = {r for r, _ in sig}
+            lst = listings[members[0].info.path]
             an.client_groups.append(ClientGroup(
                 members=[m.info.path for m in members], n_files=len(sig),
-                only_in_group=disp(sorted(paths - ref_paths)), missing_in_group=disp(sorted(ref_paths - paths)),
+                only_in_group=disp(sorted(sig - ref_sig)), missing_in_group=disp(sorted(ref_sig - sig)),
                 is_reference=sig == ref_sig,
+                size_diff=sum(1 for r in sig & ref_sig if lst[r][0] != ref_sizes[r][0]),
             ))
+        ref_custom = min((o.pictures.get("custom", 0) for o in groups[ref_sig]), default=0)
+        for o in clients:
+            if o.pictures.get("custom", 0) > ref_custom:
+                o.role_note = (o.role_note + "; " if o.role_note else "") + \
+                    f"diğer client'lardan farklı olarak {o.pictures['custom']} custom picture içeriyor: rolü teyit"
+
+    # PC station listesi (manuel giriş) <-> wincproj
+    if an.manual.pc_stations:
+        names = {o.info.name.upper() for o in an.os_projects if o.in_es and o.role != "reference"}
+        st = {s.upper() for s in an.manual.pc_stations}
+        an.missing_os_projects = sorted(s for s in an.manual.pc_stations if s.upper() not in names)
+        an.extra_os_projects = sorted(o.info.name for o in an.os_projects
+                                      if o.in_es and o.role in ("client", "server") and o.info.name.upper() not in st)
+
+
+def _analyze_wincc_exports(src: Source, d: DiscoveryResult, an: Analysis, extra: list[Path], log) -> None:
+    """Configuration Studio tag/alarm export'ları: backup içindekiler + ayrıca verilen klasör/dosyalar."""
+    os_names = sorted({o.info.name for o in an.os_projects})
+    items: list[tuple[str, bytes]] = []
+    for rel in d.wincc_exports:
+        try:
+            items.append((rel, src.materialize(rel).read_bytes()))
+        except OSError as e:
+            an.warnings.append(f"{rel}: okunamadı ({e})")
+    for p in extra:
+        p = Path(p)
+        files = sorted(p.rglob("*.txt")) if p.is_dir() else [p]
+        for f in files:
+            try:
+                data = f.read_bytes()
+            except OSError as e:
+                an.warnings.append(f"{f}: okunamadı ({e})")
+                continue
+            if looks_like_export(data[:16384]):
+                items.append((str(f), data))
+    exports = []
+    for rel, data in items:
+        e = parse_export(data, rel, assign_os(Path(rel).name, os_names))
+        an.warnings += e.warnings
+        if e.sections:
+            exports.append(e)
+            log(f"WinCC export: {rel} -> {e.os_name} ({e.kind})")
+    for os_name, exps in by_os(exports).items():
+        w = WinccOs(os_name, [e.path for e in exps])
+        conns = {}
+        for e in exps:
+            tt = tag_totals(e)
+            w.dm_tag += tt["DmTag"]
+            w.dm_structtag += tt["DmStructtag"]
+            for k, c in connections(e).items():
+                if k in conns:
+                    conns[k].tags += c.tags
+                    conns[k].struct_tags += c.struct_tags
+                    if not conns[k].parameter:
+                        conns[k] = c
+                else:
+                    conns[k] = c
+            al = alarms(e)
+            w.alarms += len(al)
+            w.alarm_classes.update(a.msg_class or "(boş)" for a in al.values())
+            w.alarm_areas.update(a.area or "(area yok)" for a in al.values())
+            w.sfc_struct_tags += sfc_struct_tags(e)
+            w.lm_refs += lm_usage(e)
+        w.connections = sorted(conns.values(), key=lambda c: c.name)
+        an.wincc[os_name] = w
+    grouped = by_os(exports)
+    roles = {o.info.name: o.role for o in an.os_projects}
+    es_names = [n for n in grouped if roles.get(n) == "es"]
+    srv_names = [n for n in grouped if roles.get(n) == "server"]
+    for a in es_names:
+        for b in srv_names:
+            an.export_diffs.append(compare_exports(a, grouped[a], b, grouped[b]))
+
+
+LM_BLOCKS = ("LM_MATRIX", "LM_CAUSE", "LM_EFFECT", "LM_NODE")
+
+
+def _lm_status(an: Analysis) -> None:
+    """Logic Matrix: kurulu (block var) / kullanılıyor (instance veya WinCC'de LM tag/mesajı). Faceplate kanıt değil."""
+    wincc_refs = sum(w.lm_refs for w in an.wincc.values())
+    for b in an.block_folders:
+        lm = {n: nr for n, nr in b.fb_by_name.items() if n.upper() in LM_BLOCKS}
+        has_lib = "Logic Matrix" in b.features
+        if not lm and not has_lib:
+            continue
+        inst = sum(b.fb_instances.get(nr, 0) for nr in lm.values())
+        if inst or wincc_refs:
+            status = "kullanılıyor"
+        elif an.wincc:
+            status = "kurulu, kullanılmıyor"
+        else:
+            status = "kurulu, AS'te instance yok (WinCC export'u olmadan kesinleşmez)"
+        an.lm_status[b.as_label] = {"blocks": len(lm) or len(b.libraries.get("Logic Matrix", {})),
+                                    "instances": inst, "wincc": wincc_refs, "status": status}
 
 
 def _copy_label(path: str) -> str:
@@ -680,12 +885,13 @@ def _versions(an: Analysis) -> None:
 # Ana giriş
 # ---------------------------------------------------------------------------
 
-def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | None = None, log=None) -> Analysis:
+def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | None = None, log=None,
+                   manual: ManualInputs | None = None, extra_exports: list[Path] | None = None) -> Analysis:
     log = log or (lambda msg: None)
     log("Keşif...")
     d = discover_source(src)
     an = Analysis(source=src.label, target=target, tool_version=__version__,
-                  created=datetime.now().isoformat(timespec="minutes"), discovery=d)
+                  created=datetime.now().isoformat(timespec="minutes"), discovery=d, manual=manual or ManualInputs())
     an.warnings += d.warnings
     _analyze_backups(src, d, an)
     d = _without_stale_copies(d, an)
@@ -712,6 +918,9 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
 
     log("OS projeleri...")
     _analyze_os(src, d, an)
+    log("WinCC export'ları...")
+    _analyze_wincc_exports(src, d, an, list(extra_exports or []), log)
+    _lm_status(an)
     _versions(an)
 
     log("Kontroller...")
@@ -726,9 +935,13 @@ def _open_items(an: Analysis) -> None:
     heur = [f"{b.as_label} ← {b.info.path} ({b.mapping})" for b in an.block_folders if b.counts]
     if heur:
         items.append("Block klasörü ↔ AS eşlemesi heuristic (teyit edilmeli): " + "; ".join(heur))
-    unk = [o.info.name for o in an.os_projects if o.role == "?"]
+    unk = [f"{o.info.name} ({o.role_note})" for o in an.os_projects if o.role_note]
     if unk:
-        items.append("Rolü tespit edilemeyen OS projeleri: " + ", ".join(sorted(set(unk))))
+        items.append("Rolü teyit edilmesi gereken OS projeleri: " + "; ".join(sorted(set(unk))))
+    if an.missing_os_projects:
+        items.append("PC station listesinde olup wincproj klasörü bulunmayan OS: " + ", ".join(an.missing_os_projects))
+    if an.extra_os_projects:
+        items.append("wincproj'u olup PC station listesinde olmayan OS projesi: " + ", ".join(an.extra_os_projects))
     nomap = [s.name for s in an.stations if s.project == "-"]
     if nomap:
         items.append("Projeye eşlenemeyen HW Config export'ları: " + ", ".join(nomap))
@@ -738,6 +951,7 @@ def _open_items(an: Analysis) -> None:
         items.append("Bazı block klasörlerinde SUBBLK.DBT yok: instance sayıları eksik")
 
 
-def analyze(path: Path, target: str = "V10.0SP2", released_csv: Path | None = None, log=None) -> Analysis:
+def analyze(path: Path, target: str = "V10.0SP2", released_csv: Path | None = None, log=None,
+            manual: ManualInputs | None = None, extra_exports: list[Path] | None = None) -> Analysis:
     with open_source(path, log) as src:
-        return analyze_source(src, target, released_csv, log)
+        return analyze_source(src, target, released_csv, log, manual, extra_exports)

@@ -91,12 +91,12 @@ def test_body_structure(docx):
     assert kids[-1].startswith("<w:sectPr") and 'r:id="rId11"' in kids[-1]
     assert sum(1 for k in kids if k.startswith("<w:sectPr")) == 1
     order = ["ÖZET", "Sonuç: Proje upgrade edilebilir", "Tablo 1: Genel değerlendirme", "PROJE ENVANTERİ",
-             "Tablo 2: AS envanteri", "Tablo 3: OS yapısı", "Tablo 4: Yazılım içeriği", "RİSKLER", "Zorluklar",
-             "Tablo 5: Zorluklar ve etkileri", "Referans dokümanlar"]
+             "Tablo 2: AS envanteri", "Tablo 3: OS yapısı", "Tablo 4: WinCC yapısı", "Tablo 5: Yazılım içeriği",
+             "RİSKLER", "Zorluklar", "Tablo 6: Zorluklar ve etkileri", "Referans dokümanlar"]
     pos = [d.index(x) for x in order]
     assert pos == sorted(pos)
-    assert "Teklif öncesi" not in d and "Ek A" not in d          # Word = müşteri raporu (PDF yapısı)
-    assert d.count("<w:tbl>") == 6
+    assert "Teklif öncesi" not in d and "Ek A" not in d and "hazırlık listesi" not in d   # Word = müşteri raporu
+    assert d.count("<w:tbl>") == 7
     assert 'w:val="Topline"' in d and 'w:val="berschrift1"' in d and 'w:val="TableHead"' in d
 
 

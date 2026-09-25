@@ -112,15 +112,18 @@ GROUPS = {
     "BLK_CUSTOM": ("Custom block'lar", 50), "COMM_AS_AS": ("Custom block'lar", 50),
     "BLK_SYMBOL_MISMATCH": ("Custom block'lar", 50), "BLK_UNUSED": ("Custom block'lar", 50),
     "OS_CUSTOM_TYPICALS": ("OS migration", 60), "OS_OPC": ("OS migration", 60), "OS_MIGRATION_VOLUME": ("OS migration", 60),
-    "CONS_ES_SERVER": ("ES / Server / Client tutarlılığı", 70), "CONS_CLIENTS": ("ES / Server / Client tutarlılığı", 70),
-    "CONS_BACKUP_DATES": ("ES / Server / Client tutarlılığı", 70),
+    "CONS_ES_SERVER": ("ENG / SRV / Client tutarlılığı", 70), "CONS_CLIENTS": ("ENG / SRV / Client tutarlılığı", 70),
+    "CONS_BACKUP_DATES": ("ENG / SRV / Client tutarlılığı", 70), "WINCC_DIFF": ("ENG / SRV / Client tutarlılığı", 70),
+    "OPC_3RD_PARTY": ("3rd party OPC", 72), "OS_CONN_REDUNDANCY": ("OS bağlantısı (redundans)", 74),
+    "SFC_VISU": ("SFC görselleştirme", 76), "ARCHIVES": ("Arşivler", 86),
     "LICENSES": ("Lisanslar", 80),
     "CAS_PH": ("Arşiv (CAS / PH)", 85),
     "HW_GSD_3RD_PARTY": ("3rd party GSD", 90),
     "LIB_MASTERDATA_DELETE": ("Diğer notlar", 99), "OS_PO_INCREASE": ("Diğer notlar", 99),
     "AS_STOP_NO_TCIR": ("Diğer notlar", 99),
 }
-_CONS_PREFIX = {"CONS_ES_SERVER": "ES / Server", "CONS_CLIENTS": "Client'lar", "CONS_BACKUP_DATES": "Backup'lar"}
+_CONS_PREFIX = {"CONS_ES_SERVER": "OS projeleri", "CONS_CLIENTS": "Client'lar", "CONS_BACKUP_DATES": "Backup'lar",
+                "WINCC_DIFF": "Tag / alarm"}
 
 SLAVE_FAMILY = [
     (r"^6ES7 ?152-", "ET 200iSP"), (r"^6ES7 ?153-", "ET 200M"), (r"^6ES7 ?151-", "ET 200S"),
@@ -262,8 +265,19 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
                 continue
             asl = label[: -len(" opsiyonları")]
             b = next((x for x in an.block_folders if x.as_label == asl), None)
-            feats = [x for x in (b.features if b else []) if x not in ("APL", "Basis", "ELEMENTA", "F-System")]
-            parts = (["En büyük AS."] if "AS_SIZE" in ids else []) + ([", ".join(feats) + "."] if feats else [])
+            feats = [x for x in (b.features if b else []) if x not in ("APL", "Basis", "ELEMENTA", "F-System",
+                                                                         "Logic Matrix", "SFC")]
+            parts = (["En büyük AS."] if "AS_SIZE" in ids else [])
+            if b and "SFC" in b.features:
+                visu = [(o.info.name, o.sfc.get("charts", 0)) for o in an.os_projects
+                        if o.in_es and o.sfc.get("filled")]
+                parts.append("SFC: " + (", ".join(f"{n} chart {o}'de görselleştiriliyor" for o, n in visu)
+                                        if visu else f"{b.fb_instances.get(300, 0)} instance") + ".")
+            lm = an.lm_status.get(asl)
+            if lm:
+                parts.append(f"Logic Matrix {lm['status'].split(' (')[0]}.")
+            if feats:
+                parts.append(", ".join(feats) + ".")
             parts.append("CFC'ler kontrol edilmeli.")
             rows.append([asl, STATUS_ATTN, " ".join(parts)])
     if "LIB_STD_LIB" in by_id:
@@ -276,15 +290,28 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
         n_all = len([b for b in an.block_folders if b.counts])
         who = "Tüm AS'lerde" if n == n_all and n > 1 else f"{n} AS'te"
         rows.append(["Custom block'lar", STATUS_ATTN, f"{who} integratör block'ları var. Kullanıldıkları CFC'ler kontrol edilmeli."])
-    if "CONS_ES_SERVER" in by_id:
-        sh = by_id["CONS_ES_SERVER"][0].detail.split(";")[0]
-        rows.append(["ES / Server tutarlılığı", STATUS_ATTN, f"ES ile OS server ayrışmış ({sh})."])
-    elif "CONS_ES_SERVER" in nc:
-        rows.append(["ES / Server tutarlılığı", STATUS_NOT_CHECKED, nc["CONS_ES_SERVER"]])
-    else:
-        rows.append(["ES / Server tutarlılığı", STATUS_OK, "ES ve OS server projeleri aynı."])
+    pairs = [d for d in an.os_diffs if d.kind == "os_pair"]
+    if pairs or an.export_diffs:
+        names = sorted({f"{d.a_label}/{d.b_label}" for d in pairs} | {f"{d.a}/{d.b}" for d in an.export_diffs})
+        extra = []
+        for d in an.export_diffs:
+            extra.append(f"tag farkı {d.n_tags_only_a:,}/{d.n_tags_only_b:,}, alarm farkı {d.n_alarms_only_a:,}/{d.n_alarms_only_b:,}")
+        rows.append([f"{', '.join(names)} OS projeleri", STATUS_ATTN,
+                     "İki ayrı OS projesi (ENG, ES üzerinde çalışan tam OS; master/kopya değil) ayrışmış"
+                     + (f" ({'; '.join(extra)})" if extra else "") + ". İkisinin de taşınıp taşınmayacağı teyit edilmeli."])
+    copies = [f for f in by_id.get("CONS_ES_SERVER", []) if "OS PC kopyası" in f.detail]
+    if copies:
+        rows.append(["ES ↔ OS PC kopyası", STATUS_ATTN, copies[0].detail.split(";")[0] + "."])
+    if not pairs and not copies and "CONS_ES_SERVER" in nc:
+        rows.append(["ENG / SRV tutarlılığı", STATUS_NOT_CHECKED, nc["CONS_ES_SERVER"]])
     if "CONS_CLIENTS" in by_id:
-        rows.append(["Client tutarlılığı", STATUS_ATTN, "Client'lar farklı içerik gruplarına ayrılıyor."])
+        rows.append(["Client tutarlılığı", STATUS_ATTN,
+                     f"Client'lar isim setine göre {len(an.client_groups)} gruba ayrılıyor; farklı gruplar teyit edilmeli."])
+    if "OPC_3RD_PARTY" in by_id:
+        vend = sorted({cn.opc_vendor or cn.name for w in an.wincc.values() for cn in w.connections if cn.kind == "opc"})
+        rows.append(["3rd party OPC", STATUS_ATTN, f"{_fmt_list(vend, 4)}; hedef versiyonda uyum ve kapsam teyit edilmeli."])
+    if "OS_CONN_REDUNDANCY" in by_id:
+        rows.append(["OS bağlantısı", STATUS_ATTN, by_id["OS_CONN_REDUNDANCY"][0].detail.split(". ")[0] + "."])
     if "CAS_PH" in by_id:
         rows.append(["Arşiv (CAS / PH)", STATUS_ATTN, "CAS desteklenmiyor → Process Historian (teyit edilmeli)."])
     return rows
@@ -312,6 +339,15 @@ def _version_bullets(an: Analysis) -> list[str]:
     if an.backups:
         items.append("**Farklı tarihli backup'lar:** " + "; ".join(
             f"{b.name}: referans {b.newest_path}" for b in an.backups) + ".")
+    pdm = [s.pdm_used for s in an.stations if s.pdm_used is not None]
+    if pdm:
+        items.append("**PDM:** " + ("kullanılmıyor (tüm HW export'larında PDM_PARAM 0)." if not any(pdm) else
+                                    "PDM ile parametrelenmiş cihaz var: " + ", ".join(s.name for s in an.stations if s.pdm_used) + "."))
+    m = an.manual
+    lic = [f"AS RT PO {m.as_rt_po}" if m.as_rt_po else "AS RT PO: eksik", f"OS PO {m.os_po}" if m.os_po else "OS PO: eksik",
+           f"archive tag {m.archive_tags}" if m.archive_tags else "archive tag: eksik"]
+    items.append("**Lisans ihtiyacı (PCS 7 License Information, manuel):** " + ", ".join(lic)
+                 + ". V10 update'inde OS RT PO sayısı artabilir [1, Bölüm 4.3]; mevcut ALM key'leri ile karşılaştırılmalı.")
     if an.stations:
         h = [s for s in an.stations if any("-5H" in o.upper() or "5H" in n.upper() for o, _, n in s.cpus)]
         n_cpu = sum(len(s.cpus) for s in an.stations)
@@ -362,29 +398,113 @@ def _natkey(s: str):
 def _os_rows(an: Analysis) -> list[list[str]]:
     by_mp: dict[str, list] = defaultdict(list)
     for o in an.os_projects:
-        by_mp[an.mp_of(o.info.project) if o.in_es else "-"].append(o)
-    all_names = {o.info.name.upper() for o in an.os_projects}
+        if o.in_es:
+            by_mp[an.mp_of(o.info.project)].append(o)
     rows = []
     for mp, ops in sorted(by_mp.items()):
-        if mp == "-" and len(by_mp) > 1:
-            continue
-        es = [o for o in ops if o.in_es] or ops
-        servers = [o for o in es if o.role == "server"]
-        standby = any(o.role == "standby" for o in an.os_projects) or any("STBY" in n or "STANDBY" in n for n in all_names)
-        clients = [o for o in es if o.role == "client"]
-        others = [o for o in es if o.role in ("?", "reference", "es")]
+        servers = [o for o in ops if o.role == "server"]
+        standby = [o for o in ops if o.role == "standby"]
+        clients = [o for o in ops if o.role == "client"]
+        eng = [o for o in ops if o.role == "es"]
+        refs = [o for o in ops if o.role == "reference"]
         parts = []
         for s in servers:
-            parts.append(("Redundant OS server" if standby else "OS server") + f" ({s.info.name}" + (" + Standby)" if standby else ")"))
+            parts.append(("Redundant OS server" if standby else "OS server") + f" ({s.info.name}"
+                         + (f" + {', '.join(x.info.name for x in standby)})" if standby else ")"))
         if clients:
-            parts.append(f"{len(clients)} OS client")
-        if others:
-            parts.append(", ".join(o.info.name for o in others))
-        parts.append("ES")
-        pics = sum(o.pictures.get("custom", 0) for o in (servers or es))
-        scripts = sorted({s.rsplit("/", 1)[-1].rsplit(".", 1)[0] for o in (servers or es) for s in o.scripts})
+            groups = len(an.client_groups)
+            parts.append(f"{len(clients)} OS client" + (f" ({groups} içerik grubu)" if groups > 1 else ""))
+        odd = [o.info.name for o in clients if o.role_note]
+        if odd:
+            parts.append(f"rolü teyit: {', '.join(odd)}")
+        if eng:
+            parts.append(", ".join(f"{o.info.name} (ES + tam OS)" for o in eng))
+        else:
+            parts.append("ES")
+        if refs:
+            parts.append(f"referans (client sayılmadı): {', '.join(o.info.name for o in refs)}")
+        base = servers or ops
+        pics = sum(o.pictures.get("custom", 0) for o in base)
+        scripts = sorted({s.rsplit("/", 1)[-1].rsplit(".", 1)[0] for o in base for s in o.scripts})
         line2 = f"{pics} custom process picture" + (f", VBS global script'ler ({_fmt_list(scripts, 4)})" if scripts else "")
         rows.append([tr_upper(mp) if mp != "-" else "-", ", ".join(parts) + "\n" + line2])
+    return rows
+
+
+def _wincc_rows(an: Analysis) -> list[list[str]]:
+    rows = []
+    roles = {o.info.name: (o, an.mp_of(o.info.project)) for o in an.os_projects if o.in_es}
+    for name, w in sorted(an.wincc.items()):
+        mp = roles.get(name, (None, "-"))[1]
+        kinds = Counter(c.kind for c in w.connections)
+        conn = ", ".join(f"{k} {v}" for k, v in sorted(kinds.items()))
+        opc = [f"{c.name} ({c.opc_vendor})" if c.opc_vendor else c.name for c in w.connections if c.kind == "opc"]
+        rows.append([tr_upper(mp) if mp != "-" else "-", name, f"{w.total_tags:,}".replace(",", "."),
+                     f"{w.alarms:,}".replace(",", "."),
+                     f"{len(w.connections)} ({conn})" + (f"\nOPC: {_fmt_list(opc, 4)}" if opc else "")])
+    return rows
+
+
+def prep_list(an: Analysis) -> list[str]:
+    """Otomatik upgrade hazırlık listesi (dry-run öncesi ES'e kurulacak/hazırlanacaklar)."""
+    ids = {f.check_id for f in an.findings}
+    feats = {x for b in an.block_folders for x in b.features}
+    items = []
+    fam = an.pcs7_family
+    items.append(f"İç prosedür yolu: {fam or '?'} → {' → '.join(staged_path_from(fam))} "
+                 "(manual V7.1 SP4+ → V10.0 SP2 doğrudan geçişe izin veriyor [1, Bölüm 4.3]).")
+    if "F-System" in feats:
+        items.append("S7 F Systems + F Configuration Pack (F-block'lar var): hedef versiyonla uyumlu sürüm Compatibility Tool'dan "
+                     "teyit edilmeli; HW export F Configuration Pack kurulu PC'den alınmalı.")
+    if "PCS 7 Lib V7.1" in feats or "LIB_STD_LIB" in ids:
+        items.append("PCS 7 Library V7.1 SP3 Upd4 (ES) + PCS 7 Faceplates V7.1 SP3 Upd1 (ES + tüm OS) [1, Bölüm 8.5] "
+                     "(Siemens 'Downloadable previous versions of SIMATIC PCS 7 Libraries', ID 109480136).")
+    gsd = sorted({k for s in an.stations for k in s.gsd})
+    if gsd:
+        items.append("GSD dosyaları: " + _fmt_list(gsd, 6) + " — HW Config → Options → Install GSD File → 'from the STEP 7 "
+                     "project' ile projeden alınabilir.")
+    if "SFC" in feats:
+        items.append("SFC system block'ları (FB245, FB246, FB300, FC240…FC250) güncel SFC library'den offline block "
+                     "klasörüne kopyalanmalı, complete compile [1, Bölüm 9.5].")
+    if "LIB_MASTERDATA_DELETE" in ids:
+        items.append("Master data library'den OB_DIAG, OR_M_16, OR_M_32 silinmeli [1, Bölüm 4.3].")
+    if any(o.custom_typicals for o in an.os_projects) or any(o.apc_typicals for o in an.os_projects):
+        items.append("Picture object update: custom typicals ve @PCS7TypicalsAPC.pdl ayrıca ele alınmalı [1, Bölüm 9.6.4].")
+    if any(o.sfc.get("filled") for o in an.os_projects):
+        items.append("OS compile'da 'SFC visualization' işaretlenmeli (SFC görselleştirme verisi var).")
+    if "IM_DRV" in ids:
+        items.append("IM_DRV block'ları update öncesi system chart'lardan geçici chart'lara taşınmalı [1, Bölüm 6.1].")
+    if "LIB_LOGIC_MATRIX" in ids:
+        items.append("Logic Matrix: kullanılıyorsa library update zorunlu [1, Bölüm 9.9.4]; kullanılmıyorsa kaldırma kararı.")
+    return items
+
+
+def manual_items(an: Analysis) -> list[list[str]]:
+    """[konu, durum/değer] — backup'tan okunamayan, kullanıcıdan istenen bilgiler (ek prompt bölüm 11)."""
+    m = an.manual
+    rows = [
+        ["AS RT PO (PCS 7 License Information)", m.as_rt_po or "eksik"],
+        ["OS PO", m.os_po or "eksik"],
+        ["Archive tag", m.archive_tags or "eksik"],
+        ["Tesisteki lisans key'leri (ALM)", m.license_keys or "eksik"],
+        ["PC station listesi (wincproj karşılaştırması)", ", ".join(m.pc_stations) if m.pc_stations else "eksik"],
+        ["Compile OS wizard ekranları (area→OS ataması, SFC visualization işareti)", "eksik (backup'tan okunamıyor)"],
+        ["Tesis PC'lerinin 'Installed SIMATIC software' listesi (opsiyonel)", "eksik"],
+    ]
+    q = ["İki OS projesi (ENG ve SRV) de taşınacak mı?" if any(d.kind == "os_pair" for d in an.os_diffs) else "",
+         "Modül arızası (diagnostic) alarmları operatör client'larında görünüyor mu?" if any(
+             d.diag_only_a or d.diag_only_b for d in an.export_diffs) else "",
+         "Rolü belirsiz OS projeleri: " + ", ".join(o.info.name for o in an.os_projects if o.role_note)
+         if any(o.role_note for o in an.os_projects) else "",
+         "Arşiv (runtime ALG/TLG) taşınacak mı?" if any(o.archives.get("segments") for o in an.os_projects) else "",
+         "Logic Matrix kaldırılsın mı?" if any(s["status"].startswith("kurulu, kullanılmıyor")
+                                             for s in an.lm_status.values()) else "",
+         "3rd party OPC bağlantılarının durumu (hangi server hâlâ kullanılıyor)?" if any(
+             c.kind == "opc" for w in an.wincc.values() for c in w.connections) else "",
+         "TCP/IP OS bağlantısı hangi AS'e gidiyor (redundans)?" if any(
+             c.kind == "tcpip" for w in an.wincc.values() for c in w.connections) else "",
+         "AS bazında izin verilen duruş süreleri"]
+    rows += [["Müşteri sorusu", x] for x in q if x]
     return rows
 
 
@@ -471,6 +591,9 @@ def build_document(an: Analysis, full: bool = True) -> list:
         doc.append(Para("HW Config bulunamadı (.cfg export veya .s7h yok); AS envanteri çıkarılamadı."))
     if an.os_projects:
         doc.append(Table(["MP", "OS / PC yapısı"], _os_rows(an), cap("OS yapısı"), widths=[20, 80]))
+    if an.wincc:
+        doc.append(Table(["MP", "OS", "Tag (DmTag + struct)", "Alarm", "Connection"], _wincc_rows(an), cap("WinCC yapısı"),
+                         widths=[14, 14, 16, 12, 44]))
     sw = _software_rows(an)
     if sw:
         doc.append(Table(["AS", "Library / opsiyon", "Custom block'lar"], sw, cap("Yazılım içeriği"), widths=[10, 45, 45]))
@@ -491,6 +614,10 @@ def build_document(an: Analysis, full: bool = True) -> list:
         doc.append(Para("Bulgu yok."))
 
     if full:
+        doc.append(Heading(1, "Upgrade hazırlık listesi"))
+        doc.append(Bullets(prep_list(an)))
+        doc.append(Heading(1, "Manuel girişler ve müşteri soruları"))
+        doc.append(Table(["Konu", "Değer / soru"], manual_items(an)))
         doc.append(Heading(1, "Teklif öncesi netleşmesi gerekenler"))
         titles = {c.id: c.title for c in CHECKS}
         doc.append(Bullets(list(an.open_items)

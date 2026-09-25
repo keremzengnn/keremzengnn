@@ -46,6 +46,13 @@ def _f(c: "Check", detail: str, sources=(), confidence=Confidence.HIGH, severity
     return Finding(c.id, c.topic, severity or c.severity, detail, srcs, confidence, scope, blocking)
 
 
+def human_size(n: float) -> str:
+    for unit, div in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= div:
+            return f"{n / div:.1f} {unit}"
+    return f"{int(n)} B"
+
+
 def _short(items, n=8) -> str:
     items = list(items)
     s = ", ".join(items[:n])
@@ -68,7 +75,8 @@ def hw_released(c, an):
         out.append(_f(c, "Hedef versiyonda desteklenmeyen modüller: " + _short(
             f"{m.order} {m.fw} ×{m.count} ({', '.join(m.stations)}; {m.note})" for m in blocked) + " -> değişim gerekli.",
             [an.released_list], blocking=True))
-    bad = [m for m in an.hw_matches if m not in blocked and ("bulunamadı" in m.status or "FW" in m.status)]
+    bad = [m for m in an.hw_matches if m not in blocked and m.kind == "modül"
+           and ("bulunamadı" in m.status or "FW" in m.status)]
     acc = [m for m in bad if "aksesuar" in m.note]
     bad = [m for m in bad if m not in acc]
     if acc:
@@ -160,7 +168,24 @@ def lib_v71(c, an):
 
 
 def lib_lm(c, an):
-    return _feature(c, an, "Logic Matrix", "Logic Matrix block'ları var; upgrade without new functionality desteklenmez -> library update zorunlu.")
+    out = []
+    for b in an.block_folders:
+        if "Logic Matrix" not in b.features:
+            continue
+        st = an.lm_status.get(b.as_label, {})
+        status = st.get("status", "")
+        if status.startswith("kurulu, kullanılmıyor"):
+            out.append(_f(c, f"{b.as_label}: Logic Matrix kurulu, kullanılmıyor ({st.get('blocks', 0)} LM block tipi, instance "
+                             f"{st.get('instances', 0)}, WinCC'de LM tag/mesajı 0). Kaldırılması veya library update ile "
+                             "taşınması kararı; tesis PC'lerinde ayrı Logic Matrix Viewer olup olmadığı teyit edilmeli.",
+                          [b.info.dbf], scope=b.as_label, severity=L))
+        else:
+            detail = (f"{b.as_label}: Logic Matrix {status or 'block''ları var'} (instance {st.get('instances', '?')}"
+                      + (f", WinCC LM referansı {st.get('wincc')}" if an.wincc else "") + "); upgrade without new "
+                      "functionality desteklenmez -> library update zorunlu.")
+            out.append(_f(c, detail, [b.info.dbf], scope=b.as_label,
+                          confidence=Confidence.HIGH if an.wincc or st.get("instances") else Confidence.LOW))
+    return out
 
 
 def lib_sfc(c, an):
@@ -379,10 +404,14 @@ def cas_ph(c, an):
 
 def os_typicals(c, an):
     t = sorted({(x, o.info.name) for o in an.os_projects for x in o.custom_typicals})
-    if not t:
-        return []
-    return [_f(c, "Standart dışı picture object template'leri: " + _short(f"{x} ({n})" for x, n in t) +
-               " -> picture object update'te ayrıca ele alınmalı.")]
+    apc = sorted({o.info.name for o in an.os_projects if o.pictures and o.apc_typicals})
+    out = []
+    if t:
+        out.append(_f(c, "Standart dışı picture object template'leri: " + _short(f"{x} ({n})" for x, n in t) +
+                      " -> picture object update'te ayrıca ele alınmalı."))
+    if apc:
+        out.append(_f(c, f"@PCS7TypicalsAPC.pdl var ({_short(apc)}): iç prosedürde V8.2.1 adımında silinir.", severity=L))
+    return out
 
 
 def os_opc(c, an):
@@ -407,32 +436,153 @@ def os_volume(c, an):
     return [_f(c, f"ES'teki {len(ref)} OS projesinde {pics} custom picture, {scr} VBS script. CCMigrator migration saatler sürebilir.")]
 
 
+def wincc_diff(c, an):
+    if not an.wincc:
+        raise NotChecked("WinCC Configuration Studio export'u yok (Tag Management / Alarm Logging -> Export)")
+    out = []
+    for d in an.export_diffs:
+        parts = []
+        if d.conn_pairs:
+            parts.append("aynı AS'e farklı adlı named connection'lar (beklenen): "
+                         + _short([f"{a}: {x}↔{y}" for a, x, y in d.conn_pairs], 6))
+        if d.conn_only_a or d.conn_only_b:
+            parts.append(f"connection sadece {d.a}'de: {_short(d.conn_only_a, 5) or '-'}; sadece {d.b}'de: "
+                         f"{_short(d.conn_only_b, 5) or '-'}")
+        if d.n_tags_only_a or d.n_tags_only_b:
+            parts.append(f"tag sadece {d.a}'de {d.n_tags_only_a:,} ({_short([f'{k} ×{v}' for k, v in d.tags_only_a.most_common(4)], 4)}), "
+                         f"sadece {d.b}'de {d.n_tags_only_b:,}")
+        if d.tags_changed:
+            parts.append(f"connection/adres farkı {len(d.tags_changed)} tag")
+        if d.n_alarms_only_a or d.n_alarms_only_b:
+            parts.append(f"alarm sadece {d.a}'de {d.n_alarms_only_a:,} (en çok: "
+                         f"{_short([f'{k} ×{v}' for k, v in d.alarms_only_a.most_common(3)], 3)}), sadece {d.b}'de {d.n_alarms_only_b:,}")
+        if d.alarm_text_diff:
+            parts.append(f"ortak mesajlarda metin farkı {len(d.alarm_text_diff)}")
+        if d.alarm_class_diff:
+            parts.append(f"class farkı {len(d.alarm_class_diff)}")
+        if parts:
+            out.append(_f(c, f"{d.a} ↔ {d.b} WinCC konfigürasyonu: " + "; ".join(parts) + ".",
+                          [f for w in (an.wincc.get(d.a), an.wincc.get(d.b)) if w for f in w.files]))
+    for d in an.export_diffs:
+        for side, cnt in ((d.a, d.diag_only_a), (d.b, d.diag_only_b)):
+            if cnt:
+                out.append(_f(c, f"Sadece {side}'de olan area'sız modül/kanal diagnostic mesajları (@(n) chart'ları, #RawEvent): "
+                                 f"{sum(cnt.values()):,} — " + _short([f"{k} {v:,}" for k, v in cnt.most_common()], 6)
+                                 + ". Hangi OS'e gittiğini compile sırasındaki AS-OS seçimi belirler; operatör client'larında "
+                                   "modül arızası alarmı görünüyor mu teyit edilmeli.", confidence=Confidence.LOW, severity=L))
+    return out
+
+
+def opc_3rd_party(c, an):
+    rows = []
+    for w in an.wincc.values():
+        for cn in w.connections:
+            if cn.kind == "opc":
+                rows.append(f"{w.name}: {cn.name} ({cn.opc_vendor or 'üretici bilinmiyor'}; {cn.ip or '-'}; "
+                            f"{cn.tags + cn.struct_tags} tag)")
+    if not rows:
+        return []
+    only = []
+    for d in an.export_diffs:
+        oc = {cn.name: cn for w in [an.wincc.get(d.a)] if w for cn in w.connections if cn.kind == "opc"}
+        ob = {cn.name: cn for w in [an.wincc.get(d.b)] if w for cn in w.connections if cn.kind == "opc"}
+        only += [f"{n} sadece {d.a}" for n in d.conn_only_a if n in oc] + [f"{n} sadece {d.b}" for n in d.conn_only_b if n in ob]
+    return [_f(c, "3rd party OPC server bağlantıları: " + _short(rows, 8) + (". " + _short(only, 6) if only else "")
+               + ". Hedef versiyonda OPC DA (DCOM) desteği ve server'ların güncelliği teyit edilmeli.")]
+
+
+def os_conn_redundancy(c, an):
+    has_h = any(any("5H" in (n or o).upper() or "-5H" in o for o, _, n in s.cpus) for s in an.stations)
+    out = []
+    for w in an.wincc.values():
+        for cn in w.connections:
+            if cn.kind == "tcpip":
+                out.append(_f(c, f"{w.name}: connection '{cn.name}' named connection değil, tek IP'li TCP/IP ({cn.ip}; "
+                                 f"{cn.tags + cn.struct_tags} tag)" + (". Projede H-system var: bu bağlantı bir H-system'e "
+                                 "gidiyorsa redundant değildir -> named connection'a çevrilmeli." if has_h else "."),
+                              confidence=Confidence.LOW, severity=M if has_h else L))
+    return out
+
+
+def sfc_visu(c, an):
+    out = []
+    fb300 = sum(b.fb_instances.get(300, 0) for b in an.block_folders if "SFC" in b.features)
+    for o in an.os_projects:
+        s = o.sfc
+        if not s or not s.get("present"):
+            continue
+        w = an.wincc.get(o.info.name)
+        if s.get("filled"):
+            from datetime import datetime as _dt
+            rng = (f", chart tarihleri {_dt.fromtimestamp(s['first']):%Y-%m} → {_dt.fromtimestamp(s['last']):%Y-%m}"
+                   if s.get("first") else "")
+            dat = s["files"].get("objects.dat", s["files"].get("OBJECTS.DAT"))
+            out.append(_f(c, f"{o.info.name}: SFC görselleştirme verisi var ({s['charts']} chart, {len(s['groups'])} grup{rng}"
+                             + (f"; objects.dat {human_size(dat[0])}, {_dt.fromtimestamp(dat[1]):%d.%m.%Y}" if dat else "")
+                             + (f"; WinCC @SFC_RTS struct tag {w.sfc_struct_tags}" if w and w.sfc_struct_tags else "")
+                             + (f"; AS'te FB300 instance {fb300}" if fb300 else "")
+                             + "). OS compile'da 'SFC visualization' işaretlenmeli; SFC visualization lisansı teyit edilmeli.",
+                          [f"{o.info.path}/SfcRtBase"]))
+    return out
+
+
+def archives(c, an):
+    from datetime import datetime as _dt
+    out = []
+    for o in an.os_projects:
+        a = o.archives
+        if not a:
+            continue
+        seg = a.get("segments", []) + a.get("alg_tlg", [])
+        if seg:
+            newest = max(x[2] for x in seg)
+            n_alg = sum(1 for x in a["segments"] if "alg" in x[0].lower())
+            n_tlg = sum(1 for x in a["segments"] if "tlg" in x[0].lower())
+            out.append(_f(c, f"{o.info.name}: arşiv segmentleri ALG {n_alg} / TLG {n_tlg}, Alg/Tlg dosyaları "
+                             f"{len(a['alg_tlg'])}; en yeni {_dt.fromtimestamp(newest):%m.%Y}. Güncel runtime arşivi backup'ta "
+                             "olmayabilir; arşivin taşınıp taşınmayacağı teyit edilmeli.", [o.info.path], severity=L))
+        mdf, ldf = a.get("main_mdf"), a.get("main_ldf")
+        if mdf and ldf and mdf[0] > 0 and ldf[0] / mdf[0] > 2:
+            out.append(_f(c, f"{o.info.name}: SQL log dosyası büyük: {o.info.name}.ldf {human_size(ldf[0])}, .mdf "
+                             f"{human_size(mdf[0])} (oran {ldf[0] / mdf[0]:.1f}). Migration öncesi log shrink / backup "
+                             "planlanmalı.", [o.info.path]))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tutarlılık
 # ---------------------------------------------------------------------------
 
 def cons_es_server(c, an):
     if not an.os_diffs:
-        raise NotChecked("OS PC'lerinden alınmış wincproj kopyası yok (sadece ES projesi var)")
+        raise NotChecked("karşılaştırılacak OS proje çifti yok (ENG+SRV projesi veya OS PC'den wincproj kopyası bulunamadı)")
     out = []
     for d in an.os_diffs:
         oa, ob = d.relevant(d.only_a), d.relevant(d.only_b)
         na, nb = d.relevant(d.newer_a), d.relevant(d.newer_b)
         if not (oa or ob or na or nb):
             continue
-        name = d.a.rsplit("/", 1)[-1]
+        a, b = d.a_label, d.b_label
         parts = []
-        if nb:
-            parts.append(f"{d.b_label}'de daha yeni {len(nb)} (online değişiklik, ES'e alınmamış): {_short(_base(nb), 6)}")
         if ob:
-            parts.append(f"sadece {d.b_label}'de {len(ob)}: {_short(_base(ob), 6)}")
-        if na:
-            parts.append(f"ES'te daha yeni {len(na)}")
+            parts.append(f"sadece {b}'de {len(ob)}: {_short(_base(ob), 6)}")
+        if nb:
+            parts.append(f"{b}'de daha yeni {len(nb)}: {_short(_base(nb), 6)}")
         if oa:
-            parts.append(f"sadece ES'te {len(oa)}")
-        sev = H if (nb or ob) else M
-        out.append(_f(c, f"{name}: " + "; ".join(parts) + ". ES master değil -> migration öncesi reconciliation.",
-                      [d.a, d.b], severity=sev))
+            parts.append(f"sadece {a}'de {len(oa)}: {_short(_base(oa), 4)}")
+        if na:
+            parts.append(f"{a}'de daha yeni {len(na)}")
+        if d.kind == "os_pair":
+            # ENG ayrı ve tam bir OS'tir (farklı connection'lar); master/kopya değil -> online değişiklik yorumu yapılmaz
+            text = (f"{a} ↔ {b}: iki OS projesi ayrışmış — " + "; ".join(parts)
+                    + f". {b} operatörlerin kullandığı proje; iki proje de taşınacak mı ve farklar teyit edilmeli.")
+            sev = M
+        else:
+            text = (f"{d.a.rsplit('/', 1)[-1]} (ES) ↔ {b} (OS PC kopyası): " + "; ".join(parts)
+                    + f". {b}'de daha yeni / sadece {b}'de olanlar ES'e alınmamış değişiklik olabilir; hangisinin güncel "
+                      "olduğu teyit edilmeli.")
+            sev = H if (nb or ob) else M
+        out.append(_f(c, text, [d.a, d.b], severity=sev))
     return out
 
 
@@ -495,7 +645,15 @@ CHECKS: list[Check] = [
     Check("OS_PO_INCREASE", "PO lisansı", "Update sonrası OS RT PO sayısı artabilir", L, f"{SW_UPDATE}, 4.3", os_po),
     Check("OS_MIGRATION_VOLUME", "OS migration", "OS migration hacmi", L, f"{SW_UPDATE}, 9.2.2", os_volume),
     # --- Tutarlılık (ayrı analiz maddesi) ---
-    Check("CONS_ES_SERVER", "ES ↔ OS server tutarlılığı", "ES OS projesi ile OS PC kopyası farkları", H, "-", cons_es_server),
+    Check("CONS_ES_SERVER", "ENG / SRV / client tutarlılığı", "OS projeleri arası (ENG↔SRV1, ES↔OS PC kopyası) farklar",
+          M, "-", cons_es_server),
+    Check("WINCC_DIFF", "WinCC tag / alarm farkları", "ENG ↔ SRV1 connection, tag, alarm farkları (Configuration Studio export)",
+          M, "-", wincc_diff),
+    Check("OPC_3RD_PARTY", "3rd party OPC", "3rd party OPC server bağlantıları (ProgID'den üretici)", M, "-", opc_3rd_party),
+    Check("OS_CONN_REDUNDANCY", "OS bağlantısı", "H-system'e tek IP'li TCP/IP connection (redundant değil)", M, "-",
+          os_conn_redundancy),
+    Check("SFC_VISU", "SFC görselleştirme", "SfcRtBase/ChartLst: SFC görselleştirme kullanımı", L, "-", sfc_visu),
+    Check("ARCHIVES", "Arşivler", "Arşiv segmentleri ve SQL log boyutu", L, "-", archives),
     Check("CONS_CLIENTS", "Client tutarlılığı", "Client'lar arası içerik farkları", M, "-", cons_clients),
     Check("CONS_BACKUP_DATES", "Farklı tarihli backup'lar", "Aynı projenin farklı tarihli kopyaları", M, "-", cons_backups),
 ]

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import csv
 import io
+import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -24,10 +26,27 @@ def list_os_project(root: Path) -> dict[str, tuple[int, float]]:
     return out
 
 
-def list_os_project_from_csv(csv_path: Path, project: str) -> dict[str, tuple[int, float]]:
-    """PowerShell 'Get-ChildItem -Recurse | Export-Csv' çıktısı (FullName,Length,LastWriteTime)."""
+_TS_FORMATS = ("%m/%d/%Y %I:%M:%S %p", "%d.%m.%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+               "%m/%d/%Y %H:%M:%S", "%d.%m.%Y %H:%M")
+
+
+def parse_timestamp(ts: str) -> float | None:
+    """PowerShell LastWriteTime (en-US, tr-TR, de-DE, ISO). Tanınmazsa None (çağıran uyarı üretir)."""
+    ts = ts.strip()
+    for fmt in _TS_FORMATS:
+        try:
+            return datetime.strptime(ts, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def list_os_project_from_csv(csv_path: Path, project: str, warnings: list | None = None) -> dict[str, tuple[int, float]]:
+    """PowerShell 'Get-ChildItem -Recurse | Export-Csv' çıktısı (FullName,Length,LastWriteTime).
+    Tarihi okunamayan satırlar mtime=0 alır ve `warnings` listesine sayısı yazılır (sessizce yutulmaz)."""
     raw = Path(csv_path).read_bytes().decode("utf-8-sig", "ignore")
     out = {}
+    bad = []
     for r in csv.DictReader(io.StringIO(raw)):
         p = r["FullName"].split("wincproj\\", 1)[-1].split("\\")
         if p[0] != project:
@@ -35,12 +54,14 @@ def list_os_project_from_csv(csv_path: Path, project: str) -> dict[str, tuple[in
         rel = "/".join(p[1:]).lower()
         if rel.endswith(OS_IGNORE_EXT):
             continue
-        ts = r["LastWriteTime"].strip()
-        try:  # en-US PowerShell formatı; farklı locale'de format genişletilmeli
-            mtime = datetime.strptime(ts, "%m/%d/%Y %I:%M:%S %p").timestamp()
-        except ValueError:
+        mtime = parse_timestamp(r["LastWriteTime"])
+        if mtime is None:
+            bad.append(r["LastWriteTime"])
             mtime = 0.0
         out[rel] = (int(r["Length"] or 0), mtime)
+    if bad and warnings is not None:
+        warnings.append(f"{csv_path}: {len(bad)} satırda tarih okunamadı (ör. '{bad[0]}'); bu dosyalar için "
+                        "'hangisi daha yeni' karşılaştırması yapılamaz")
     return out
 
 
@@ -103,3 +124,99 @@ def picture_kind(rel: str) -> str:
     if "typicals" in name or name.startswith("@template"):
         return "typicals" if name in STANDARD_TYPICALS else "custom_typicals"
     return "faceplate"
+
+
+# ---------------------------------------------------------------------------
+# SFC görselleştirme (SfcRtBase) ve arşivler
+# ---------------------------------------------------------------------------
+
+# Boş SfcRtBase şablonu (hiç derlenmemiş): objects.dat 10.240 B + objects.idx 141.312 B
+SFC_EMPTY_SIZES = {"objects.dat": 10240, "objects.idx": 141312}
+_CHART_LINE = re.compile(r"^V\d+\.(?P<name>[^.]+)\.(?P<ts>\d{9,11})\.(?P<name2>[^.]*)\.\d+\.\d+\.(?P<comment>.*)\.\d+\s*$")
+
+
+def parse_chartlst(text: str) -> list[tuple[str, int, str]]:
+    """ChartLst: 'V701.<Chart>.<unix_ts>.<Chart>.0.0.<Yorum>.0' -> [(chart, ts, yorum)]."""
+    out = []
+    for line in text.splitlines():
+        m = _CHART_LINE.match(line.strip())
+        if m:
+            out.append((m.group("name"), int(m.group("ts")), m.group("comment")))
+    return out
+
+
+def chart_group(name: str) -> str:
+    """'TK01_OP1_FILL_CYCLE' -> 'TK01'; kısa önekler (GO, FO, MN) iki token: 'MN_SEL'."""
+    toks = [t for t in name.split("_") if t]
+    if not toks:
+        return name
+    if len(toks) > 1 and re.fullmatch(r"[A-Za-z]{1,3}", toks[0]):
+        return f"{toks[0]}_{toks[1]}"
+    return toks[0]
+
+
+def sfc_visualization(entries, os_dir: str, read_bytes=None) -> dict:
+    """
+    SfcRtBase kanıtı. {'present', 'filled', 'charts', 'groups', 'first', 'last', 'files': {ad: (boyut, mtime)}}.
+    read_bytes(rel) -> bytes: ChartLst'i okumak için (verilmezse sadece boyutlar).
+    """
+    prefix = os_dir + "/"
+    files = {}
+    chartlst_rel = None
+    for e in entries:
+        if not e.rel.startswith(prefix):
+            continue
+        sub = e.rel[len(prefix):]
+        parts = sub.split("/")
+        if len(parts) >= 2 and parts[0].lower() == "sfcrtbase":
+            files[parts[-1]] = (e.size, e.mtime)
+            if parts[-1].lower() == "chartlst":
+                chartlst_rel = e.rel
+    res = {"present": bool(files), "filled": False, "charts": 0, "groups": Counter(), "first": 0, "last": 0,
+           "files": files}
+    if not files:
+        return res
+    charts = []
+    if chartlst_rel and read_bytes:
+        try:
+            charts = parse_chartlst(read_bytes(chartlst_rel).decode("latin1", "replace"))
+        except OSError:
+            charts = []
+    big = any(files.get(k, files.get(k.upper(), (0, 0)))[0] > v for k, v in SFC_EMPTY_SIZES.items())
+    res["filled"] = bool(charts) or big
+    res["charts"] = len(charts)
+    res["groups"] = Counter(chart_group(c[0]) for c in charts)
+    if charts:
+        res["first"] = min(c[1] for c in charts)
+        res["last"] = max(c[1] for c in charts)
+    return res
+
+
+def archive_files(entries, os_dir: str, os_name: str) -> dict:
+    """
+    Arşiv izleri: ArchiveManager/ içeriği, kökteki <proje>ALG_*/TLG_* segmentleri, <proje>Alg/Tlg.mdf,
+    ana veritabanı <proje>.mdf/.ldf. {'segments': [(dosya, boyut, mtime)], 'alg_tlg': [...], 'archive_manager': [...],
+    'main_mdf': (boyut, mtime) | None, 'main_ldf': ...}
+    """
+    prefix = os_dir + "/"
+    n = os_name.lower()
+    out = {"segments": [], "alg_tlg": [], "archive_manager": [], "main_mdf": None, "main_ldf": None}
+    for e in entries:
+        if not e.rel.startswith(prefix):
+            continue
+        sub = e.rel[len(prefix):]
+        low = sub.lower()
+        if low.startswith("archivemanager/"):
+            out["archive_manager"].append((sub, e.size, e.mtime))
+            continue
+        if "/" in sub:
+            continue
+        if low in (f"{n}.mdf",):
+            out["main_mdf"] = (e.size, e.mtime)
+        elif low in (f"{n}.ldf", f"{n}_log.ldf"):
+            out["main_ldf"] = (e.size, e.mtime)
+        elif low in (f"{n}alg.mdf", f"{n}tlg.mdf", f"{n}alg.ldf", f"{n}tlg.ldf"):
+            out["alg_tlg"].append((sub, e.size, e.mtime))
+        elif re.match(rf"{re.escape(n)}_?(alg|tlg)_.*\.(mdf|ldf)$", low):
+            out["segments"].append((sub, e.size, e.mtime))
+    return out

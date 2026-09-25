@@ -35,3 +35,21 @@ def test_block_folder(case):
         assert bf.instances_per_fb[("FB", int(fb))] == n, f"FB{fb}"
     for author in case.get("authors_present", []):
         assert any(b.author == author for b in bf.blocks), author
+
+
+def test_wincc_and_os():
+    """Gerçek projede WinCC export / SFC / client grubu beklenenleri (expected_local.json'da varsa)."""
+    exp = json.loads(EXPECTED.read_text(encoding="utf-8"))
+    if not any(k in exp for k in ("wincc", "sfc_charts", "client_groups")):
+        pytest.skip("expected_local.json'da wincc/sfc_charts/client_groups yok")
+    from pcs7_analyzer.analyze import analyze
+    an = analyze(Path(PROJECT), extra_exports=[Path(p) for p in exp.get("exports", [])])
+    for os_name, v in exp.get("wincc", {}).items():
+        if os_name.startswith("_"):
+            continue
+        w = an.wincc[os_name]
+        assert (w.dm_tag, w.dm_structtag, w.alarms) == (v["dm_tag"], v["dm_structtag"], v["alarms"]), os_name
+    for os_name, n in exp.get("sfc_charts", {}).items():
+        assert next(o.sfc["charts"] for o in an.os_projects if o.info.name == os_name and o.in_es) == n
+    if "client_groups" in exp:
+        assert len(an.client_groups) == exp["client_groups"]

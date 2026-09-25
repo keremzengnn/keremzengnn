@@ -4,9 +4,30 @@
     {
       "id": "AS_X",
       "path": "<MP>/<Proje>/ombstx/offline/<8hex>",
-      "counts": {"FB": 0, "FC": 0, "DB": 0, "OB": 0},
-      "instances": {"1827": 0},
-      "authors_present": ["AdvLib81"]
+      "counts": {
+        "FB": 0,
+        "FC": 0,
+        "DB": 0,
+        "OB": 0
+      },
+      "instances": {
+        "1827": 0
+      },
+      "authors_present": [
+        "AdvLib81"
+      ]
     }
-  ]
+  ],
+  "wincc": {
+    "_comment": "OS bazında Configuration Studio export beklenenleri (gerçek değerler sadece expected_local.json'da)",
+    "OS_ADI": {
+      "dm_tag": 0,
+      "dm_structtag": 0,
+      "alarms": 0
+    }
+  },
+  "sfc_charts": {
+    "OS_ADI": 0
+  },
+  "client_groups": 0
 }
