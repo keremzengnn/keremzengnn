@@ -23,6 +23,7 @@ from pathlib import Path
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Confidence, Finding, Severity
+from .parsers.subblk import lang_name
 
 # ---------------------------------------------------------------------------
 # Doküman modeli
@@ -541,7 +542,7 @@ def _software_rows(an: Analysis) -> list[list[str]]:
             for c in b.custom_blocks:
                 if c.headerless:
                     custom.append(f"FB{c.number} {c.name.replace(' (symbol)', '')} header'sız"
-                                  + (" STL" if c.lang.strip("0") == "1" else "") + " block")
+                                  + (" STL" if lang_name(c.lang) == "STL" else "") + " block")
             noinst = [c.name or f"FB{c.number}" for c in b.custom_blocks if c.instances == 0 and b.memo_available]
             if noinst:
                 custom.append(f"{_fmt_list(noinst, 4)} (instance görünmüyor)")
@@ -673,7 +674,7 @@ def _appendix(an: Analysis, doc: list) -> None:
         if b.custom_blocks:
             doc.append(Table(["Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance"],
                              [[f"{x.kind}{x.number}", x.name or "(header yok)", x.family or "-", x.author or "-",
-                               "STL" if x.lang.strip("0") == "1" else x.lang, x.version, str(x.instances)] for x in b.custom_blocks]))
+                               lang_name(x.lang), x.version, str(x.instances)] for x in b.custom_blocks]))
         if b.top_instances:
             doc.append(Table(["Block", "Instance"], [[k, str(n)] for k, n in b.top_instances]))
         extra = []

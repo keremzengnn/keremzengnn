@@ -20,6 +20,7 @@ from pathlib import Path
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Severity
+from .parsers.subblk import lang_name
 from .report import GENERIC_OPEN_ITEMS, REFERENCES, _natkey, decision, manual_items, prep_list, tr_upper
 from .xlsx import Cell, Workbook
 
@@ -159,7 +160,7 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     for b in an.block_folders:
         for c in b.custom_blocks:
             rows.append([b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
-                         "STL" if c.lang.strip("0") == "1" else c.lang, c.version,
+                         lang_name(c.lang), c.version,
                          c.instances if b.memo_available else "", "header'sız" if c.headerless else ""])
         for s in b.symbol_only:
             rows.append([b.as_label, s.split(" ", 1)[0], s.split(" ", 1)[-1], "", "", "", "", "",

@@ -64,6 +64,19 @@ def classify_author(author: str) -> str:
     return AUTHOR_LIBRARY[best] if best else "custom"
 
 
+# BLKLANG kodu -> dil (S7 block header dil kodları; 4 = SCL, APL/Basis block'ları SCL ile yazılmıştır)
+BLOCK_LANGUAGES = {1: "STL", 2: "LAD", 3: "FBD", 4: "SCL", 5: "DB", 6: "GRAPH"}
+
+
+def lang_name(code: str) -> str:
+    """'00001' -> 'STL'; bilinmeyen kod 'kod N' olarak döner, boş kod ''."""
+    c = str(code or "").strip()
+    if not c.isdigit():
+        return c
+    n = int(c)
+    return BLOCK_LANGUAGES.get(n, f"kod {n}") if n else ""
+
+
 @dataclass
 class BlockHeader:
     kind: str          # FB / FC / ...
@@ -72,7 +85,11 @@ class BlockHeader:
     name: str
     version: str
     author: str
-    lang: str          # BLKLANG: 00001=STL, 00004=CFC/SCL derlenmiş vb.
+    lang: str          # BLKLANG ham kodu ('00001'); okunur ad: lang_name / .language
+
+    @property
+    def language(self) -> str:
+        return lang_name(self.lang)
 
     @property
     def library(self) -> str:
@@ -90,6 +107,7 @@ class BlockFolder:
     memo_available: bool = False
     # SSBPART'ı instance gibi görünen ama FB numarası çözülemeyen / geçersiz DB sayısı.
     unresolved_instances: int = 0
+    bad_records: int = 0          # BLKNUMBER okunamayan kayıt (atlandı)
 
     @property
     def is_empty(self) -> bool:
@@ -149,7 +167,11 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
         if progress and bf.n_records % 20000 == 0:
             progress(bf.n_records, total)
         ty = rec["SUBBLKTYP"]
-        nr = int(rec["BLKNUMBER"])
+        try:
+            nr = int(rec["BLKNUMBER"])
+        except (TypeError, ValueError):      # bozuk / boş kayıt: atla, klasörün geri kalanı okunur
+            bf.bad_records += 1
+            continue
         if ty in _KIND:
             present.add((ty, nr))
         if ty in (SUBBLK_FB, SUBBLK_FC):

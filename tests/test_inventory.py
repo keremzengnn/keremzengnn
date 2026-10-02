@@ -19,10 +19,24 @@ def inv_out(tmp_path_factory):
 def test_sheets(inv_out):
     inv, _ = inv_out
     names = [s.name for s in inv.sheets]
-    assert names[0] == "Özet" and names[-1] == "Uyarılar"
+    assert names[:2] == ["Mevcut durum", "Özet"] and names[-1] == "Uyarılar"
     for n in ("Projeler", "HW modüller (export)", "HW (backup içi)", "Block klasörleri", "Bloklar", "Instance sayıları",
               "Library özeti", "Semboller", "OS projeleri", "OS dosyaları", "Dosya türleri"):
         assert n in names
+
+
+def test_current_state(inv_out):
+    inv, _ = inv_out
+    rows = {(r[0], r[1]): r[2] for r in inv.sheet("Mevcut durum").rows}
+    assert rows[("Yazılım", "PCS 7 versiyonu")] == "V8.1"
+    assert "V5.5 SP4" in rows[("Yazılım", "STEP 7 (AS01)")]
+    # eski kopya (ESKI_BACKUP) özete katılmaz: APL sayıları çift sayılmaz
+    assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and "ESKI_BACKUP" not in rows[("Library", "APL")]
+    assert "karışık versiyon" in rows[("Library", "APL")]
+    assert rows[("Library", "Custom FB (AS01)")].startswith("3 FB")
+    assert rows[("Library", "Header'sız FB (AS01)")].startswith("1 FB")
+    assert "6ES7 414-5HM06-0AB0" in rows[("Hardware", "AS01: CPU")]
+    assert any(k[0] == "Not" and "ESKI_BACKUP" in v for k, v in rows.items())
 
 
 def test_blocks_and_instances(inv_out):

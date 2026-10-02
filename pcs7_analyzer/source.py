@@ -16,6 +16,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
+def long_path(p: Path) -> Path:
+    """Windows'ta 260 karakter (MAX_PATH) sınırını aşan path'ler için \\\\?\\ önekli mutlak path."""
+    if os.name != "nt":
+        return Path(p)
+    s = str(Path(p).absolute())
+    if s.startswith("\\\\?\\"):
+        return Path(s)
+    if s.startswith("\\\\"):                       # UNC: \\server\share -> \\?\UNC\server\share
+        return Path("\\\\?\\UNC\\" + s[2:])
+    return Path("\\\\?\\" + s)
+
+
 @dataclass(frozen=True)
 class Entry:
     rel: str        # kaynağa göre relatif, '/' ayraçlı, orijinal harf büyüklüğüyle
@@ -60,10 +72,11 @@ class FolderSource(Source):
     def __init__(self, root: Path, progress=None):
         self.root = Path(root).resolve()
         self.label = str(self.root)
+        self._walk_root = long_path(self.root)
         self.warnings = []
         self.entries = []
         n = 0
-        for dirpath, dirnames, filenames in os.walk(self.root, onerror=self._onerror):
+        for dirpath, dirnames, filenames in os.walk(self._walk_root, onerror=self._onerror):
             dirnames.sort()
             d = Path(dirpath)
             for fn in sorted(filenames):
@@ -73,7 +86,7 @@ class FolderSource(Source):
                 except OSError as e:
                     self.warnings.append(f"Okunamadı: {p} ({e.strerror})")
                     continue
-                self.entries.append(Entry(p.relative_to(self.root).as_posix(), st.st_size, st.st_mtime))
+                self.entries.append(Entry(p.relative_to(self._walk_root).as_posix(), st.st_size, st.st_mtime))
                 n += 1
                 if progress and n % 20000 == 0:
                     progress(f"{n} dosya indekslendi")
@@ -82,7 +95,8 @@ class FolderSource(Source):
         self.warnings.append(f"Okunamadı: {err.filename} ({err.strerror})")
 
     def materialize(self, rel: str) -> Path:
-        return self.root / PurePosixPath(rel)
+        p = self.root / PurePosixPath(rel)
+        return long_path(p) if len(str(p)) >= 240 else p
 
     def read_head(self, rel: str, n: int) -> bytes:
         with open(self.materialize(rel), "rb") as f:
@@ -119,6 +133,8 @@ class ZipSource(Source):
 
     def materialize(self, rel: str) -> Path:
         out = self._tmp / PurePosixPath(rel)
+        if len(str(out)) >= 240:
+            out = long_path(out)
         if not out.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
             with self.zf.open(self._info[rel]) as src, open(out, "wb") as dst:

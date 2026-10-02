@@ -40,6 +40,8 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.html")) { throw "rapor yok" }
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.docx")) { throw "Word rapor yok (gömülü template?)" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\envanter.xlsx")) { throw "analizle birlikte envanter yok" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\log.txt")) { throw "log.txt yok" }
           $q = Start-Process -FilePath dist\PCS7Envanter.exe -ArgumentList "$env:RUNNER_TEMP\demo\DEMO_BACKUP","-o","$env:RUNNER_TEMP\inv" -Wait -PassThru
           if ($q.ExitCode -ne 0) { throw "envanter exit $($q.ExitCode)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\inv\envanter.xlsx")) { throw "envanter.xlsx yok" }

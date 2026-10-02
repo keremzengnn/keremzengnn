@@ -133,6 +133,21 @@ def _summarize_os(files: list[Entry], os_dir: str) -> Counter:
 
 def discover_source(src: Source) -> DiscoveryResult:
     res = DiscoveryResult(root=src.label, warnings=list(src.warnings))
+
+    def head(rel: str, n: int) -> bytes:
+        """Bozuk / şifreli zip üyesi veya erişilemeyen dosya keşfi durdurmaz: uyarı + boş."""
+        try:
+            return src.read_head(rel, n)
+        except Exception as ex:  # noqa: BLE001
+            res.warnings.append(f"Okunamadı: {rel} ({type(ex).__name__}: {ex})")
+            return b""
+
+    def whole(rel: str) -> bytes:
+        try:
+            return src.read_bytes(rel)
+        except Exception as ex:  # noqa: BLE001
+            res.warnings.append(f"Okunamadı: {rel} ({type(ex).__name__}: {ex})")
+            return b""
     by_dir: dict[str, list[Entry]] = defaultdict(list)
     for e in src.entries:
         by_dir[e.parent].append(e)
@@ -146,7 +161,7 @@ def discover_source(src: Source) -> DiscoveryResult:
         elif low.endswith(".s7h"):
             res.s7h_files.append(e.rel)
         elif low.endswith(".cfg") and "/wincproj/" not in f"/{e.rel.lower()}":
-            if is_hw_cfg_head(src.read_head(e.rel, 4096)):
+            if is_hw_cfg_head(head(e.rel, 4096)):
                 res.cfg_exports.append(e.rel)
         elif low.endswith(_SYMBOL_EXPORT_EXT):
             res.symbol_exports.append(e.rel)
@@ -155,7 +170,7 @@ def discover_source(src: Source) -> DiscoveryResult:
         elif low.endswith(_ARCHIVE_EXT):
             res.archives.append(e.rel)
         elif low.endswith(".txt") and e.size > 64 and "/wincproj/" not in f"/{e.rel.lower()}":
-            if looks_like_export(src.read_head(e.rel, 16384)):
+            if looks_like_export(head(e.rel, 16384)):
                 res.wincc_exports.append(e.rel)
     project_dirs = [p.rsplit("/", 1)[0] if "/" in p else "" for p in res.projects]
 
@@ -172,7 +187,7 @@ def discover_source(src: Source) -> DiscoveryResult:
         res.block_folders.append(BlockFolderInfo(
             path=d, project=owner_project(d, project_dirs), dbf=dbf.rel, dbt=dbt.rel if dbt else None,
             dbf_size=dbf.size, dbf_mtime=_iso(dbf.mtime),
-            n_records=dbf_record_count_from_head(src.read_head(dbf.rel, 8)),
+            n_records=dbf_record_count_from_head(head(dbf.rel, 8)),
             dbt_size=dbt.size if dbt else None, dbt_mtime=_iso(dbt.mtime) if dbt else None,
             has_baustein="baustein.dbf" in names,
         ))
@@ -187,7 +202,7 @@ def discover_source(src: Source) -> DiscoveryResult:
     for d in os_dirs:
         files = [e for e in src.entries if e.rel.startswith(d + "/")]
         mcp = next(f for f in sorted(by_dir[d], key=lambda x: x.name) if f.name.lower().endswith(".mcp"))
-        m = _WINCC_BUILD.search(src.read_bytes(mcp.rel)) if mcp.size < 50_000_000 else None
+        m = _WINCC_BUILD.search(whole(mcp.rel)) if mcp.size < 50_000_000 else None
         s = _summarize_os(files, d)
         res.os_projects.append(OsProjectInfo(
             path=d, project=owner_project(d, project_dirs), mcp=mcp.name,

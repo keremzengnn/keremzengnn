@@ -26,6 +26,7 @@ from .report import _css
 from .source import Source, open_source
 from .xlsx import Workbook
 
+_CPU_RE = re.compile(r"^6ES7 ?(41\d|31[2-9])-")
 _FW = re.compile(r"\bV\d{1,2}\.\d{1,2}(?:\.\d{1,3})?\b")
 _KIND_LABEL = {"custom": "custom picture", "faceplate": "faceplate", "f_faceplate": "F faceplate",
                "typicals": "picture object template", "custom_typicals": "custom template"}
@@ -49,6 +50,7 @@ class Inventory:
     summary: list[tuple[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     diagnostics: str = ""
+    block_data: list = field(default_factory=list)      # [(BlockFolderInfo, BlockFolder)] -> Mevcut durum
 
     def sheet(self, name: str) -> Sheet:
         return next(s for s in self.sheets if s.name == name)
@@ -109,7 +111,7 @@ def _hw_exports(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
         for mo in cfg["modules"]:
             kind = ("dahili (HSP/port)" if mo.is_internal else "GSD cihaz" if mo.is_gsd and mo.is_station_header
                     else "GSD modül" if mo.is_gsd else "slave (IM)" if mo.is_station_header else
-                    "CPU" if re.match(r"6ES7 ?41\d-", mo.order_no) else "CP" if mo.order_no.startswith("6GK7") else "modül")
+                    "CPU" if _CPU_RE.match(mo.order_no) else "CP" if mo.order_no.startswith("6GK7") else "modül")
             mods.rows.append([name, rel, mo.location, mo.order_no, mo.firmware, mo.name, kind])
     inv.sheets += [stations, mods]
 
@@ -180,7 +182,7 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
         for b in bf.blocks:
             n = bf.instances_per_fb.get(("FB", b.number), 0) if b.kind == "FB" else ""
             blocks.rows.append([pname, folder, b.kind, b.number, b.name, b.family, b.author, b.library, b.version,
-                                b.lang, n if bf.memo_available else ""])
+                                b.language, n if bf.memo_available else ""])
         for (kind, nr), n in bf.instances_per_fb.most_common():
             inst.rows.append([pname, folder, kind, nr, names.get(nr, "") if kind == "FB" else "", n])
         for lib, cnt in sorted(library_summary(bf).items()):
@@ -190,6 +192,9 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
             dbfam.rows.append([pname, folder, fam or "(boş)", n])
         if bf.unresolved_instances:
             inv.warnings.append(f"{info.path}: {bf.unresolved_instances} instance referansı çözülemedi")
+        if bf.bad_records:
+            inv.warnings.append(f"{info.path}: {bf.bad_records} SUBBLK kaydı okunamadı (atlandı)")
+        inv.block_data.append((info, bf))
     inv.sheets += [folders, blocks, inst, libs, dbfam]
     return fb_sets
 
@@ -350,33 +355,202 @@ def diagnostics(src: Source) -> str:
 # Ana giriş ve çıktılar
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Mevcut durum: diğer sayfalardan tek bakışta özet (yazılım, library, hardware, OS). Yorum yok, kaynak var.
+# ---------------------------------------------------------------------------
+
+def _norm_name(x: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", x.lower())
+
+
+_LIB_SKIP = {"custom", "custom/unknown", "CFC generated"}
+
+
+def step7_label(used: str) -> str:
+    """USED_S7_VERSIONS '5.5.4.9_10.1.0.1' -> 'STEP 7 V5.5 SP4'."""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", used or "")
+    if not m:
+        return ""
+    return f"STEP 7 V{m.group(1)}.{m.group(2)}" + (f" SP{m.group(3)}" if m.group(3) != "0" else "")
+
+
+def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
+    from .analyze import STEP7_TO_PCS7, WINCC_TO_PCS7, author_version
+    sh = Sheet("Mevcut durum", ["Bölüm", "Konu", "Değer", "Kaynak"],
+               note="Backup'ta bulunanların özeti. Versiyonlar proje dosyalarından (analizi yapan PC'nin yazılımı değil). "
+                    "'aday' = tek kaynaktan çıkarım, teyit edilmeli.")
+    rows = sh.rows
+    names = {s.name for s in inv.sheets}
+
+    def get(name):
+        return inv.sheet(name).rows if name in names else []
+
+    # Aynı isimli proje birden fazla yerde (farklı tarihli backup): özette sadece en yeni kopya; diğerleri sayfalarda durur
+    copies: dict = defaultdict(list)
+    for r in get("Projeler"):
+        if r[0] == "Proje":
+            copies[r[1].lower()].append((str(r[5] or ""), r[2].rsplit("/", 1)[0] if "/" in r[2] else ""))
+    stale: set = set()
+    dup_notes = []
+    for name, cs in sorted(copies.items()):
+        if len(cs) > 1:
+            cs.sort(reverse=True)
+            stale |= {c[1] for c in cs[1:]}
+            dup_notes.append(f"{cs[0][1] or name} (en yeni, {cs[0][0]}) kullanıldı; özet dışı: "
+                             + ", ".join(f"{c[1]} ({c[0]})" for c in cs[1:]))
+
+    def plabel(proj_dir: str) -> str:
+        return Path(proj_dir).name or proj_dir or "-"
+
+    # 1) Yazılım
+    for r in get("HW station (export)"):
+        lab = step7_label(r[4])
+        if lab:
+            fam = STEP7_TO_PCS7.get(".".join(re.match(r"(\d+)\.(\d+)\.(\d+)", r[4]).groups()))
+            rows.append(["Yazılım", f"STEP 7 ({r[0]})", lab + (f" (PCS 7 {fam} ailesi, aday)" if fam else ""), r[1]])
+    builds: dict = defaultdict(list)
+    for o in d.os_projects:
+        if o.wincc_build:
+            builds[o.wincc_build].append(o)
+    fams = []
+    for b, os_list in sorted(builds.items()):
+        mm = re.match(r"V0?(\d+)\.(\d\d)", b)
+        key = f"{int(mm.group(1)):02d}.{mm.group(2)}" if mm else ""
+        wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
+        if fam:
+            fams.append((fam, ok))
+        names_ = ", ".join(sorted({o.name for o in os_list}))
+        rows.append(["Yazılım", "WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" + ("" if ok else ", aday") if fam else "")
+                     + f" — {len(os_list)} OS projesi: {names_}", f"{os_list[0].path}/{os_list[0].mcp}"])
+    if fams:
+        best = sorted(fams, key=lambda x: not x[1])[0]
+        val = best[0] + ("" if best[1] else " (aday, teyit edilmeli)")
+        if len({f for f, _ in fams}) > 1:
+            val += " — farklı WinCC build'leri var: " + ", ".join(sorted({f for f, _ in fams}))
+        rows.insert(0, ["Yazılım", "PCS 7 versiyonu", val, "WinCC build (.mcp)"])
+    for n in dup_notes:
+        rows.append(["Not", "Aynı proje birden fazla yerde (farklı tarihli backup?)", n
+                     + " — 'en yeni' dosya tarihine göre, teyit edilmeli", "*.s7p"])
+
+    # 2) Library'ler (block header author'larından), proje klasörü bazında
+    libs: dict = defaultdict(lambda: defaultdict(lambda: [0, set()]))
+    custom: Counter = Counter()
+    for info, bf in inv.block_data:
+        if info.project in stale:
+            continue
+        lab = plabel(info.project)
+        for lib, cnt in library_summary(bf).items():
+            if lib in _LIB_SKIP:
+                continue
+            for author, n in cnt.items():
+                v = author_version(author) or author or "-"
+                libs[lib][v][0] += n
+                libs[lib][v][1].add(lab)
+        custom[(lab, "custom")] += sum(1 for b in bf.blocks if b.kind == "FB" and b.library == "custom")
+        custom[(lab, "headerless")] += sum(1 for b in bf.blocks if b.kind == "FB" and b.library == "custom/unknown")
+    for lib in sorted(libs):
+        val = "; ".join(f"{v}: {n} block ({', '.join(sorted(ps))})" for v, (n, ps) in sorted(libs[lib].items()))
+        if len(libs[lib]) > 1:
+            val += " — karışık versiyon"
+        rows.append(["Library", lib, val, "block header author (SUBBLK.DBF)"])
+    for (lab, kind), n in sorted(custom.items()):
+        if n and kind == "custom":
+            rows.append(["Library", f"Custom FB ({lab})", f"{n} FB (integratör author'lu; liste: 'Bloklar', Library = custom)",
+                         "block header author (SUBBLK.DBF)"])
+        elif n:
+            rows.append(["Library", f"Header'sız FB ({lab})", f"{n} FB (korumalı F-block veya custom; liste: 'Bloklar', "
+                         "Library = custom/unknown)", "block header boş (SUBBLK.DBF)"])
+
+    # 3) Hardware: HW Config export'larından; export'u olmayan projeler için backup içi .s7h taraması
+    by_station: dict = defaultdict(lambda: {"cpu": [], "cp": [], "mod": 0, "slave": 0, "gsd": 0, "src": ""})
+    for st, rel, _loc, mlfb, fw, name, kind in get("HW modüller (export)"):
+        x = by_station[st]
+        x["src"] = rel
+        if kind == "CPU":
+            x["cpu"].append(f"{name or mlfb} ({mlfb}) {fw}".strip())
+        elif kind == "CP":
+            x["cp"].append(f"{name or mlfb} ({mlfb}) {fw}".strip())
+        elif kind == "slave (IM)":
+            x["slave"] += 1
+        elif kind == "GSD cihaz":
+            x["gsd"] += 1
+        elif kind == "modül":
+            x["mod"] += 1
+
+    def counted(items):
+        return ", ".join(f"{k} ×{n}" if n > 1 else k for k, n in Counter(items).items())
+    for st in sorted(by_station):
+        x = by_station[st]
+        rows.append(["Hardware", f"{st}: CPU", counted(x["cpu"]) or "-", x["src"]])
+        if x["cp"]:
+            rows.append(["Hardware", f"{st}: CP", counted(x["cp"]), x["src"]])
+        rows.append(["Hardware", f"{st}: saha", f"{x['slave']} slave (IM), {x['gsd']} GSD cihaz, {x['mod']} modül",
+                     x["src"]])
+    exported = {_norm_name(s) for s in by_station}
+    internal: dict = defaultdict(Counter)
+    for proj, _rel, method, mlfb, fw, n in get("HW (backup içi)"):
+        if method == ".s7h tarama":
+            internal[proj][(mlfb, fw)] += n
+    for proj, c in sorted(internal.items()):
+        if proj in stale or _norm_name(Path(proj).name) in exported:
+            continue                                    # eski kopya / export'u var: yukarıda
+        cpus = [f"{m} {fw}".strip() + (f" ×{n}" if n > 1 else "") for (m, fw), n in sorted(c.items()) if _CPU_RE.match(m)]
+        cps = [f"{m} {fw}".strip() for (m, fw), n in sorted(c.items()) if m.startswith("6GK7")]
+        lab = plabel(proj)
+        rows.append(["Hardware", f"{lab}: CPU (backup içi)", ", ".join(cpus) or "-", ".s7h tarama (export yok)"])
+        if cps:
+            rows.append(["Hardware", f"{lab}: CP (backup içi)", ", ".join(cps), ".s7h tarama (export yok)"])
+        rows.append(["Hardware", f"{lab}: diğer (backup içi)",
+                     f"{len(c)} farklı MLFB/FW; rack/slot yok (liste: 'HW (backup içi)' sayfası)", ".s7h tarama"])
+    if not by_station and not internal:
+        rows.append(["Hardware", "-", "HW bilgisi bulunamadı: HW Config → Station → Export (.cfg) alınmalı", ""])
+    # 4) OS
+    for r in get("OS projeleri"):
+        rows.append(["OS", r[0], f"{r[2]}; WinCC {r[4] or '-'}; custom picture {r[6]}, VBS {r[8]}+{r[9]}, C action {r[10]}",
+                     r[1]])
+    if not rows:
+        rows.append(["-", "Backup'ta tanınan PCS 7 içeriği bulunamadı", "", ""])
+    return sh
+
+
 def build_inventory_source(src: Source, log=None) -> Inventory:
     log = log or (lambda m: None)
     log("Keşif...")
     d = discover_source(src)
     inv = Inventory(source=src.label, created=datetime.now().isoformat(sep=" ", timespec="minutes"), discovery=d)
     inv.warnings += d.warnings
+    def stage(name, fn, *args):
+        try:
+            return fn(*args)
+        except Exception as e:  # noqa: BLE001 - bir bölümün hatası envanteri durdurmaz
+            inv.warnings.append(f"{name} bölümü tamamlanamadı: {type(e).__name__}: {e}")
+            log(f"UYARI: {name} bölümü tamamlanamadı ({e})")
+            return None
+
     log("Projeler...")
-    _projects(src, d, inv)
+    stage("Projeler", _projects, src, d, inv)
     log("HW Config export'ları...")
-    _hw_exports(src, d, inv)
+    stage("HW Config export", _hw_exports, src, d, inv)
     log("HW (backup içi tarama)...")
-    _hw_internal(src, d, inv)
+    stage("HW (backup içi)", _hw_internal, src, d, inv)
     log("Block klasörleri...")
-    fb_sets = _blocks(src, d, inv, log)
+    fb_sets = stage("Block klasörleri", _blocks, src, d, inv, log) or {}
     log("Symbol table'lar...")
-    _symbols(src, d, inv, fb_sets)
+    stage("Symbol table", _symbols, src, d, inv, fb_sets)
     log("OS projeleri...")
-    _os(src, d, inv)
-    _file_types(src, inv)
+    stage("OS projeleri", _os, src, d, inv)
+    stage("Dosya türleri", _file_types, src, inv)
     log("Yapı tanısı...")
-    inv.diagnostics = diagnostics(src)
+    inv.diagnostics = stage("Yapı tanısı", diagnostics, src) or ""
+    names = {x.name for x in inv.sheets}
 
     authors = Counter()
-    for r in inv.sheet("Library özeti").rows:
+    for r in (inv.sheet("Library özeti").rows if "Library özeti" in names else []):
         if r[2] in ("APL", "Basis Library", "S7 F Systems Failsafe Blocks", "Logic Matrix", "PCS 7 Library V7.1 COMM"):
             authors[f"{r[2]}: {r[3]}"] += r[4]
-    step7 = sorted({r[4] for r in inv.sheet("HW station (export)").rows if r[4]})
+    step7 = sorted({r[4] for r in (inv.sheet("HW station (export)").rows if "HW station (export)" in names else [])
+                    if r[4]})
     wincc = sorted({o.wincc_build for o in d.os_projects if o.wincc_build})
     inv.summary = [
         ("Kaynak", inv.source), ("Tarih", inv.created),
@@ -393,6 +567,9 @@ def build_inventory_source(src: Source, log=None) -> Inventory:
         ("Uyarı", str(len(inv.warnings))),
     ]
     inv.sheets.insert(0, Sheet("Özet", ["Konu", "Değer"], [list(x) for x in inv.summary]))
+    cur = stage("Mevcut durum", _current_state, inv, d)
+    if cur is not None:
+        inv.sheets.insert(0, cur)
     inv.sheets.append(Sheet("Uyarılar", ["Uyarı"], [[w] for w in inv.warnings]))
     return inv
 

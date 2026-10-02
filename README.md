@@ -11,8 +11,13 @@ Girdi: backup **klasörü** veya doğrudan **.zip** (açmaya gerek yok; sadece g
 ## İki program
 | Program | Ne yapar | Çıktı |
 |---|---|---|
-| **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi (pencerede "Envanter" modu da seçilebilir) | rapor.docx, rapor.xlsx (8 sayfa), rapor.html (+ md, json) |
+| **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi + envanter (pencerede sadece "Envanter" modu da seçilebilir) | rapor.docx, rapor.xlsx (8 sayfa), rapor.html (+ md, json), envanter.xlsx |
 | **PCS7Envanter.exe** | Sadece backup'taki her şeyi okur ve listeler, değerlendirme yapmaz | envanter.xlsx, envanter.html, yapi_tanisi.txt |
+
+**Önce bakılacak yer: `envanter.xlsx` → "Mevcut durum" sayfası.** Tek tabloda: PCS 7 / STEP 7 / WinCC versiyonu
+(proje dosyalarından), kullanılan library'ler ve versiyonları (APL, Basis, F, Logic Matrix, SFC, V7.1 …, karışık versiyon
+uyarısıyla), custom / header'sız FB sayıları, AS bazında CPU + FW, CP'ler, saha cihaz sayıları, OS projeleri. Her satırın
+kaynağı yazılıdır. Aynı proje backup'ta birden fazla yerde ise en yeni kopya kullanılır, diğerleri not edilir.
 
 Envanter, export almadan backup içinden okur: symbol table'lar (`YDBs/.../SYMLIST.DBF`, tüm semboller),
 HW (`.s7h` ve `hOmSave7` DBF'lerinden MLFB + FW; rack/slot yok), tüm FB/FC listesi ve instance sayıları, OS picture/script
@@ -29,12 +34,15 @@ adları ve kayıt sayıları); formatı çözülmemiş dosyalar için geliştiri
 Pencerede: **Backup klasörü seç…** veya **Backup .zip seç…** → (ilk seferde) adınızı ve departmanınızı girin
 → **Analizi başlat** → rapor tarayıcıda açılır, **Word'ü aç** ile .docx açılır. Ayarlar hatırlanır.
 Raporlar varsayılan olarak `Belgeler\PCS7_Raporlar\<backup>_<tarih>` altına yazılır.
+Her çalıştırmada aynı klasöre `log.txt` yazılır: bir şey ters giderse (uyarı, okunamayan dosya) bu dosyaya bakın.
+Bir bölüm (ör. OS projeleri) okunamazsa program durmaz; diğer bölümler raporlanır, hata uyarılarda yazar.
 Zip içindeki zip'ler (ör. farklı tarihli ikinci backup) de açılıp taranır.
 
 Komut satırı:
 ```
 python -m pcs7_analyzer D:\Backup\Proje.zip -o D:\Raporlar\Proje --author "Ad Soyad" --department "Departman" --open
 python -m pcs7_analyzer D:\Backup\Proje.zip --inventory  # sadece envanter (Excel)
+python -m pcs7_analyzer D:\Backup\Proje.zip --no-inventory  # analiz, envanter olmadan (daha hızlı)
 python -m pcs7_analyzer D:\Backup\Proje --discover        # sadece klasör yapısı
 python -m pcs7_analyzer --demo C:\Temp\demo               # sahte demo projesiyle dene
 python -m pcs7_analyzer --list-checks                     # tanımlı kontroller

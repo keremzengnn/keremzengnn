@@ -119,7 +119,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     if not fixed:
         mf = ttk.Frame(body)
         mf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 6))
-        ttk.Radiobutton(mf, text=f"Analiz: {TARGET_LABEL} upgrade değerlendirmesi (Word + Excel + HTML)", value="analysis",
+        ttk.Radiobutton(mf, text=f"Analiz: {TARGET_LABEL} upgrade değerlendirmesi (Word + Excel + HTML) + envanter", value="analysis",
                         variable=mode_var).pack(anchor="w")
         ttk.Radiobutton(mf, text="Envanter: backup'taki her şeyi listele, değerlendirme yapma (Excel + HTML)",
                         value="inventory", variable=mode_var).pack(anchor="w")
@@ -198,6 +198,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     open_btn.pack(side="left", padx=(12, 6))
     word_btn = ttk.Button(actions, text="Word'ü aç", state="disabled")
     word_btn.pack(side="left")
+    inv_btn = ttk.Button(actions, text="Envanter (Excel)", state="disabled")
+    inv_btn.pack(side="left", padx=(6, 0))
     folder_btn = ttk.Button(actions, text="Klasörü aç", state="disabled")
     folder_btn.pack(side="left", padx=6)
     bar = ttk.Progressbar(actions, mode="indeterminate", length=160)
@@ -242,6 +244,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                     folder_btn.configure(state="normal")
                     if (Path(val).parent / "rapor.docx").exists() or (Path(val).parent / "envanter.xlsx").exists():
                         word_btn.configure(state="normal")
+                    if (Path(val).parent / "envanter.xlsx").exists():
+                        inv_btn.configure(state="normal")
                     logbox.insert("end", f"\nTamamlandı: {val}\n")
                     logbox.see("end")
                     webbrowser.open(Path(val).resolve().as_uri())
@@ -259,7 +263,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
             messagebox.showwarning("Backup", "Önce 'Backup klasörü seç' veya 'Backup .zip seç' ile backup'ı seçin.")
             return
         logbox.delete("1.0", "end")
-        for b in (run_btn, open_btn, word_btn, folder_btn):
+        for b in (run_btn, open_btn, word_btn, inv_btn, folder_btn):
             b.configure(state="disabled")
         out = out_var.get().strip()
         settings.save({"author": author_var.get().strip(), "department": dept_var.get().strip(),
@@ -285,6 +289,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                 return
 
     word_btn.configure(command=open_second)
+    inv_btn.configure(command=lambda: result["path"] and (result["path"].parent / "envanter.xlsx").exists()
+                      and _open_file(result["path"].parent / "envanter.xlsx"))
     mode_var.trace_add("write", on_mode)
     on_mode()
     folder_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent))

@@ -109,6 +109,9 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
    PC station config, arşiv yapısı, 3rd party yazılımlar).
 
 ## Kurallar
+- **Gerçek backup'ta çökme yok:** analiz (`analyze._stage`), envanter (`stage`) ve çıktı yazımı (`cli.run`) bölüm bölüm
+  yalıtılmış; hata uyarı + `log.txt`'ye traceback. Keşifte okunamayan dosya uyarıdır. Windows'ta uzun path (`source.long_path`).
+- BLKLANG kodu -> dil `parsers.subblk.lang_name` (1 STL, 2 LAD, 3 FBD, 4 SCL, 6 GRAPH; bilinmeyen "kod N").
 - **Okuma sadece.** Proje klasörüne asla yazma. Geçici dosyalar için temp klasör kullan.
 - Büyük dosyalar olacak (SUBBLK.DBT 400+ MB, DBF 70 MB): streaming oku, hepsini belleğe alma; ilerleme göster.
 - Her bulgu kaynağını taşısın (dosya yolu). Emin olunmayan çıkarım `confidence: low` ile işaretlensin.
@@ -166,7 +169,9 @@ değişen kısımlar: kademeli yol (`staged_path_from`), `version_note`, APL V8/
 listede yok -> `ACCESSORIES` notu, Düşük etki.
 
 ## Envanter modu (`inventory.py`, `--inventory`, PCS7Envanter.exe)
-Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
+**Kullanıcının 1. önceliği: mevcut durum** (hardware, yazılım versiyonları, library'ler); analiz 2. aşama. Analiz modu da
+aynı açık kaynaktan envanteri üretir (`--no-inventory` kapatır). İlk sayfa "Mevcut durum" (`_current_state`): diğer
+sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni dosya tarihi). Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
 

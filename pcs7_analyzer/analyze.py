@@ -158,6 +158,7 @@ class BlockFolderResult:
     unused_library_fbs: list[str] = field(default_factory=list)
     f_driver_instances: int = 0
     unresolved_instances: int = 0
+    bad_records: int = 0
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
@@ -324,7 +325,7 @@ class Analysis:
 # Yardımcılar
 # ---------------------------------------------------------------------------
 
-_CPU = re.compile(r"^6ES7 ?41\d-")
+_CPU = re.compile(r"^6ES7 ?(41\d|31[2-9])-")   # S7-400 (PCS 7 AS) + S7-300 CPU (paket üniteler)
 _HSYNC = re.compile(r"^6ES7 ?960-1AA")
 _F_ORDER = re.compile(r"^6ES7 ?(13[68]-|326-|336-)")   # F-DI/F-DO/F-AI (ET 200S/iSP F, SM326/336)
 
@@ -508,6 +509,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.fb_library = {b.number: (b.name, b.library, b.author) for b in bf.blocks if b.kind == "FB"}
     res.memo_available = bf.memo_available
     res.unresolved_instances = bf.unresolved_instances
+    res.bad_records = bf.bad_records
     summary = library_summary(bf)
     res.libraries = {lib: dict(c) for lib, c in sorted(summary.items())}
     for lib, c in summary.items():
@@ -885,6 +887,16 @@ def _versions(an: Analysis) -> None:
 # Ana giriş
 # ---------------------------------------------------------------------------
 
+def _stage(an: Analysis, name: str, log, fn, *args) -> None:
+    """Bir analiz bölümünü çalıştırır; hata olursa raporu durdurmaz, uyarı olarak yazar."""
+    try:
+        fn(*args)
+    except Exception as e:  # noqa: BLE001 - gerçek backup'ta beklenmeyen format: diğer bölümler devam eder
+        an.warnings.append(f"{name} bölümü tamamlanamadı: {type(e).__name__}: {e}")
+        log(f"UYARI: {name} bölümü tamamlanamadı ({e})")
+        log(traceback.format_exc())
+
+
 def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | None = None, log=None,
                    manual: ManualInputs | None = None, extra_exports: list[Path] | None = None) -> Analysis:
     log = log or (lambda msg: None)
@@ -893,12 +905,15 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
     an = Analysis(source=src.label, target=target, tool_version=__version__,
                   created=datetime.now().isoformat(timespec="minutes"), discovery=d, manual=manual or ManualInputs())
     an.warnings += d.warnings
-    _analyze_backups(src, d, an)
-    d = _without_stale_copies(d, an)
+    _stage(an, "Farklı tarihli backup'lar", log, _analyze_backups, src, d, an)
+    try:
+        d = _without_stale_copies(d, an)
+    except Exception as e:  # noqa: BLE001
+        an.warnings.append(f"Eski kopyalar ayıklanamadı: {e}")
 
     log("HW Config...")
-    _analyze_stations(src, d, an, log)
-    _analyze_released(an, released_csv)
+    _stage(an, "HW Config", log, _analyze_stations, src, d, an, log)
+    _stage(an, "Released Modules", log, _analyze_released, an, released_csv)
 
     log("Block klasörleri...")
     for i, info in enumerate(d.block_folders, 1):
@@ -910,23 +925,26 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
                                     mapping_confidence=Confidence.LOW.value, error=f"{e}")
             an.warnings.append(f"{info.path}: okunamadı ({e})")
             log(traceback.format_exc())
+        if bfr.bad_records:
+            an.warnings.append(f"{info.path}: {bfr.bad_records} SUBBLK kaydı okunamadı (atlandı)")
         an.block_folders.append(bfr)
 
     log("Symbol table'lar...")
-    symtabs = _symbol_tables(src, d, an)
-    _map_block_folders(an, symtabs)
+    symtabs: list = []
+    _stage(an, "Symbol table", log, lambda: symtabs.extend(_symbol_tables(src, d, an)))
+    _stage(an, "Block klasörü ↔ AS eşlemesi", log, _map_block_folders, an, symtabs)
 
     log("OS projeleri...")
-    _analyze_os(src, d, an)
+    _stage(an, "OS projeleri", log, _analyze_os, src, d, an)
     log("WinCC export'ları...")
-    _analyze_wincc_exports(src, d, an, list(extra_exports or []), log)
-    _lm_status(an)
-    _versions(an)
+    _stage(an, "WinCC export", log, _analyze_wincc_exports, src, d, an, list(extra_exports or []), log)
+    _stage(an, "Logic Matrix kullanımı", log, _lm_status, an)
+    _stage(an, "Versiyon tespiti", log, _versions, an)
 
     log("Kontroller...")
     from .checks import run_checks
-    run_checks(an)
-    _open_items(an)
+    _stage(an, "Kontroller", log, run_checks, an)
+    _stage(an, "Açık konular", log, _open_items, an)
     return an
 
 

@@ -43,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="WinCC Configuration Studio export klasörü/dosyası (backup dışındaysa); birden fazla verilebilir")
     p.add_argument("--manual", type=Path, help="Manuel girişler JSON (PO, archive tag, PC station listesi…); "
                                               "şablon: data/manuel_giris_ornek.json")
+    p.add_argument("--no-inventory", action="store_true",
+                   help="Analizle birlikte envanter (envanter.xlsx) üretme (büyük backup'ta süreyi kısaltır)")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
     p.add_argument("--open", action="store_true", help="Bitince HTML raporu tarayıcıda aç")
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
@@ -73,13 +75,32 @@ def default_out_dir(source: Path, root: Path | None = None) -> Path:
     return Path(root) / f"{name}_{datetime.now():%Y%m%d_%H%M}"
 
 
+def _tee_log(log, path: Path):
+    """Log mesajlarını ekrana ve çıktı klasöründeki log.txt'ye yazar (sorun bildirirken paylaşılabilir)."""
+    try:
+        path.write_text(f"pcs7_analyzer {__version__} — {datetime.now():%Y-%m-%d %H:%M}\n", encoding="utf-8")
+    except OSError:
+        return log
+
+    def tee(msg):
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"{msg}\n")
+        except OSError:
+            pass
+        log(msg)
+    return tee
+
+
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None, inventory: bool = False,
-        manual=None, exports: list[Path] | None = None) -> Path:
-    """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür."""
+        manual=None, exports: list[Path] | None = None, with_inventory: bool = True) -> Path:
+    """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür.
+    with_inventory: analizle birlikte envanter (envanter.xlsx, Mevcut durum sayfası) de üretilir; kaynak bir kez açılır."""
     from . import settings
-    from .analyze import analyze
+    from .analyze import analyze_source
+    from .source import open_source
     from .discovery import discover, render_markdown as render_discovery
     from .report import ReportMeta, build_document, render_html, render_json, render_markdown
 
@@ -88,6 +109,7 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     if source.is_dir() and _inside(out_dir, source):
         raise ValueError(f"Çıktı kaynak klasörün içine yazılamaz (salt okuma kuralı): {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
+    log = _tee_log(log, out_dir / "log.txt")
 
     if inventory:
         from .inventory import build_inventory, write_outputs
@@ -109,26 +131,61 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
                       department=department if department is not None else st.get("department", ""),
                       customer=customer or "")
     from .analyze import ManualInputs
-    an = analyze(source, target=target, released_csv=released, log=log,
-                 manual=manual if manual is not None else ManualInputs(), extra_exports=exports)
-    doc = build_document(an)
+    with open_source(source, log) as src:
+        an = analyze_source(src, target, released, log, manual if manual is not None else ManualInputs(), exports)
+        if with_inventory:
+            log("Envanter (mevcut durum)...")
+            try:
+                from .inventory import build_inventory_source, write_outputs
+                write_outputs(build_inventory_source(src, log), out_dir)
+                log(f"Envanter: {out_dir / 'envanter.xlsx'}")
+            except Exception as e:  # noqa: BLE001 - envanter hatası analiz raporunu engellemez
+                import traceback as _tb
+                log(f"UYARI: envanter üretilemedi ({type(e).__name__}: {e})")
+                log(_tb.format_exc())
+    # Her çıktı ayrı üretilir: biri hata verirse diğerleri yine yazılır.
+    import traceback
+    failed = []
+
+    def out(name, fn):
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001
+            failed.append(name)
+            log(f"UYARI: {name} üretilemedi ({type(e).__name__}: {e})")
+            log(traceback.format_exc())
+
     html_p = out_dir / "rapor.html"
-    html_p.write_text(render_html(an, doc, meta), encoding="utf-8")
-    (out_dir / "rapor.md").write_text(render_markdown(an, doc, meta), encoding="utf-8")
-    (out_dir / "rapor.json").write_text(render_json(an), encoding="utf-8")
-    from .excel_report import write_excel
-    write_excel(an, out_dir / "rapor.xlsx", meta)
-    log(f"Excel rapor: {out_dir / 'rapor.xlsx'}")
+    out("rapor.json", lambda: (out_dir / "rapor.json").write_text(render_json(an), encoding="utf-8"))
+    out("rapor.html", lambda: html_p.write_text(render_html(an, build_document(an), meta), encoding="utf-8"))
+    out("rapor.md", lambda: (out_dir / "rapor.md").write_text(render_markdown(an, build_document(an), meta),
+                                                              encoding="utf-8"))
+
+    def excel():
+        from .excel_report import write_excel
+        write_excel(an, out_dir / "rapor.xlsx", meta)
+        log(f"Excel rapor: {out_dir / 'rapor.xlsx'}")
+    out("rapor.xlsx", excel)
     tpl = settings.find_template(str(template) if template else None)
     if tpl:
         from .word import TemplateError, render_docx
-        try:
-            p = render_docx(an, build_document(an, full=False), meta, tpl, out_dir / "rapor.docx")
-            log(f"Word rapor: {p}")
-        except TemplateError as e:
-            log(f"Word rapor üretilemedi: {e}")
+
+        def word():
+            try:
+                p = render_docx(an, build_document(an, full=False), meta, tpl, out_dir / "rapor.docx")
+                log(f"Word rapor: {p}")
+            except TemplateError as e:
+                log(f"Word rapor üretilemedi: {e}")
+        out("rapor.docx", word)
     else:
         log("Word template (.dotx) seçilmedi: rapor.docx üretilmedi (HTML/MD/JSON üretildi).")
+    if an.warnings:
+        log(f"{len(an.warnings)} uyarı var (raporun 'Keşif ve uyarılar' ekinde).")
+    if "rapor.html" in failed:
+        alt = next((out_dir / n for n in ("rapor.xlsx", "rapor.md", "rapor.json") if (out_dir / n).exists()), None)
+        if alt is None:
+            raise RuntimeError("Hiçbir rapor dosyası üretilemedi (log'a bakın)")
+        html_p = alt
     log(f"Rapor: {html_p}")
     return html_p
 
@@ -172,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
         from .analyze import ManualInputs
         manual = ManualInputs.load(args.manual) if args.manual else None
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
-                  args.author, args.department, args.customer, args.inventory, manual, args.exports)
+                  args.author, args.department, args.customer, args.inventory, manual, args.exports,
+                  with_inventory=not args.no_inventory)
     except ValueError as e:
         parser.error(str(e))
     if args.open:

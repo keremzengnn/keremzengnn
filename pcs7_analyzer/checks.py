@@ -14,6 +14,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from .model import Confidence, Finding, Severity
+from .parsers.subblk import lang_name
 
 SW_UPDATE = "[1] Software update V10.0 SP2"
 RELEASED = "[2] Released Modules V10.0 SP2"
@@ -237,7 +238,7 @@ def blk_custom(c, an):
     for b in an.block_folders:
         if not b.custom_blocks:
             continue
-        items = [f"FB{x.number} {x.name or '(header yok)'}" + (" STL" if x.lang.strip("0") == "1" else "")
+        items = [f"FB{x.number} {x.name or '(header yok)'}" + (" STL" if lang_name(x.lang) == "STL" else "")
                  + f" [{x.instances} inst.]" for x in b.custom_blocks]
         out.append(_f(c, f"{b.as_label}: {len(items)} custom FB: " + _short(items, 6), [b.info.dbf], scope=b.as_label))
     return out
