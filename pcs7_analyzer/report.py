@@ -850,8 +850,11 @@ def _appendix(an: Analysis, doc: list) -> None:
         for lib, c in b.libraries.items():
             lib_rows.append([b.as_label, lib, ", ".join(f"{a} ({n})" for a, n in sorted(c.items()))])
         n_cust += len(b.custom_blocks)
+        from .parsers.xutils import callers_text
         cust_rows += [[b.as_label, f"{x.kind}{x.number}", x.name or "(header yok)", x.family or "-", x.author or "-",
-                       lang_name(x.lang), x.version, str(x.instances) if b.memo_available else "-"] for x in b.custom_blocks]
+                       lang_name(x.lang), x.version, str(x.instances) if b.memo_available else "-",
+                       (callers_text(b, x.number) + " (çıkarım)") if x.kind == "FB" and callers_text(b, x.number) else "-"]
+                      for x in b.custom_blocks]
         inst = ", ".join(f"{k} {n}" for k, n in b.top_instances[:5])
         notes = ([f"en çok instance: {inst}"] if inst else []) \
             + ([f"symbol table: {b.symbol_source}"] if b.symbol_source else []) \
@@ -865,7 +868,7 @@ def _appendix(an: Analysis, doc: list) -> None:
         doc.append(Table(["AS", "Library", "Author (FB/FC sayısı)"], lib_rows, widths=[14, 30, 56]))
     if cust_rows:
         doc.append(Heading(2, f"Custom block'lar ({n_cust})"))
-        doc.append(Table(["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance"],
+        doc.append(Table(["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Çağıran (XUTILS)"],
                          _cap_rows(cust_rows, "Custom_Blocklar")))
     if extra:
         doc.append(Bullets(extra + ["Tüm FB instance sayıları: Excel 'Instance_Sayilari'."]))
