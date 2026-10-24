@@ -36,6 +36,7 @@ FILES = [
     ("qa_report.md", "Detay", "Rapor kalite kontrolü (HATA varsa raporu müşteriye göndermeden düzeltin)"),
     ("revizyon.md", "Detay", "Revizyon: önceki rapora göre yeni / kapanan / değişen bulgular"),
     ("rapor.md", "Detay", "Çalışma raporunun Markdown hali"),
+    ("yol_haritasi.md", "Detay", "Yol haritasının Markdown hali"),
     ("findings.json", "Detay", "Bulgular (BLOCKER / RİSK / BİLGİ / VERİ YOK, KANIT / ÇIKARIM) — makine okunur"),
     ("rapor.json", "Detay", "Analiz verisinin tamamı — makine okunur"),
     ("report_ir.json", "Detay", "Rapor modeli (profil, bölümler, istatistik) — makine okunur"),

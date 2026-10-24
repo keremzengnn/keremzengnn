@@ -20,6 +20,9 @@ def test_analysis_index_summary_and_links(tmp_path):
     assert "BLOCKER" in lines[4] and "RİSK" in lines[4]
     for name in ("envanter.html", "rapor.html", "rapor.docx", "rapor.xlsx", "qa_report.md", "yapi_tanisi.txt"):
         assert f'href="{name}"' in html, name
+    import importlib.util
+    if importlib.util.find_spec("pcs7_analyzer.roadmap"):
+        assert 'href="yol_haritasi.html"' in html
     assert "Geliştiriciye gönder" in html and "Proje özeti" in html
     assert 'href="revizyon.md"' not in html          # üretilmeyen dosya listelenmez
     assert (out / "envanter_ozet.json").exists()

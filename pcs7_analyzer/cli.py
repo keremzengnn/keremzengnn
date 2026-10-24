@@ -266,7 +266,7 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
             if e.name and e.name.endswith("roadmap"):
                 return                   # yol haritası modülü bu sürümde yok
             raise
-        p = write_roadmap(an, out_dir)
+        p = write_roadmap(an, out_dir, meta)
         log(f"Yol haritası: {p or out_dir / 'yol_haritasi.html'}")
     out("yol_haritasi.html", roadmap)
 
