@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .discovery import BlockFolderInfo, DiscoveryResult, OsProjectInfo, discover_source, owner_project
-from .parsers.subblk import STANDARD_LIBRARY
+from .parsers.subblk import STANDARD_LIBRARY, record_instance_issues
 from .unknown import UnknownRecorder
 from .model import Confidence, Finding
 from .parsers import (
@@ -165,6 +165,12 @@ class BlockFolderResult:
     unused_library_fbs: list[str] = field(default_factory=list)
     f_driver_instances: int = 0
     unresolved_instances: int = 0
+    # Instance çözümleme nedenleri / DBT formatı (parsers.subblk; record_instance_issues ile unknown'a yazılır)
+    unresolved_reasons: dict = field(default_factory=dict)   # {INSTANCE_ISSUE_*: n}
+    unresolved_examples: list = field(default_factory=list)  # [(DB no, neden, ham hex)]
+    memo_format: str = ""                                    # 'db3' / 'db4' ('' = DBT okunmadı)
+    memo_block_size: int = 0
+    memo_issues: dict = field(default_factory=dict)          # {DBT anomali: n}
     bad_records: int = 0
     sfb_instances: dict = field(default_factory=dict)     # {SFB no: instance DB sayısı}
     other_types: dict = field(default_factory=dict)       # {SUBBLKTYP kodu: kayıt sayısı} (bilinmeyen alt kayıt)
@@ -560,6 +566,10 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.fb_library = {b.number: (b.name, b.library, b.author) for b in bf.blocks if b.kind == "FB"}
     res.memo_available = bf.memo_available
     res.unresolved_instances = bf.unresolved_instances
+    res.unresolved_reasons = dict(bf.unresolved_reasons)
+    res.unresolved_examples = list(bf.unresolved_examples)
+    res.memo_format, res.memo_block_size = bf.memo_format, bf.memo_block_size
+    res.memo_issues = dict(bf.memo_issues)
     res.bad_records = bf.bad_records
     res.other_types = dict(bf.other_types)
     res.protected = [f"{k}{n}" for k, n in sorted(bf.protected)]
@@ -1076,9 +1086,7 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
             log(traceback.format_exc())
         if bfr.bad_records:
             _unk(an, "blocks", info.dbf, f"{bfr.bad_records} SUBBLK kaydı okunamadı (atlandı)", where="BLKNUMBER")
-        if bfr.unresolved_instances:
-            an.unknown.add("blocks", info.dbt or info.dbf, f"{bfr.unresolved_instances} instance DB'nin FB numarası "
-                           "çözülemedi (SSBPART geçersiz / ≥ 8192)", where="SSBPART")
+        record_instance_issues(bfr, an.unknown, info.dbt or info.dbf)   # neden başına bir satır (+ DBT anomalileri)
         if bfr.other_types:
             an.unknown.add("blocks", info.dbf, "tanınmayan SUBBLKTYP alt kayıtları (sayılmadı): " + ", ".join(
                 f"{c}×{n}" for c, n in sorted(bfr.other_types.items())), where="SUBBLKTYP")

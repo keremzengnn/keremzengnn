@@ -628,6 +628,7 @@ def _format_probe(src: Source, max_records: int = 200_000) -> list[str]:
                 out.append(f"    {f}: " + ", ".join(f"{k}×{v}" for k, v in c.most_common(40)))
         except Exception as ex:  # noqa: BLE001 - tanı bölümü; hata metni yazılır
             out.append(f"- {kind}: okunamadı ({type(ex).__name__})")
+    out += _memo_format_probe(src)
     toks = Counter()
     for e in src.entries:
         if e.name.lower().endswith(".mcp") and e.size < 50_000_000:
@@ -639,6 +640,29 @@ def _format_probe(src: Source, max_records: int = 200_000) -> list[str]:
                 out.append(f"- .mcp okunamadı ({type(ex).__name__})")
     out += ["", "## .mcp içindeki versiyon dizileri", ", ".join(f"{k}×{v}" for k, v in toks.most_common(20)) or "-"]
     return out
+
+
+def _memo_format_probe(src: Source) -> list[str]:
+    """İlk dolu SUBBLK.DBT'nin header'ı (512 byte, akış yok): memo formatı + block boyutu (parsers.subblk.RawMemoFile
+    kuralları: ofset 16 = 0x03 -> dBASE III / block 512; aksi dBASE IV, block boyutu ofset 20-21)."""
+    for e in src.entries:
+        if e.name.upper() != "SUBBLK.DBT" or e.size <= 512:
+            continue
+        try:
+            head = src.read_head(e.rel, 512)
+        except Exception as ex:  # noqa: BLE001 - tanı bölümü
+            return [f"- SUBBLK.DBT memo formatı: okunamadı ({type(ex).__name__})"]
+        if len(head) < 22:
+            continue
+        if head[16] == 0x03:
+            fmt, bs = "dBASE III", 512
+        else:
+            bs = int.from_bytes(head[20:22], "little")
+            fmt, bs = "dBASE IV", bs if 64 <= bs <= 32768 and bs % 64 == 0 else 512
+        n = sum(1 for x in src.entries if x.name.upper() == "SUBBLK.DBT" and x.size > 512)
+        return [f"- SUBBLK.DBT memo formatı: {fmt}, blok {bs} (header sürüm byte 0x{head[16]:02X}; ilk dosya, "
+                f"{mask_path(e.rel)}; dolu DBT: {n})"]
+    return ["- SUBBLK.DBT memo formatı: dolu SUBBLK.DBT yok"]
 
 
 # ---------------------------------------------------------------------------

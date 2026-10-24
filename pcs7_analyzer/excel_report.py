@@ -24,6 +24,7 @@ from .analyze import Analysis, author_version, staged_path_from
 from .model import Severity
 from .mlfb_info import describe
 from .parsers.subblk import lang_name
+from .parsers.xutils import callers_text, fc_callers_text
 from .report import GENERIC_OPEN_ITEMS, REFERENCES, _natkey, decision, manual_items, prep_list, tr_upper
 from .xlsx import Cell, Workbook, col_letter
 
@@ -243,18 +244,26 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
                  widths=[10, 26, 30, 10, 6, 30, 24, 12, 12, 14, 50])
 
     # ---------------- 4 Custom_Blocklar ----------------
-    rows = [["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Not"]]
+    # "Çağıran (ÇIKARIM)": XUTILS call tree (parsers.xutils) -> sadece bir AS klasöründe çağıran bilgisi varsa
+    with_callers = any(b.callers or b.fc_callers for b in an.as_folders)
+    rows = [["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Not"]
+            + (["Çağıran (ÇIKARIM)"] if with_callers else [])]
     for b in sorted(an.as_folders, key=lambda b: _natkey(b.as_label)):       # library projeleri AS değil
         for c in sorted(b.custom_blocks, key=lambda c: (c.kind, c.number)):
-            rows.append([b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
-                         lang_name(c.lang), c.version,
-                         c.instances if b.memo_available else "", "header'sız" if c.headerless else ""])
+            row = [b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
+                   lang_name(c.lang), c.version,
+                   c.instances if b.memo_available else "", "header'sız" if c.headerless else ""]
+            if with_callers:
+                txt = (callers_text(b, c.number) if c.kind == "FB" else
+                       fc_callers_text(b, c.number) if c.kind == "FC" else "")
+                row.append(Cell(txt, "yellow") if txt else "")
+            rows.append(row)
         for s in b.symbol_only:
             rows.append([b.as_label, s.split(" ", 1)[0], s.split(" ", 1)[-1], "", "", "", "", "",
-                         "symbol table'da var, block klasöründe yok"])
+                         "symbol table'da var, block klasöründe yok"] + ([""] if with_callers else []))
     _no_data(rows, "custom block bulunamadı (sadece library block'ları) veya block klasörü yok")
     wb.add_sheet("Custom_Blocklar", rows, header_rows={0}, filter_row=0, freeze=1,
-                 widths=[10, 10, 30, 12, 12, 8, 9, 9, 40])
+                 widths=[10, 10, 30, 12, 12, 8, 9, 9, 40] + ([40] if with_callers else []))
 
     # ---------------- 5 Instance_Sayilari ----------------
     rows = [["AS", "Library", "Author", "Versiyon (author)", "FB tipi", "Instance", f"En çok kullanılan (ilk {TOP_INSTANCES})",

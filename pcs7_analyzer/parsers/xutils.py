@@ -376,5 +376,37 @@ def callers_text(bfr, fb_no: int, max_items: int = 3) -> str:
     return ", ".join(parts)
 
 
+_ABL_UNITS = {1: "den", 2: "den", 3: "ten", 4: "ten", 5: "ten", 6: "dan", 7: "den", 8: "den", 9: "dan"}
+_ABL_TENS = {1: "dan", 2: "den", 3: "dan", 4: "tan", 5: "den", 6: "tan", 7: "ten", 8: "den", 9: "dan"}
+
+
+def _ablative(nr: int) -> str:
+    """Türkçe ayrılma eki (sayının okunuşuna göre): 35 -> 'ten', 1 -> 'den', 30 -> 'dan', 100 / 1000 -> 'den'."""
+    if nr % 10:
+        return _ABL_UNITS[nr % 10]
+    if nr % 100:
+        return _ABL_TENS[(nr // 10) % 10]
+    return "den"                                  # yüz / bin
+
+
+def fc_callers_text(bfr, fc_no: int, max_items: int = 3) -> str:
+    """
+    FC hücresi için: OB'den çağrılan FC -> "OB35'ten çağrılıyor (runtime group?)" (+ diğer çağıranlar);
+    aksi 'FC7, FB10 ×2'. XUTILS yoksa / çağıran yoksa ''. ÇIKARIM (CT kaydı = çağrı).
+    """
+    lst = (getattr(bfr, "fc_callers", None) or {}).get(fc_no) or []
+    obs = [n for t, n, _ in lst if t == "OB"]
+    rest = [(t, n, c) for t, n, c in lst if t != "OB"]
+    parts = []
+    if obs:
+        shown = obs[:max_items]
+        parts.append("/".join(f"OB{n}" for n in shown) + f"'{_ablative(shown[-1])} çağrılıyor (runtime group?)")
+    room = max(max_items - (1 if obs else 0), 0)
+    parts += [f"{t}{n}" + (f" ×{c}" if c > 1 else "") for t, n, c in rest[:room]]
+    if len(rest) > room:
+        parts.append(f"+{len(rest) - room}")
+    return ", ".join(parts)
+
+
 __all__ = ["XutilsSet", "TYPE_NAMES", "OPTYPES", "find_xutils_dirs", "read_xutils_set", "read_all", "call_tree",
-           "map_sets_to_folders", "attach", "callers_text"]
+           "map_sets_to_folders", "attach", "callers_text", "fc_callers_text"]
