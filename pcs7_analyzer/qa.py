@@ -39,6 +39,7 @@ class QaInput:
     docx: dict | None = None          # {"paras": [...], "tables": [...], "runs": [...]}
     xlsx: dict | None = None          # {sheet: [[cell, ...], ...]}
     missing: list[str] = field(default_factory=list)
+    unreadable: dict[str, str] = field(default_factory=dict)   # dosya -> hata (bozuk çıktı: QA HATA)
 
 
 # ---------------- okuma ----------------
@@ -120,7 +121,11 @@ def load(folder: Path) -> QaInput:
         if not p.exists():
             q.missing.append(name)
             return None
-        return fn(p)
+        try:
+            return fn(p)
+        except Exception as e:  # noqa: BLE001 - bozuk çıktı (ör. geçersiz XML'li docx) QA'yı durdurmaz, HATA olur
+            q.unreadable[name] = f"{type(e).__name__}: {e}"
+            return None
     q.ir = opt("report_ir.json", lambda p: json.loads(p.read_text(encoding="utf-8")))
     q.findings = opt("findings.json", lambda p: json.loads(p.read_text(encoding="utf-8")))
     q.md = opt("rapor.md", lambda p: p.read_text(encoding="utf-8"))
@@ -191,6 +196,11 @@ def qa_counts(q):
         if +sources[n] != +ref:
             yield Issue(HATA, "COUNTS", f"bulgu sayıları tutmuyor: {names[0]} {dict(sorted(ref.items()))} ≠ "
                                         f"{n} {dict(sorted(sources[n].items()))}", n)
+
+
+def qa_unreadable(q):
+    for name, err in q.unreadable.items():
+        yield Issue(HATA, "UNREADABLE", f"çıktı dosyası okunamadı / bozuk ({err[:200]})", name)
 
 
 def qa_highlight(q):
@@ -271,7 +281,8 @@ def qa_repeats(q):
             yield Issue(UYARI, "REPEAT", f"aynı cümle {n} kez: '{s[:70]}'", "rapor.docx")
 
 
-QA_CHECKS = [qa_placeholders, qa_actions, qa_glossary, qa_counts, qa_highlight, qa_direct_format, qa_excel_errors,
+QA_CHECKS = [qa_unreadable,
+             qa_placeholders, qa_actions, qa_glossary, qa_counts, qa_highlight, qa_direct_format, qa_excel_errors,
              qa_empty_sections, qa_omitted_blocker, qa_mask, qa_cell_words, qa_table_layout, qa_repeats]
 
 

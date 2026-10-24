@@ -134,11 +134,11 @@ def test_metadata(db):
     db_path, _ = db
     docs = {r[0]: r[1:] for r in _q(db_path, "SELECT path, doc_title, product_version, doc_no, title_mismatch"
                                               " FROM docs")}
-    title, ver, no, mm = docs["PCS7_Version_Upgrade/Software_Update_V10.0_SP2.md".replace("/", kb.os.sep)]
+    title, ver, no, mm = docs["PCS7_Version_Upgrade/Software_Update_V10.0_SP2.md"]
     assert "Software update" in title and ver == "V10.0 SP2" and no == "A5E52547920-AD" and mm == 0
-    _, ver8, _, mm8 = docs["SCALANCE/Profinet_Diagnostics_V8.0.md".replace("/", kb.os.sep)]
+    _, ver8, _, mm8 = docs["SCALANCE/Profinet_Diagnostics_V8.0.md"]
     assert ver8 == "V8.0" and mm8 == 1
-    ptitle, pver, pno, _ = docs["Safety/F_Manual.pdf".replace("/", kb.os.sep)]
+    ptitle, pver, pno, _ = docs["Safety/F_Manual.pdf"]
     assert "Safety Integrated" in ptitle and pno == "A5E00048979-AM" and pver is None
 
 
@@ -158,8 +158,10 @@ def test_missing_pdftotext(archive, tmp_path, monkeypatch):
     monkeypatch.setattr(kb, "WINDOWS_PDFTOTEXT_GLOBS", ())
     assert kb.find_pdftotext(str(tmp_path / "yok.exe")) is None
     stats = kb.build(archive, tmp_path / "kb2.sqlite", log=lambda m: None, pdftotext=str(tmp_path / "yok.exe"))
+    # pdftotext yok -> yerleşik okuyucu denenir; sahte PDF okunamaz -> atlanır (sayılır, build durmaz)
     assert stats["pdftotext"] is None and stats["pdf_skipped"] == 1
-    assert any(kb.UNKNOWN_NO_PDFTOTEXT in u for u in stats["unknown"])
+    assert stats["skip_reasons"] == {kb.REASON_BROKEN: 1}
+    assert any("F_Manual.pdf" in u and kb.REASON_BROKEN in u for u in stats["unknown"])
     assert stats["docs"] == 4
 
 

@@ -121,17 +121,21 @@ def _zip_time(ts: float) -> tuple:
     return t if t[0] >= 1980 else (1980, 1, 1, 0, 0, 0)
 
 
-def read_manifest(data: bytes) -> tuple[str, list[tuple[str, int, float, bool]]]:
-    """(orijinal kaynak etiketi, [(rel, size, mtime, included)])."""
-    rd = csv.reader(io.StringIO(data.decode("utf-8")))
-    head = next(rd)
+def read_manifest(data: bytes, bad: list[str] | None = None) -> tuple[str, list[tuple[str, int, float, bool]]]:
+    """(orijinal kaynak etiketi, [(rel, size, mtime, included)]). Okunamayan satırlar atlanır ve `bad`'e eklenir."""
+    rd = csv.reader(io.StringIO(data.decode("utf-8", "replace")))
+    head = next(rd, None)
     if not head or head[0] != "#pcs7_manifest":
         raise ValueError("geçersiz manifest")
-    next(rd)
+    next(rd, None)
     out = []
     for r in rd:
         if len(r) >= 4:
-            out.append((r[0], int(r[1]), float(r[2]), r[3] == "1"))
+            try:
+                out.append((r[0], int(r[1]), float(r[2]), r[3] == "1"))
+            except ValueError:          # bozuk satır (elle düzenlenmiş / kesik manifest): atla, bildir
+                if bad is not None:
+                    bad.append(",".join(r)[:200])
     return (head[2] if len(head) > 2 else ""), out
 
 

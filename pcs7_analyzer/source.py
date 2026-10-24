@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -137,8 +138,19 @@ class ZipSource(Source):
             out = long_path(out)
         if not out.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
-            with self.zf.open(self._info[rel]) as src, open(out, "wb") as dst:
-                shutil.copyfileobj(src, dst, 1 << 20)
+            # Önce .part'a yaz: bozuk / şifreli üye yarım dosya bırakmasın (sonraki çağrı onu geçerli sanmasın)
+            part = out.with_name(out.name + ".part")
+            try:
+                with self.zf.open(self._info[rel]) as src, open(part, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+            except (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError, EOFError) as ex:
+                part.unlink(missing_ok=True)
+                raise OSError(f"zip üyesi okunamadı (bozuk / şifreli / desteklenmeyen sıkıştırma): {rel} "
+                              f"({type(ex).__name__}: {ex})") from ex
+            except BaseException:
+                part.unlink(missing_ok=True)
+                raise
+            os.replace(part, out)
             m = self._entry_mtime(rel)
             if m:
                 os.utime(out, (m, m))
@@ -152,8 +164,12 @@ class ZipSource(Source):
             return 0.0
 
     def read_head(self, rel: str, n: int) -> bytes:
-        with self.zf.open(self._info[rel]) as f:
-            return f.read(n)
+        try:
+            with self.zf.open(self._info[rel]) as f:
+                return f.read(n)
+        except (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError, EOFError) as ex:
+            raise OSError(f"zip üyesi okunamadı (bozuk / şifreli / desteklenmeyen sıkıştırma): {rel} "
+                          f"({type(ex).__name__}: {ex})") from ex
 
     def close(self) -> None:
         self.zf.close()
@@ -172,7 +188,10 @@ class PackageSource(ZipSource):
     def __init__(self, zip_path: Path, progress=None, temp_dir: Path | None = None):
         super().__init__(zip_path, progress, temp_dir)
         from .collect import MANIFEST, read_manifest
-        orig, rows = read_manifest(self.zf.read(MANIFEST))
+        bad: list[str] = []
+        orig, rows = read_manifest(self.zf.read(MANIFEST), bad)
+        if bad:
+            self.warnings.append(f"Paket manifest'inde {len(bad)} satır okunamadı (atlandı), ilk: {bad[0]}")
         self.original_label = orig
         self.entries = sorted((Entry(r, size, mtime) for r, size, mtime, _ in rows), key=lambda e: e.rel)
         self._included = {r for r, _, _, inc in rows if inc and r in self._info}
@@ -251,8 +270,14 @@ def open_source(path: Path, progress=None, nested: bool = True) -> Source:
         with zipfile.ZipFile(path) as zf:
             is_package = MANIFEST in zf.NameToInfo
         if is_package:
-            return PackageSource(path, progress)
-        base = ZipSource(path, progress)
+            try:
+                return PackageSource(path, progress)
+            except Exception as ex:  # noqa: BLE001 - bozuk manifest: normal zip olarak oku (çökme yok)
+                base = ZipSource(path, progress)
+                base.warnings.append(f"Paket manifest'i okunamadı ({type(ex).__name__}: {ex}): "
+                                     "zip normal backup olarak okunuyor (büyük dosyalar pakette yok)")
+        else:
+            base = ZipSource(path, progress)
     if base is not None:
         if nested and any(e.rel.lower().endswith(".zip") for e in base.entries):
             return NestedSource(base, progress)

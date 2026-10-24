@@ -72,15 +72,23 @@ class WinccExport:
         return "?"
 
 
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def decode_text(data: bytes) -> str:
-    """Hiç hata vermez: bozuk / kesik (dosya başı okunurken surrogate çiftinin ortasında kesilmiş) UTF-16 -> U+FFFD."""
+    """
+    Hiç hata vermez: bozuk / kesik (dosya başı okunurken surrogate çiftinin ortasında kesilmiş) UTF-16 -> U+FFFD.
+    XML'de geçersiz kontrol karakterleri silinir (rapora taşınırsa docx/xlsx açılmaz); TAB / satır sonu kalır.
+    """
     if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
-        return data.decode("utf-16", "replace")
-    if data.startswith(b"\xef\xbb\xbf"):
-        return data[3:].decode("utf-8", "replace")
-    if len(data) > 4 and data[1:2] == b"\x00" and data[3:4] == b"\x00":      # BOM'suz UTF-16LE
-        return data.decode("utf-16-le", "replace")
-    return data.decode("utf-8", "replace")
+        t = data.decode("utf-16", "replace")
+    elif data.startswith(b"\xef\xbb\xbf"):
+        t = data[3:].decode("utf-8", "replace")
+    elif len(data) > 4 and data[1:2] == b"\x00" and data[3:4] == b"\x00":      # BOM'suz UTF-16LE
+        t = data.decode("utf-16-le", "replace")
+    else:
+        t = data.decode("utf-8", "replace")
+    return _CTRL.sub("", t)
 
 
 def looks_like_export(head: bytes) -> bool:
@@ -214,7 +222,7 @@ def _tag_map(exp: WinccExport) -> dict[str, tuple[str, str]]:
 
 
 def tag_prefix(name: str) -> str:
-    return re.split(r"[/.]", name, 1)[0] if name else ""
+    return re.split(r"[/.]", name, maxsplit=1)[0] if name else ""
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +262,7 @@ def is_diagnostic(a: Alarm) -> bool:
 
 
 def alarm_prefix(a: Alarm) -> str:
-    conn = re.split(r"[/]", a.message_tag, 1)[0] if a.message_tag else ""
+    conn = re.split(r"[/]", a.message_tag, maxsplit=1)[0] if a.message_tag else ""
     words = " ".join(a.event.split()[:2])
     return f"{conn} | {words}".strip(" |")
 
@@ -332,8 +340,8 @@ def compare_exports(a_name: str, a: list[WinccExport], b_name: str, b: list[Winc
     d.alarm_rows_only_b = [ab[n] for n in sorted(ob)]
     d.alarms_only_a = Counter(alarm_prefix(aa[n]) for n in oa)
     d.alarms_only_b = Counter(alarm_prefix(ab[n]) for n in ob)
-    d.diag_only_a = Counter(re.split(r"[/]", aa[n].message_tag, 1)[0] or "?" for n in oa if is_diagnostic(aa[n]))
-    d.diag_only_b = Counter(re.split(r"[/]", ab[n].message_tag, 1)[0] or "?" for n in ob if is_diagnostic(ab[n]))
+    d.diag_only_a = Counter(re.split(r"[/]", aa[n].message_tag, maxsplit=1)[0] or "?" for n in oa if is_diagnostic(aa[n]))
+    d.diag_only_b = Counter(re.split(r"[/]", ab[n].message_tag, maxsplit=1)[0] or "?" for n in ob if is_diagnostic(ab[n]))
     for n in sorted(set(aa) & set(ab)):
         if aa[n].event != ab[n].event:
             d.alarm_text_diff.append((n, aa[n].event, ab[n].event))

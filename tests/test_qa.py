@@ -224,9 +224,15 @@ def test_repeats_body_only(tmp_path):
     assert "iki kez" in c["REPEAT"][0].message
 
 
+def test_unreadable_docx(tmp_path):
+    with zipfile.ZipFile(tmp_path / "rapor.docx", "w") as z:
+        z.writestr("word/document.xml", "<bozuk")
+    assert checks(tmp_path)["UNREADABLE"][0].level == HATA
+
+
 def test_every_qa_check_has_a_firing_fixture():
     """Yeni QA kontrolü eklenirse bu dosyaya bozuk fixture eklenmeli."""
-    covered = {"qa_placeholders", "qa_actions", "qa_glossary", "qa_counts", "qa_highlight", "qa_direct_format",
+    covered = {"qa_unreadable", "qa_placeholders", "qa_actions", "qa_glossary", "qa_counts", "qa_highlight", "qa_direct_format",
                "qa_excel_errors", "qa_empty_sections", "qa_omitted_blocker", "qa_mask", "qa_cell_words",
                "qa_table_layout", "qa_repeats"}
     assert {c.__name__ for c in QA_CHECKS} == covered

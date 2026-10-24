@@ -5,12 +5,23 @@ import re
 from pathlib import Path
 
 _SYM = re.compile(r"\s*(FB|FC|SFB|SFC|UDT|OB|DB|VAT)\s+(\d+)")
+# XML'de geçersiz kontrol karakterleri (bozuk tablo): rapora (docx/xlsx) taşınırsa dosya açılmaz
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _s(v) -> str:
+    return _CTRL.sub("", str(v or "")).strip()
+
+
+def _read_lines(path: Path) -> list[str]:
+    """.ASC sabit genişlikli: kontrol karakteri boşlukla değişir (sütunlar kaymasın)."""
+    return _CTRL.sub(" ", Path(path).read_text(encoding="latin1")).splitlines()
 
 
 def parse_symbol_asc(path: Path) -> list[tuple[str, int, str, str]]:
     """'126,<name 24 char><type> <nr>  <type> <nr> <comment>' satırları -> (type, nr, name, comment)."""
     out = []
-    for line in Path(path).read_text(encoding="latin1").splitlines():
+    for line in _read_lines(path):
         if not line.startswith("126,"):
             continue
         s = line[4:]
@@ -53,8 +64,7 @@ def parse_symlist_dbf(path: Path) -> list[tuple[str, int, str, str]]:
         m = _SYM.match(str(rec.get(f_op) or ""))
         if not m:
             continue
-        out.append((m.group(1), int(m.group(2)), str(rec.get(f_name) or "").strip(),
-                    str(rec.get(f_com) or "").strip() if f_com else ""))
+        out.append((m.group(1), int(m.group(2)), _s(rec.get(f_name)), _s(rec.get(f_com)) if f_com else ""))
     return out
 
 
@@ -75,20 +85,20 @@ def read_symlist_all(path: Path) -> tuple[list[dict], list[str]]:
         raise ValueError(f"SYMLIST.DBF alanları tanınmadı: {fields}")
     rows = []
     for rec in table:
-        name = str(rec.get(f_name) or "").strip()
-        op = re.sub(r"\s+", " ", str(rec.get(f_op) or "")).strip()
+        name = _s(rec.get(f_name))
+        op = re.sub(r"\s+", " ", _s(rec.get(f_op))).strip()
         if not name and not op:
             continue
         rows.append({"symbol": name, "operand": op,
-                     "datatype": str(rec.get(f_typ) or "").strip() if f_typ else "",
-                     "comment": str(rec.get(f_com) or "").strip() if f_com else ""})
+                     "datatype": _s(rec.get(f_typ)) if f_typ else "",
+                     "comment": _s(rec.get(f_com)) if f_com else ""})
     return rows, fields
 
 
 def read_symbol_asc_all(path: Path) -> list[dict]:
     """.ASC export'unun tüm satırları: '126,<isim 24><operand 12><tip 10><yorum>' (sabit genişlik, yaklaşık)."""
     rows = []
-    for line in Path(path).read_text(encoding="latin1").splitlines():
+    for line in _read_lines(path):
         if not line.startswith("126,"):
             continue
         s = line[4:]

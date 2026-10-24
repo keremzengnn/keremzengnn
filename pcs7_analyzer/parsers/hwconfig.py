@@ -11,6 +11,10 @@ _CFG_LINE = re.compile(
 )
 
 
+# XML'de geçersiz kontrol karakterleri (bozuk export): rapora (docx/xlsx) taşınırsa dosya açılmaz
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 @dataclass
 class HwModule:
     location: str   # 'RACK 0, SLOT 3' / 'DPSUBSYSTEM 1, DPADDRESS 5, SLOT 4'
@@ -34,7 +38,7 @@ class HwModule:
 
 def parse_cfg(cfg_path: Path) -> dict:
     """HW Config export'unu okur (latin1, CRLF)."""
-    txt = Path(cfg_path).read_text(encoding="latin1")
+    txt = _CTRL.sub("", Path(cfg_path).read_text(encoding="latin1"))
     lines = txt.splitlines()
     station = next((l for l in lines if l.startswith("STATION")), "")
     subnets = [l for l in lines if l.startswith("SUBNET")]
