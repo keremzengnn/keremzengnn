@@ -205,11 +205,13 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
         st[f"{d}: CPU-station ilişkisi (TOBJTYP 1314972/1315656)"] = sum(
             1 for r in rels if _int(r.get("TOBJTYP")) in REL_CPU_IN_STATION)
         cpus = {}
+        cpu_unit: dict = {}
         if obj_f:
             for r in _rows(src, obj_f):
                 cid = _int(r.get("ID"))
                 if cid is not None:
                     cpus[cid] = (_str(r.get("NAME")), _int(r.get("SUBSTATN")), _int(r.get("MODULN")))
+                    cpu_unit[cid] = _int(r.get("UNITID"))
         cpu_station = {}
         for r in rels:
             if _int(r.get("TOBJTYP")) in REL_CPU_IN_STATION and _int(r.get("SOBJID")) is not None:
@@ -225,6 +227,9 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
                 p.cpu_name, p.rack, p.slot = cpus[cid]
             p.evidence.append(f"{rel_f}: RELID 16 CPU {cid} -> program {pid}")
             sid = cpu_station.get(cid)
+            if sid is None and cpu_unit.get(cid) in stations:      # H-system yedek CPU: HOBJECT1.UNITID = station
+                sid = cpu_unit[cid]
+                p.evidence.append(f"{obj_f}: CPU {cid} UNITID -> station {sid}")
             if sid is not None:
                 p.station_id = sid
                 if sid in stations:
@@ -232,8 +237,9 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
                     p.evidence.append(f"{files['hOmSave7/s7hstatx/HOBJECT1.DBF']}: station {sid}")
                 s7h = index.get(f"{pd}/hOmSave7/s7hstatx/{sid:x}.s7h".lower() if pd else f"homsave7/s7hstatx/{sid:x}.s7h")
                 p.s7h = s7h
+    is_library = any(k.endswith(".s7l") and k.rsplit("/", 1)[0] == (pd.lower() if pd else "") for k in index)
     for p in progs.values():
-        if p.block_folder and p.station_id is None:
+        if p.block_folder and p.station_id is None and not is_library:
             bm.unknown.append(f"blockmap | {pd or '.'} | program {p.program_id}: CPU / station bağı "
                               "bulunamadı (HRELATI1 RELID 16 yok; CPU'suz program olabilir)")
 

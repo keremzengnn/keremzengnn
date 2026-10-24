@@ -259,6 +259,31 @@ STD_COMM = {"TCON", "TDISCON", "TSEND", "TRCV", "P_SND_RK", "P_RCV_RK", "TUSEND"
 STD_COMM_SFB = {8: "USEND", 9: "URCV", 12: "BSEND", 13: "BRCV", 14: "GET", 15: "PUT"}
 
 
+FC_LIMIT = 65536            # S7-400: block başına 64 KB (MC7 kodu)
+
+
+def blk_fc_size(c, an):
+    """Runtime group FC'leri (CFC'nin ürettiği) büyükse V10 APL'nin ek parametreleriyle 64 KB aşılıp compile durabilir
+    ("Code generator not called"). Boyut KANIT (SUBBLK MC5LEN), aşma riski ÇIKARIM."""
+    out = []
+    any_data = False
+    for b in an.as_folders:
+        fcs = sorted(((k, v) for k, v in b.code_len.items() if k.startswith("FC")), key=lambda x: -x[1])
+        any_data = any_data or bool(fcs)
+        big = [(k, v) for k, v in fcs if v >= 0.6 * FC_LIMIT]
+        if not big:
+            continue
+        top = ", ".join(f"{k} {v / 1024:.0f} KB (%{100 * v / FC_LIMIT:.0f})" for k, v in big[:6])
+        sev = Severity.HIGH if big[0][1] >= 0.85 * FC_LIMIT else Severity.MEDIUM
+        out.append(_f(c, f"{b.as_label}: 64 KB sınırına yakın FC'ler: {top}. V10 APL block'ları daha fazla parametre "
+                         "taşıdığından runtime group FC'si 64 KB'ı aşıp compile'ı durdurabilir; runtime group bölünmesi "
+                         "planlanmalı (Siemens kaynağıyla teyit).", [b.info.dbf], Confidence.LOW, severity=sev,
+                      scope=b.as_label))
+    if not any_data:
+        raise NotChecked("SUBBLK.DBF'te MC5LEN yok / FC ana kaydı yok")
+    return out
+
+
 def blk_know_how(c, an):
     out = []
     for b in an.as_folders:
@@ -719,6 +744,7 @@ CHECKS: list[Check] = [
     Check("BLK_SYMBOL_MISMATCH", "Symbol ↔ block", "Symbol'de olup block'u olmayan block'lar", M, "-", blk_symbol),
     Check("PROJ_MIN_VERSION", "Proje versiyonu", "Proje en az PCS 7 V7.1 SP4 olmalı", H, f"{SW_UPDATE}, 4.3",
           proj_min_version),
+    Check("BLK_FC_SIZE", "FC 64 KB sınırı", "Runtime group FC'leri 64 KB sınırına yakın (MC5LEN)", M, "-", blk_fc_size),
     Check("BLK_KNOW_HOW", "Know-how protection", "Know-how protected block'lar (SUBBLK PASSWORD = 3)", M, "-",
           blk_know_how),
     Check("COMM_STD", "Haberleşme block'ları", "TCON/TSEND/BSEND/PUT/GET/Modbus… kullanımı (parametreler VERİ YOK)", M, "-",

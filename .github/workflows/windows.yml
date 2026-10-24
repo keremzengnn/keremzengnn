@@ -32,7 +32,6 @@ jobs:
       - name: Build
         run: |
           pyinstaller --noconfirm --onefile --windowed --name PCS7Analyzer --add-data "pcs7_analyzer/data;pcs7_analyzer/data" pcs7_analyzer_app.py
-          pyinstaller --noconfirm --onefile --windowed --name PCS7Envanter --add-data "pcs7_analyzer/data;pcs7_analyzer/data" pcs7_inventory_app.py
       - name: Smoke test (demo, headless)
         shell: pwsh
         run: |
@@ -42,12 +41,10 @@ jobs:
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\rapor.docx")) { throw "Word rapor yok (gömülü template?)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\envanter.xlsx")) { throw "analizle birlikte envanter yok" }
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\rapor\log.txt")) { throw "log.txt yok" }
-          $q = Start-Process -FilePath dist\PCS7Envanter.exe -ArgumentList "$env:RUNNER_TEMP\demo\DEMO_BACKUP","-o","$env:RUNNER_TEMP\inv" -Wait -PassThru
+          $q = Start-Process -FilePath dist\PCS7Analyzer.exe -ArgumentList "$env:RUNNER_TEMP\demo\DEMO_BACKUP","--inventory","-o","$env:RUNNER_TEMP\inv" -Wait -PassThru
           if ($q.ExitCode -ne 0) { throw "envanter exit $($q.ExitCode)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\inv\envanter.xlsx")) { throw "envanter.xlsx yok" }
       - uses: actions/upload-artifact@v4
         with:
           name: PCS7Analyzer-windows
-          path: |
-            dist/PCS7Analyzer.exe
-            dist/PCS7Envanter.exe
+          path: dist/PCS7Analyzer.exe

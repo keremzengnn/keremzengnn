@@ -177,7 +177,7 @@ değişen kısımlar: kademeli yol (`staged_path_from`), `version_note`, APL V8/
 `released_extract.extract_rows_markdown`). FW: `V6.x` joker, FW'siz satır = her FW. Aksesuarlar (6ES7 960-1AA… H-Sync)
 listede yok -> `ACCESSORIES` notu, Düşük etki.
 
-## Envanter modu (`inventory.py`, `--inventory`, PCS7Envanter.exe)
+## Envanter modu (`inventory.py`, `--inventory`, pencerede "Envanter"; ayrı PCS7Envanter.exe kaldırıldı)
 **Kullanıcının 1. önceliği: mevcut durum** (hardware, yazılım versiyonları, library'ler); analiz 2. aşama. Analiz modu da
 aynı açık kaynaktan envanteri üretir (`--no-inventory` kapatır). İlk sayfa "Mevcut durum" (`_current_state`): diğer
 sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni dosya tarihi). Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
@@ -200,6 +200,9 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
   desteklenen OS / SQL 2019 / Maintenance functions (4.3), sadece WinCC 3D design (9.6.1).
 
 ## Master prompt (PROMPT_BACKUP_ANALYZER_TEK_PARCA) karşılıkları
+- MP_PDCS gerçek proje turu (2026-10-24): zincir 15/15 program -> block klasörü; station yoksa CPU HOBJECT1.UNITID
+  (H yedek CPU); SUBBLK MC5LEN = kod boyutu -> `BLK_FC_SIZE` (64 KB); ek alt kayıt kodları 24-26/64-67/70/71 bilinen;
+  `parse_subblk` çalışma başına önbellek (`clear_cache`), analiz + envanter iki kez okumaz.
 - Kapsam: `docs/COVERAGE.md` (her madde YAPILDI / KISMİ / YAPILAMADI + neden), kararlar `docs/DECISIONS.md`.
 - `blockmap.py`: ID zinciri hrs/S7RESOFF → linkhrs.lnk (01 60 11 00 + int16) → ombstx/offline/<ID:08X>; HRELATI1 RELID 16
   (CPU→program), TOBJTYP 1314972/1315656 (CPU→station); YDBs/YLNKLIST → SYMLISTS. Gerçek projede teyit edilmedi:

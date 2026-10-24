@@ -17,7 +17,7 @@ Durum: **YAPILDI** / **KISMİ** / **YAPILAMADI** (neden). Test sütunu: ilgili t
 | 11 | author→library eşleme tablosu dosyada (`data/author_library_map.yaml`) | subblk.AUTHOR_LIBRARY (Python dict) | test_subblk | KISMİ (YAML değil, bkz. DECISIONS) |
 | 12 | Mixed-version, custom block listesi, instance sayıları, source var mı | analyze, checks BLK_*, readiness | test_analyze, test_readiness | YAPILDI (source: s7asrcom/AWL/SCL varlığı, block bazında değil) |
 | 13 | Know-how protection / şifreli block sayısı | subblk (PASSWORD = 3), checks BLK_KNOW_HOW | test_subblk | KISMİ (alan anlamı açık kaynak okuyucudan; gerçek projede teyit bekliyor) |
-| 14 | Runtime group / chart başına block (FC 64 KB riski) | - (yapi_tanisi'nde XUTILS CT* kod dağılımı toplanıyor) | - | YAPILAMADI (XUTILS çağrı ağacı CT*.DBF ile mümkün görünüyor; kod anlamları gerçek tanı dosyasıyla çözülecek) |
+| 14 | Runtime group / chart başına block (FC 64 KB riski) | subblk MC5LEN -> checks BLK_FC_SIZE, rapor "En büyük FC'ler" | test_subblk | KISMİ (FC kod boyutu KANIT; V10'da aşma riski ÇIKARIM; XUTILS çağrı ağacı henüz kullanılmıyor) |
 | 15 | hwconfig: .cfg, USED_S7_VERSIONS, F-capable, PDM, modül/FW, GSD ayrı | parsers/hwconfig.py | test_hwconfig | YAPILDI |
 | 16 | MLFB yanında model / açıklama | mlfb_info.py | test_source | YAPILDI |
 | 17 | IP / MPI adresleri, slot listesi | inventory "HW modüller (export)" (Konum) | test_inventory | KISMİ (rack/slot var; IP/MPI ayrıştırılmıyor) |

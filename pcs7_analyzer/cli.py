@@ -221,6 +221,8 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         if alt is None:
             raise RuntimeError("Hiçbir rapor dosyası üretilemedi (log'a bakın)")
         html_p = alt
+    from .parsers.subblk import clear_cache
+    clear_cache()
     log(f"Rapor: {html_p}")
     return html_p
 

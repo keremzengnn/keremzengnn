@@ -171,6 +171,7 @@ class BlockFolderResult:
     standard_blocks: list = field(default_factory=list)  # header'sız, isimden Siemens standart block (ÇIKARIM)
     protected: list = field(default_factory=list)        # know-how protected block'lar ["FB909", …] (ÇIKARIM)
     local_data: dict = field(default_factory=dict)       # {"OB35": 2048, …} block'un kendi local data'sı (byte)
+    code_len: dict = field(default_factory=dict)         # {"FC18": 51234, …} derlenmiş kod boyutu (MC5LEN, byte)
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
@@ -557,6 +558,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.other_types = dict(bf.other_types)
     res.protected = [f"{k}{n}" for k, n in sorted(bf.protected)]
     res.local_data = {f"{k}{n}": v for (k, n), v in sorted(bf.local_data.items())}
+    res.code_len = {f"{k}{n}": v for (k, n), v in sorted(bf.code_len.items())}
     summary = library_summary(bf)
     res.libraries = {lib: dict(c) for lib, c in sorted(summary.items())}
     for lib, c in summary.items():

@@ -719,6 +719,14 @@ def _appendix(an: Analysis, doc: list) -> None:
         if obs:
             top = sorted(obs.items(), key=lambda x: -x[1])[:6]
             ld_rows.append([b.as_label, ", ".join(f"{k} {v} B" for k, v in top), str(max(b.local_data.values()))])
+    fc_rows = []
+    for b in an.as_folders:
+        fcs = sorted(((k, v) for k, v in b.code_len.items() if k.startswith("FC")), key=lambda x: -x[1])[:10]
+        if fcs:
+            fc_rows.append([b.as_label, ", ".join(f"{k} {v / 1024:.1f} KB" for k, v in fcs)])
+    if fc_rows:
+        doc.append(Heading(2, "En büyük FC'ler (MC5LEN, 64 KB sınırı)"))
+        doc.append(Table(["AS", "FC (kod boyutu)"], fc_rows, widths=[20, 80]))
     if ld_rows:
         doc.append(Heading(2, "Local data (block'ların kendi değeri)"))
         doc.append(Table(["AS", "OB local data (en büyük)", "En büyük block local data (byte)"], ld_rows))

@@ -92,6 +92,8 @@ def _as01(root: Path, base: str, mtime: float) -> None:
         block(FB, 1990, "DRIVE", "SINAMICS_G120", 0x11, "BM", lang="00004"),
         block(FB, 1993, "COMM", "E_AS_GET", 0x10, "BM", lang="00001"),
         block(FC, 1, "", "", 0x10, "ES_MAP"), block(FC, 2, "", "", 0x10, "ES_MAP"),
+        # FC1 ana (MC7) kaydı: runtime group FC'si, kod boyutu 41 KB (64 KB sınırının %64'ü)
+        dict(block("00012", 1, "", "", 0x10, "ES_MAP"), MC5LEN=42000, LOCDATALEN=200),
         block(FC, 256, "CONVERT", "SEL_R", 0x10, "DRIVER81"),
         block(OB, 1, "", "CYC_INT", None, ""), block(OB, 35, "", "", None, ""), block(OB, 100, "", "", None, ""),
     ]

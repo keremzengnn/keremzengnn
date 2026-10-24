@@ -30,7 +30,10 @@ MAIN_KIND = {SUBBLK_FB_MAIN: "FB", SUBBLK_FC_MAIN: "FC", SUBBLK_OB: "OB", SUBBLK
              SUBBLK_SFB: "SFB"}
 # Bilinen alt kayıtlar (sayılmaz, Unknown'a da yazılmaz): plaintext interface / yorum / DB yapısı / VAT
 KNOWN_SUBRECORDS = {"00001", "00003", "00006", "00007", "00009", "00017", "00018", "00019", "00020", "00021", "00022",
-                    "00027", "00038", "00066"}
+                    "00027", "00038", "00066",
+                    # Gerçek projede block sayılarıyla birebir örtüşen ek alt kayıtlar (anlamı bilinmiyor, sayılmaz):
+                    # 24/67 OB, 25/64 FB, 26/65 FC, 70 SFC, 71 SFB
+                    "00024", "00025", "00026", "00064", "00065", "00067", "00070", "00071"}
 KNOW_HOW_PASSWORD = 3        # ana kayıtta PASSWORD = 3 -> know-how protection (açık kaynak okuyucu; ÇIKARIM)
 
 # SSBPART'tan okunan FB numarası bunun üstündeyse geçersiz kabul edilir.
@@ -135,6 +138,7 @@ class BlockFolder:
     bad_records: int = 0          # BLKNUMBER okunamayan kayıt (atlandı)
     protected: set = field(default_factory=set)      # {(kind, nr)} know-how protected (PASSWORD = 3)
     local_data: dict = field(default_factory=dict)   # {(kind, nr): LOCDATALEN} (block'un kendi local data'sı)
+    code_len: dict = field(default_factory=dict)     # {(kind, nr): MC5LEN} derlenmiş kod boyutu (byte), ana kayıttan
     other_types: collections.Counter = field(default_factory=collections.Counter)  # bilinen 6 tip dışı SUBBLKTYP
 
     @property
@@ -168,7 +172,30 @@ def dbf_record_count(dbf_path: Path) -> int:
     return int.from_bytes(head[4:8], "little") if len(head) == 8 else 0
 
 
+_CACHE: dict = {}
+
+
+def clear_cache() -> None:
+    """Çalışma sonunda çağrılır (analiz + envanter aynı SUBBLK'yı iki kez okumasın diye önbellek)."""
+    _CACHE.clear()
+
+
 def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> BlockFolder:
+    dbf_path = Path(dbf_path)
+    try:
+        stt = dbf_path.stat()
+        key = (str(dbf_path), stt.st_size, stt.st_mtime, with_instances)
+    except OSError:
+        key = None
+    if key in _CACHE:
+        return _CACHE[key]
+    bf = _parse_subblk(dbf_path, with_instances, progress)
+    if key is not None:
+        _CACHE[key] = bf
+    return bf
+
+
+def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> BlockFolder:
     """
     SUBBLK.DBF okur.
     - Boş block klasöründe DBF 834 byte'tır (sadece header) -> n_records = 0.
@@ -212,6 +239,9 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
             ld = _int0(rec.get("LOCDATALEN"))
             if ld:
                 bf.local_data[(kind, nr)] = ld
+            cl = _int0(rec.get("MC5LEN"))
+            if cl and kind in ("FC", "FB", "OB"):
+                bf.code_len[(kind, nr)] = cl
             if kind in ("FB", "FC"):
                 main_headers.setdefault((kind, nr), rec)
         elif ty not in _KIND and str(ty).strip() not in KNOWN_SUBRECORDS:

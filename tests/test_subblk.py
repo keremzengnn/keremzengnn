@@ -138,7 +138,7 @@ def test_main_records_know_how_local_data(tmp_path):
             dict(block("00004", 1800, "Drv", "Pcs7DiIn", author="AdvLib81")),
             dict(block("00014", 1800, "Drv", "Pcs7DiIn", author="AdvLib81"), LOCDATALEN=40),
             dict(block("00008", 35, "", "", author=""), LOCDATALEN=2048),
-            dict(block("00019", 18)), dict(block("00024", 18))]
+            dict(block("00019", 18)), dict(block("00029", 18))]
     p = tmp_path / "SUBBLK.DBF"
     write_dbf(p, fields, recs, memo="db4")
     bf = parse_subblk(p)
@@ -147,7 +147,7 @@ def test_main_records_know_how_local_data(tmp_path):
     assert bf.local_data[("OB", 35)] == 2048 and bf.local_data[("FB", 909)] == 120
     fb909 = next(b for b in bf.blocks if b.number == 909)
     assert fb909.author == "SIEMENS" and fb909.name == "MB_RED"
-    assert dict(bf.other_types) == {"00024": 1}                     # 00019 bilinen alt kayıt
+    assert dict(bf.other_types) == {"00029": 1}                     # 00019 bilinen alt kayıt
 
 
 def test_real_project_false_positives():
@@ -158,3 +158,20 @@ def test_real_project_false_positives():
     assert author_version("AdvLibIL") == "" and classify_author("AdvLibIL") == "PCS 7 Industry Library"
     assert author_version("AdvLib82") == "V8.2" and author_version("F_SAFE13") == "V1_3"
     assert classify_author("", "TCON") == STANDARD_LIBRARY and classify_author("", "MYBLOCK") == "custom/unknown"
+
+
+def test_fc_code_length_and_64kb_check(tmp_path):
+    from dbfwriter import SUBBLK_FIELDS, block, write_dbf
+    from pcs7_analyzer.analyze import analyze
+    fields = SUBBLK_FIELDS + [("MC5LEN", "N", 11)]
+    d = tmp_path / "P" / "ombstx" / "offline" / "00000001"
+    d.mkdir(parents=True)
+    (tmp_path / "P" / "P.s7p").write_bytes(b"x")
+    write_dbf(d / "SUBBLK.DBF", fields, [dict(block("00012", 18, author="ES_MAP"), MC5LEN=60000),
+                                         dict(block("00012", 19, author="ES_MAP"), MC5LEN=1000),
+                                         dict(block("00014", 1800, "Drv", "Pcs7DiIn", author="AdvLib81"), MC5LEN=9000)],
+              memo="db4")
+    an = analyze(tmp_path)
+    assert an.block_folders[0].code_len == {"FB1800": 9000, "FC18": 60000, "FC19": 1000}
+    f = [x for x in an.findings if x.check_id == "BLK_FC_SIZE"]
+    assert f and "FC18 59 KB (%92)" in f[0].detail and f[0].severity.value == "Yüksek"

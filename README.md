@@ -12,7 +12,6 @@ Girdi: backup **klasörü** veya doğrudan **.zip** (açmaya gerek yok; sadece g
 | Program | Ne yapar | Çıktı |
 |---|---|---|
 | **PCS7Analyzer.exe** | V10.0 SP2 upgrade değerlendirmesi + envanter (pencerede sadece "Envanter" modu da seçilebilir) | rapor.docx, rapor.xlsx (8 sayfa), rapor.html (+ md, json), envanter.xlsx |
-| **PCS7Envanter.exe** | Sadece backup'taki her şeyi okur ve listeler, değerlendirme yapmaz | envanter.xlsx, envanter.html, yapi_tanisi.txt |
 
 **Önce bakılacak yer: `envanter.xlsx` → "Mevcut durum" sayfası.** Tek tabloda: PCS 7 / STEP 7 / WinCC versiyonu
 (proje dosyalarından), kullanılan library'ler ve versiyonları (APL, Basis, F, Logic Matrix, SFC, V7.1 …, karışık versiyon
@@ -27,7 +26,8 @@ adları ve kayıt sayıları); formatı çözülmemiş dosyalar için geliştiri
 ## Kullanım (Windows)
 
 **A) Exe (Python gerekmez):** GitHub → Actions → "Windows test + exe" → son çalışmanın *Artifacts* kısmından
-`PCS7Analyzer-windows` indirin → `PCS7Analyzer.exe` veya `PCS7Envanter.exe`'yi çift tıklayın.
+`PCS7Analyzer-windows` indirin → `PCS7Analyzer.exe`'yi çift tıklayın (envanter de bu programda: "Envanter" modu
+veya analizle birlikte otomatik).
 
 **B) Python ile (3.11+, ek paket gerekmez):** repo klasöründe `Baslat.bat`'a çift tıklayın.
 

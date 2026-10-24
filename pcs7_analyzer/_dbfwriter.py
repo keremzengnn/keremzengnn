@@ -13,6 +13,7 @@ SUBBLK_FIELDS = [
     ("SUBBLKTYP", "C", 5), ("BLKNUMBER", "C", 5), ("BLOCKFNAME", "C", 24), ("BLOCKNAME", "C", 24),
     ("VERSION", "N", 3), ("USERNAME", "C", 8), ("BLKLANG", "C", 5),
     ("MC5CODE", "M", 10), ("SSBPART", "M", 10), ("ADDINFO", "M", 10),
+    ("PASSWORD", "N", 11), ("LOCDATALEN", "N", 5), ("MC5LEN", "N", 11),     # gerçek SUBBLK.DBF'te de var
 ]
 
 
