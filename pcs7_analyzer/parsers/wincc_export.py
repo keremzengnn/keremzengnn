@@ -73,8 +73,9 @@ class WinccExport:
 
 
 def decode_text(data: bytes) -> str:
+    """Hiç hata vermez: bozuk / kesik (dosya başı okunurken surrogate çiftinin ortasında kesilmiş) UTF-16 -> U+FFFD."""
     if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
-        return data.decode("utf-16")
+        return data.decode("utf-16", "replace")
     if data.startswith(b"\xef\xbb\xbf"):
         return data[3:].decode("utf-8", "replace")
     if len(data) > 4 and data[1:2] == b"\x00" and data[3:4] == b"\x00":      # BOM'suz UTF-16LE
