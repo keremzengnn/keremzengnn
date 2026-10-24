@@ -19,38 +19,40 @@ def inv_out(tmp_path_factory):
 def test_sheets(inv_out):
     inv, _ = inv_out
     names = [s.name for s in inv.sheets]
-    assert names[:2] == ["Mevcut durum", "Özet"] and names[-1] == "Uyarılar"
-    for n in ("Projeler", "HW modüller (export)", "HW (backup içi)", "Block klasörleri", "Bloklar", "Instance sayıları",
-              "Library özeti", "Semboller", "OS projeleri", "OS dosyaları", "Dosya türleri"):
+    assert names[:2] == ["Mevcut durum", "Hardware"] and names[-1] == "Uyarılar"
+    for n in ("Projeler", "Block klasörleri", "Özel bloklar", "OS projeleri"):
         assert n in names
+    for gone in ("Bloklar", "Instance sayıları", "Library özeti", "DB family", "S7 program ↔ AS"):
+        assert gone not in names
 
 
 def test_current_state(inv_out):
     inv, _ = inv_out
     rows = {(r[0], r[1]): r[2] for r in inv.sheet("Mevcut durum").rows}
-    assert rows[("Yazılım", "PCS 7 versiyonu")] == "V8.1"
-    assert "V5.5 SP4" in rows[("Yazılım", "STEP 7 (AS01)")]
+    assert rows[("Yazılım", "PCS 7")] == "V8.1"
+    assert "V5.5 SP4" in rows[("Yazılım", "STEP 7")] and "AS01" in rows[("Yazılım", "STEP 7")]
     # eski kopya (ESKI_BACKUP) özete katılmaz: APL sayıları çift sayılmaz
     assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and "ESKI_BACKUP" not in rows[("Library", "APL")]
     assert "karışık versiyon" in rows[("Library", "APL")]
-    assert rows[("Library", "Custom FB (AS01)")].startswith("3 FB")
-    assert rows[("Library", "Header'sız FB (AS01)")].startswith("1 FB")
-    assert "6ES7 414-5HM06-0AB0" in rows[("Hardware", "AS01: CPU")]
+    assert rows[("Library", "Custom FB")].startswith("3 FB") and "(AS01 1, AS02 3)" in rows[("Library", "Custom FB")]
+    assert rows[("Hardware", "AS01")].startswith("CPU 414-5H PN/DP V6.0, CP 443-1 V3.0")
+    assert "F-capable" in rows[("Hardware", "AS02")] and "F-capable" not in rows[("Hardware", "AS01")]
     assert any(k[0] == "Not" and "ESKI_BACKUP" in v for k, v in rows.items())
 
 
 def test_blocks_and_instances(inv_out):
     inv, _ = inv_out
-    rows = [r for r in inv.sheet("Bloklar").rows if r[0] == "AS01" and r[1] == "00000001"]
-    b = {r[3]: r for r in rows}
-    assert b[1827][4] == "Intlk16" and b[1827][7] == "APL" and b[1827][10] == 5
-    assert b[1990][10] == 1
+    rows = [r for r in inv.sheet("Özel bloklar").rows if r[0] == "DEMO_MP/AS01"]
+    b = {r[4]: r for r in rows}
+    assert 1827 not in b                                  # APL (Intlk16) tek tek listelenmez
+    assert b[1990][5] == "SINAMICS_G120" and b[1990][2] == "Custom" and b[1990][8] == 1
 
 
 def test_symbols_full_list_from_backup(inv_out):
     """SYMLIST.DBF backup içinden: block sembolleri + I/O sembolleri, doğru block klasörüne eşlenmiş."""
     inv, _ = inv_out
-    rows = [r for r in inv.sheet("Semboller").rows if r[0] == "DEMO_MP/AS01/YDBs/1/SYMLIST.DBF"]
+    sym = next(s for s in inv.symbol_sheets if s.name == "Semboller")      # semboller.xlsx (envanterde değil)
+    rows = [r for r in sym.rows if r[0] == "DEMO_MP/AS01/YDBs/1/SYMLIST.DBF"]
     ops = {r[3]: r for r in rows}
     assert ops["Intlk16"][4] == "FB 1827"
     assert ops["Motor_Run"][4] == "I 0.0" and ops["Motor_Run"][5] == "BOOL"
@@ -59,17 +61,19 @@ def test_symbols_full_list_from_backup(inv_out):
 
 def test_hw_from_backup_and_export(inv_out):
     inv, _ = inv_out
-    internal = inv.sheet("HW (backup içi)").rows
-    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[4] == "CPU 414-5H PN/DP" and r[6] == "V6.0" for r in internal)
-    exp = inv.sheet("HW modüller (export)").rows
-    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[7] == "CPU" for r in exp)
+    # .s7h taraması okunur ama export'u olan station için Hardware sayfasına girmez
+    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[4] == "V6.0" for r in inv.hw_scan)
+    hw = inv.sheet("Hardware").rows
+    assert any(r[0] == "AS01" and r[1] == "CPU" and r[2] == "6ES7 414-5HM06-0AB0" and r[3] == "CPU 414-5H PN/DP"
+               and r[4] == "V6.0" and r[6] == "HW export" for r in hw)
+    assert not any(r[6] != "HW export" for r in hw)
 
 
-def test_os_files_keep_case(inv_out):
+def test_os_projects_one_row(inv_out):
     inv, _ = inv_out
-    files = inv.sheet("OS dosyaları").rows
-    assert any(r[2] == "GraCS/Tank_New.pdl" and r[3] == "custom picture" for r in files)
-    assert any(r[3] == "F faceplate" for r in files)
+    rows = {(r[0], r[2]): r for r in inv.sheet("OS projeleri").rows}
+    assert rows[("OS_SRV1", "ES")][1] == "server" and rows[("OS_SRV1", "OS PC kopyası")][5] == 5
+    assert rows[("OS_SRV1_StBy", "ES")][1] == "standby"
 
 
 def test_outputs_and_xlsx(inv_out):
@@ -78,8 +82,10 @@ def test_outputs_and_xlsx(inv_out):
         assert (out / n).stat().st_size > 0
     with zipfile.ZipFile(out / "envanter.xlsx") as z:
         wb = z.read("xl/workbook.xml").decode("utf-8")
-        assert 'name="Semboller"' in wb and len([n for n in z.namelist() if n.startswith("xl/worksheets/")]) == len(inv.sheets)
-        assert "Motor_Run" in z.read(f"xl/worksheets/sheet{[s.name for s in inv.sheets].index('Semboller') + 1}.xml").decode()
+        assert 'name="Semboller"' not in wb and len([n for n in z.namelist() if n.startswith("xl/worksheets/")]) == len(inv.sheets)
+    with zipfile.ZipFile(out / "semboller.xlsx") as z:
+        assert 'name="Semboller"' in z.read("xl/workbook.xml").decode("utf-8")
+        assert "Motor_Run" in z.read("xl/worksheets/sheet1.xml").decode()
 
 
 def test_diagnostics_contain_no_customer_data(inv_out):

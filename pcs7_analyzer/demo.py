@@ -15,7 +15,8 @@ import time
 import zipfile
 from pathlib import Path
 
-from ._dbfwriter import SUBBLK_FIELDS, block, fb_instance, sfb_instance, write_dbf, write_project_links
+from ._dbfwriter import (SUBBLK_FIELDS, block, fb_instance, sfb_instance, write_dbf, write_project_links,
+                         write_xutils)
 
 FB, FC, OB, DB = "00004", "00005", "00008", "00010"
 DAY = 86400.0
@@ -117,6 +118,14 @@ def _as01(root: Path, base: str, mtime: float) -> None:
     _file(root, f"{base}/AS01/AS01.s7p", b"s7p")
     _file(root, f"{base}/AS01/hOmSave7/s7hstatx/S00001.s7h",
           _s7h([("6ES7 414-5HM06-0AB0", "V6.0"), ("6GK7 443-1EX30-0XE0", "V3.0")]))
+    # XUTILS cross-reference (çağrı ağacı): link tablosu yok -> FB seti benzerliğiyle eşlenir
+    calls = [(8, 35, 12, 1, 66), (8, 1, 12, 2, 66), (8, 1, 14, 2500, 66), (8, 1, 10, 112, 80)]
+    calls += [(12, 1, 14, 1827, 66)] * 5 + [(12, 1, 14, 1850, 66)] * 3 + [(12, 1, 14, 2501, 66), (12, 1, 14, 1990, 66)]
+    calls += [(12, 2, 14, 1800, 66)] * 6 + [(12, 2, 14, 300, 66)] * 2 + [(14, 2501, 14, 1993, 66), (12, 1, 13, 20, 66)]
+    calls += [(12, 1, 10, 100 + i, 80) for i in range(8)]
+    fbs = [1827, 1850, 1851, 1800, 1700, 1701, 300, 60, 2500, 2501, 1990, 1993]
+    write_xutils(root / base / "AS01", 1, calls, [(14, n, 4) for n in fbs] + [(12, n, 4) for n in (1, 2, 256)] +
+                 [(8, n, 4) for n in (1, 35, 100)], name="S7 Program(1)", xr_records=3)
     for p in (root / base / "AS01").rglob("*"):
         if p.is_file():
             os.utime(p, (mtime, mtime))
@@ -141,6 +150,10 @@ def _as02(root: Path, base: str) -> None:
             _sym("F_CH_DO", "FB   352"), _sym("F_PLK", "FB   353")]
     write_dbf(_file(root, f"{base}/AS02/YDBs/1/SYMLIST.DBF"), SYMLIST_FIELDS, syms, memo=None)
     _file(root, f"{base}/AS02/AS02.s7p", b"s7p")
+    # XUTILS: link tablosu TOI = S7 program ID 7 -> ID zinciriyle block klasörü 0000000A
+    write_xutils(root / base / "AS02", 2, [(8, 35, 12, 5, 66)] + [(12, 5, 14, 351, 66)] * 4 + [(12, 5, 14, 1827, 66)] * 4
+                 + [(12, 5, 14, 352, 66), (12, 300, 14, 353, 66)],
+                 [(14, n, 4) for n in (1827, 1800, 351, 352, 353)] + [(12, 300, 4), (8, 1, 4)], toi=7, name="AS02_Prog")
     # STEP 7 ID zinciri (S7RESOFF / linkhrs.lnk / HRELATI1 / YLNKLIST): block klasörü 0000000A -> CPU -> station AS02
     write_project_links(root / base / "AS02", [{"id": 7, "name": "AS02_Prog", "folder_id": 0x0A, "cpu_id": 501,
                                                 "cpu_name": "CPU 414-5H", "station_id": 0x1F, "station_name": "AS02",

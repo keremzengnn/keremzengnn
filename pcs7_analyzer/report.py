@@ -41,6 +41,7 @@ class Topline:
 class Heading:
     level: int
     text: str
+    fold: bool = False   # HTML: level-1 bölüm kapalı <details> (ekler; ilk ekran kısa kalsın). Word / MD yok sayar.
 
 
 @dataclass
@@ -101,6 +102,8 @@ GENERIC_OPEN_ITEMS = [
     "SIMATIC Logon / domain yapısı",
 ]
 
+FULL_LIST_MAX = 10    # çalışma raporu (HTML/MD): uzun listelerde gösterilen satır; kalanı Excel sayfasına işaret
+
 _SEV_ORDER = [Severity.LOW, Severity.MEDIUM, Severity.HIGH]
 
 # Zorluklar tablosu gruplaması: check id -> (grup etiketi, sıra). {as} = bulgunun AS'i.
@@ -146,6 +149,18 @@ def _fmt_list(items, n=6) -> str:
         return "-"
     s = ", ".join(items[:n])
     return s + (f" … (+{len(items) - n})" if len(items) > n else "")
+
+
+def _more(n_rest: int, sheet: str, what: str = "satır") -> str:
+    return f"… +{n_rest} {what} daha: Excel '{sheet}' sayfası"
+
+
+def _cap_rows(rows: list, sheet: str, n: int = FULL_LIST_MAX, ncols: int | None = None) -> list:
+    """İlk `n` satır + (fazlası varsa) Excel sayfasına işaret eden son satır."""
+    if len(rows) <= n:
+        return rows
+    ncols = ncols or (len(rows[0]) if rows else 1)
+    return rows[:n] + [[_more(len(rows) - n, sheet)] + ["" for _ in range(ncols - 1)]]
 
 
 def _b(lst):
@@ -635,13 +650,6 @@ def build_document(an: Analysis, full: bool = True) -> list:
     doc.append(Note("Planlı duruş (AS STOP) ve PC / Windows yenilemesi her upgrade'de zaten kapsamdadır; "
                     "zorluk olarak listelenmemiştir."))
 
-    if full:
-        from .readiness import backup_coverage
-        doc.append(Heading(1, "Backup içeriği ve yeterlilik"))
-        doc.append(Para("Backup'ta ne var / ne yok ve eksik parçanın analize etkisi. Olmayan şey için tahmin yapılmaz."))
-        doc.append(Table(["Kontrol", "Durum", "Kanıt", "Analize etkisi"], backup_coverage(an), "Backup yeterliliği",
-                         badge_cols=[1], widths=[24, 10, 30, 36]))
-
     # ---------------- PROJE ENVANTERİ ----------------
     doc.append(Topline("PROJE ENVANTERİ"))
     doc.append(Heading(1, "Proje bilgileri"))
@@ -667,7 +675,8 @@ def build_document(an: Analysis, full: bool = True) -> list:
         rows, row_ids = [], []
         for label, fs in by_group:
             row_ids.append([f.fid for f in fs])
-            texts = [_finding_text(f, label, short=not full) for f in (fs if full else fs[:WORD_MAX_FINDINGS])]
+            # her iki modda ilk cümle; çalışma raporunda tüm bulgular (tam metin Ek C + Excel 'Bulgular')
+            texts = [_finding_text(f, label, short=True) for f in (fs if full else fs[:WORD_MAX_FINDINGS])]
             if not full and len(fs) > WORD_MAX_FINDINGS:
                 texts.append(f"+{len(fs) - WORD_MAX_FINDINGS} bulgu daha (Excel 'Bulgular')")
             if label == "Custom block'lar":
@@ -675,25 +684,18 @@ def build_document(an: Analysis, full: bool = True) -> list:
             rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs, None if full else WORD_MAX_FINDINGS)])
         doc.append(Table(["Konu", "Etki", "Açıklama", "Aksiyon (sorumlu)"], rows, cap("Zorluklar ve etkileri"),
                          badge_cols=[1], widths=[16, 10, 50, 24], row_ids=row_ids))
+        if full:
+            doc.append(Note("Açıklama: bulgunun ilk cümlesi. Tam metin, kaynak ve güven: Ek C ve Excel 'Bulgular'."))
     else:
         doc.append(Para("Bulgu yok."))
 
     if full:
         doc.append(Heading(1, "Upgrade hazırlık listesi"))
         doc.append(Bullets(prep_list(an)))
-        from .readiness import quote_inputs
-        doc.append(Heading(1, "Teklif için girdiler"))
-        doc.append(Para("Sayılar backup'tan; süre / fiyat üretilmez. 'VERİ YOK' satırları müşteriden istenmeli."))
-        doc.append(Table(["Girdi", "Değer", "Kaynak / güven"], quote_inputs(an), widths=[28, 46, 26]))
+        _open_section(an, doc)
+        _readiness_section(an, doc)
         if an.diag is not None:
             _diag_section(an, doc)
-        doc.append(Heading(1, "Manuel girişler ve müşteri soruları"))
-        doc.append(Table(["Konu", "Değer / soru"], manual_items(an)))
-        doc.append(Heading(1, "Teklif öncesi netleşmesi gerekenler"))
-        titles = {c.id: c.title for c in CHECKS}
-        doc.append(Bullets(list(an.open_items)
-                           + [f"Kontrol edilemedi — {titles.get(i, i)}: {why}" for i, why in an.not_checked]
-                           + GENERIC_OPEN_ITEMS))
 
     doc.append(Heading(1, "Referans dokümanlar"))
     doc.append(Table(["No", "Doküman", "Doküman no.", "Tarih"], REFERENCES, widths=[6, 56, 22, 16]))
@@ -703,9 +705,48 @@ def build_document(an: Analysis, full: bool = True) -> list:
     return doc
 
 
+def _open_section(an: Analysis, doc: list) -> None:
+    """Manuel girişler + müşteri soruları + teklif öncesi açık konular (tekrarsız, kısa)."""
+    rows = manual_items(an)
+    missing = [k for k, v in rows if k != "Müşteri sorusu" and str(v).startswith("eksik")]
+    given = [[k, v] for k, v in rows if k != "Müşteri sorusu" and not str(v).startswith("eksik")]
+    questions = [v for k, v in rows if k == "Müşteri sorusu"]
+    doc.append(Heading(1, "Manuel girişler ve müşteri soruları"))
+    tbl = given + ([["Eksik (müşteriden istenecek)", "; ".join(missing)]] if missing else [])
+    if tbl:
+        doc.append(Table(["Konu", "Değer"], tbl, widths=[30, 70]))
+    if questions:
+        doc.append(Bullets(questions))
+    doc.append(Heading(1, "Teklif öncesi netleşmesi gerekenler"))
+    titles = {c.id: c.title for c in CHECKS}
+    asked = {q.lower() for q in questions}
+    items = [_first_sentence(x, 40) for x in an.open_items] \
+        + [f"Kontrol edilemedi — {titles.get(i, i)}: {why}" for i, why in an.not_checked] \
+        + [x for x in GENERIC_OPEN_ITEMS if x.lower() not in asked]
+    if len(items) > FULL_LIST_MAX + 5:
+        items = items[:FULL_LIST_MAX + 5] + [_more(len(items) - FULL_LIST_MAX - 5, "Acik_Konular_Kaynak", "madde")]
+    doc.append(Bullets(items))
+
+
+def _readiness_section(an: Analysis, doc: list) -> None:
+    from .readiness import backup_coverage, quote_inputs
+    cov = backup_coverage(an)
+    gaps = [r for r in cov if r[1] != "Var" or str(r[3]).strip() not in ("", "-")]
+    ok = [r[0] for r in cov if r not in gaps]
+    doc.append(Heading(1, "Backup içeriği ve yeterlilik", fold=True))
+    doc.append(Para(f"**Var ({len(ok)}/{len(cov)}):** {', '.join(ok) or '-'}. Eksik / kısmi olanlar ve analize etkisi "
+                    "aşağıda; kanıtlarla tam liste Excel 'Backup_Yeterlilik'."))
+    if gaps:
+        doc.append(Table(["Kontrol", "Durum", "Kanıt", "Analize etkisi"], gaps, "Backup yeterliliği",
+                         badge_cols=[1], widths=[24, 10, 30, 36]))
+    doc.append(Heading(1, "Teklif için girdiler", fold=True))
+    doc.append(Para("Sayılar backup'tan; süre / fiyat üretilmez. 'VERİ YOK' satırları müşteriden istenmeli."))
+    doc.append(Table(["Girdi", "Değer", "Kaynak / güven"], quote_inputs(an), widths=[28, 46, 26]))
+
+
 def _diag_section(an: Analysis, doc: list) -> None:
     dg = an.diag
-    doc.append(Heading(1, "Diagnostics (server fail)"))
+    doc.append(Heading(1, "Diagnostics (server fail)", fold=True))
     files = ", ".join(f"{k}: {len(v)}" for k, v in dg.files.items() if v)
     sql = dg.sql
     doc.append(Bullets([f"Dosyalar: {files or '-'}",
@@ -716,56 +757,65 @@ def _diag_section(an: Analysis, doc: list) -> None:
         doc.append(Table(["Bulgu", "Önem", "Güven", "Detay", "Kaynak"],
                          [[f.title, f.severity, f.confidence, f.detail, f.source] for f in dg.findings],
                          badge_cols=[1, 2], widths=[18, 8, 9, 45, 20]))
-    key = [e for e in dg.events if e.category in ("sql_error", "sql_memory", "redundancy", "eventlog")][:60]
+    key = [e for e in dg.events if e.category in ("sql_error", "sql_memory", "redundancy", "eventlog")]
     if key:
-        doc.append(Heading(2, "Zaman çizelgesi (önemli olaylar, ilk 60)"))
-        doc.append(Table(["Zaman", "Kategori", "Olay", "Dosya"], [[e.ts or "-", e.category, e.text, e.source] for e in key],
+        doc.append(Heading(2, f"Zaman çizelgesi (önemli olaylar, ilk {min(len(key), 20)} / {len(key)})"))
+        doc.append(Table(["Zaman", "Kategori", "Olay", "Dosya"],
+                         _cap_rows([[e.ts or "-", e.category, e.text, e.source] for e in key], "Diagnostics", 20),
                          widths=[16, 10, 54, 20]))
     doc.append(Note("WinCC diagnose log formatları gerçek örnekle teyit edilmedi: sınıflandırma anahtar kelimeyle (ÇIKARIM). "
                     ".evtx okunmaz; Event Viewer'dan CSV export alınmalı."))
 
 
 def _appendix(an: Analysis, doc: list) -> None:
+    """Çalışma raporu ekleri: özet + ilk FULL_LIST_MAX satır; tam listeler Excel'de (HTML'de kapalı bölümler)."""
     d = an.discovery
-    doc.append(Heading(1, "Ek A: Detaylar"))
+    doc.append(Heading(1, "Ek A: Detaylar", fold=True))
     doc.append(Heading(2, "Versiyon kaynakları"))
     doc.append(Bullets([f"{v.item}: {v.value} — kaynak: {v.source}" + (" (teyit edilmeli)" if v.confidence == Confidence.LOW.value else "")
                         for v in an.versions] or ["-"]))
     if an.stations:
         doc.append(Heading(2, "HW Config detayı"))
         rows = []
-        for s in an.stations:
+        for s in sorted(an.stations, key=lambda s: _natkey(s.name)):
             rows.append([s.name, "; ".join(f"{o} {fw}".strip() for o, fw, _ in s.cpus) or "-",
                          "; ".join(f"{o} {fw}".strip() for o, fw, _ in s.cps) or "-",
-                         _fmt_list([f"{k} ×{n}" for k, n in s.slaves.items()], 6), _fmt_list([f"{k} ×{n}" for k, n in s.gsd.items()], 3),
                          str(s.h_sync or "-"), "-" if s.f_capable is None else ("Evet" if s.f_capable else "Hayır"),
                          "-" if s.pdm_used is None else ("Evet" if s.pdm_used else "Hayır"), (f"s7h: {len(s.source.split(', '))} dosya ({s.source.split(', ')[0].rsplit('/', 1)[0]})" if s.kind == "s7h"
                           else f"{s.kind}: {s.source}")])
-        doc.append(Table(["AS", "CPU", "CP", "Slave'ler", "GSD", "H-Sync", "F-capable", "PDM", "Kaynak"], rows))
+        doc.append(Table(["AS", "CPU", "CP", "H-Sync", "F-capable", "PDM", "Kaynak"], rows))
+        doc.append(Note("Slave / GSD cihazları: Tablo 2; MLFB bazında tam liste: Excel 'HW_Moduller'."))
     doc.append(Heading(2, "Hardware uyumluluk"))
-    doc.append(Para(f"Released Modules listesi: {Path(an.released_list).name}" if an.released_list else
-                    "Released Modules listesi (data/released_modules_<versiyon>.csv) yok: eşleştirme yapılmadı."))
-    if an.hw_matches:
-        doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
-                         [[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4), m.status] for m in
-                          sorted(an.hw_matches, key=lambda m: ("bulunamadı" not in m.status, m.order))], badge_cols=[5]))
-    ld_rows = []
-    for b in an.as_folders:
-        obs = {k: v for k, v in b.local_data.items() if k.startswith("OB")}
-        if obs:
-            top = sorted(obs.items(), key=lambda x: -x[1])[:6]
-            ld_rows.append([b.as_label, ", ".join(f"{k} {v} B" for k, v in top), str(max(b.local_data.values()))])
+    if not an.released_list:
+        doc.append(Para("Released Modules listesi (data/released_modules_<versiyon>.csv) yok: eşleştirme yapılmadı."))
+    elif an.hw_matches:
+        ok = [m for m in an.hw_matches if m.status == "listede"]
+        bad = sorted((m for m in an.hw_matches if m.status != "listede"), key=lambda m: ("bulunamadı" not in m.status, m.order))
+        doc.append(Para(f"{Path(an.released_list).name}: {len(an.hw_matches)} MLFB / GSD, **{len(ok)} listede**, "
+                        f"{len(bad)} listede değil / teyit gerekli. Tam liste: Excel 'HW_Moduller'."))
+        if bad:
+            doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
+                             _cap_rows([[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4),
+                                         m.status] for m in bad], "HW_Moduller", 15), badge_cols=[5]))
+    else:
+        doc.append(Para(f"Released Modules listesi: {Path(an.released_list).name}; eşleştirilecek modül yok."))
     fc_rows = []
     for b in an.as_folders:
-        fcs = sorted(((k, v) for k, v in b.code_len.items() if k.startswith("FC")), key=lambda x: -x[1])[:10]
+        fcs = sorted(((k, v) for k, v in b.code_len.items() if k.startswith("FC")), key=lambda x: -x[1])[:5]
         if fcs:
             fc_rows.append([b.as_label, ", ".join(f"{k} {v / 1024:.1f} KB" for k, v in fcs)])
     if fc_rows:
         doc.append(Heading(2, "En büyük FC'ler (MC5LEN, 64 KB sınırı)"))
-        doc.append(Table(["AS", "FC (kod boyutu)"], fc_rows, widths=[20, 80]))
+        doc.append(Table(["AS", "FC (kod boyutu, ilk 5)"], fc_rows, widths=[20, 80]))
+    ld_rows = []
+    for b in an.as_folders:
+        obs = {k: v for k, v in b.local_data.items() if k.startswith("OB")}
+        if obs:
+            top = sorted(obs.items(), key=lambda x: -x[1])[:3]
+            ld_rows.append([b.as_label, ", ".join(f"{k} {v} B" for k, v in top), str(max(b.local_data.values()))])
     if ld_rows:
         doc.append(Heading(2, "Local data (block'ların kendi değeri)"))
-        doc.append(Table(["AS", "OB local data (en büyük)", "En büyük block local data (byte)"], ld_rows))
+        doc.append(Table(["AS", "OB local data (en büyük 3)", "En büyük block local data (byte)"], ld_rows))
         doc.append(Note("SUBBLK LOCDATALEN: block'un kendi local data'sı; iç içe çağrılarla priority class toplamı ve CPU "
                         "ayarı backup'tan hesaplanmadı (VERİ YOK). V10'da güncellenen block'lar daha fazla local data "
                         "isteyebilir -> download öncesi CPU local data ayarı kontrol edilmeli."))
@@ -779,37 +829,46 @@ def _appendix(an: Analysis, doc: list) -> None:
                         "station); YDBs/YLNKLIST.DBF. Gerçek projede teyit edilene kadar: KANIT sadece HW export / symbol "
                         "table ile çapraz kontrol tutarsa."))
     doc.append(Heading(2, "Block klasörleri"))
-    rows = []
+    rows, empty = [], []
     for b in an.block_folders:
+        if b.info.is_empty and not b.error:
+            empty.append(b.info.path)
+            continue
         c = b.counts
-        cnt = "boş" if b.info.is_empty else f"{c.get('FB', 0)}/{c.get('FC', 0)}/{c.get('DB', 0)}/{c.get('OB', 0)}"
+        cnt = f"{c.get('FB', 0)}/{c.get('FC', 0)}/{c.get('DB', 0)}/{c.get('OB', 0)}" if c else "-"
         rows.append([b.as_label, cnt, _fmt_list(b.features), f"{b.info.path} — eşleme: {b.mapping}"
                      + (f" — HATA: {b.error}" if b.error else "")])
-    doc.append(Table(["AS", "FB/FC/DB/OB", "İçerik", "Klasör / eşleme"], rows))
+    if rows:
+        doc.append(Table(["AS", "FB/FC/DB/OB", "İçerik", "Klasör / eşleme"], rows))
+    if empty:
+        doc.append(Para(f"Boş block klasörü (kullanılmayan program, normal): {len(empty)} — {_fmt_list(empty, 4)}"))
     doc.append(Note("Block klasörü ↔ AS eşlemesi proje adı ve symbol table FB seti benzerliği ile yapıldı (heuristic, teyit edilmeli)."))
+    lib_rows, cust_rows, n_cust, extra = [], [], 0, []
     for b in an.block_folders:
         if not b.counts:
             continue
-        doc.append(Heading(2, f"{b.as_label}: library ve instance"))
-        doc.append(Table(["Library", "Author (FB/FC sayısı)"],
-                         [[lib, ", ".join(f"{a} ({n})" for a, n in sorted(c.items()))] for lib, c in b.libraries.items()]))
-        if b.custom_blocks:
-            doc.append(Table(["Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance"],
-                             [[f"{x.kind}{x.number}", x.name or "(header yok)", x.family or "-", x.author or "-",
-                               lang_name(x.lang), x.version, str(x.instances)] for x in b.custom_blocks]))
-        if b.top_instances:
-            doc.append(Table(["Block", "Instance"], [[k, str(n)] for k, n in b.top_instances]))
-        extra = []
-        if b.symbol_source:
-            extra.append(f"Symbol table: {b.symbol_source}")
-        if b.block_only:
-            extra.append("Block'ta olup symbol'de olmayan FB: " + _fmt_list(b.block_only, 12))
-        if not b.memo_available:
-            extra.append("SUBBLK.DBT yok: instance sayıları hesaplanamadı")
-        if b.unresolved_instances:
-            extra.append(f"Çözülemeyen instance referansı: {b.unresolved_instances}")
-        if extra:
-            doc.append(Bullets(extra))
+        for lib, c in b.libraries.items():
+            lib_rows.append([b.as_label, lib, ", ".join(f"{a} ({n})" for a, n in sorted(c.items()))])
+        n_cust += len(b.custom_blocks)
+        cust_rows += [[b.as_label, f"{x.kind}{x.number}", x.name or "(header yok)", x.family or "-", x.author or "-",
+                       lang_name(x.lang), x.version, str(x.instances) if b.memo_available else "-"] for x in b.custom_blocks]
+        inst = ", ".join(f"{k} {n}" for k, n in b.top_instances[:5])
+        notes = ([f"en çok instance: {inst}"] if inst else []) \
+            + ([f"symbol table: {b.symbol_source}"] if b.symbol_source else []) \
+            + ([f"block'ta olup symbol'de olmayan FB: {_fmt_list(b.block_only, 6)}"] if b.block_only else []) \
+            + (["SUBBLK.DBT yok: instance sayıları hesaplanamadı"] if not b.memo_available else []) \
+            + ([f"çözülemeyen instance referansı: {b.unresolved_instances}"] if b.unresolved_instances else [])
+        if notes:
+            extra.append(f"**{b.as_label}:** " + "; ".join(notes))
+    if lib_rows:
+        doc.append(Heading(2, "Library dağılımı (author: FB/FC sayısı)"))
+        doc.append(Table(["AS", "Library", "Author (FB/FC sayısı)"], lib_rows, widths=[14, 30, 56]))
+    if cust_rows:
+        doc.append(Heading(2, f"Custom block'lar ({n_cust})"))
+        doc.append(Table(["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance"],
+                         _cap_rows(cust_rows, "Custom_Blocklar")))
+    if extra:
+        doc.append(Bullets(extra + ["Tüm FB instance sayıları: Excel 'Instance_Sayilari'."]))
     if an.os_projects:
         doc.append(Heading(2, "OS projeleri"))
         doc.append(Table(["OS projesi", "Rol", "Yer", "WinCC", "Custom picture", "Faceplate", "Script", "Custom typicals", "OPC", "Klasör"],
@@ -822,34 +881,57 @@ def _appendix(an: Analysis, doc: list) -> None:
         name = df.a.rsplit("/", 1)[-1]
         doc.append(Heading(2, f"{name}: ES ↔ {df.b_label}"))
         doc.append(Table(["Durum", "Adet", "Picture / script"], [
-            [f"{df.b_label}'de daha yeni", str(len(df.relevant(df.newer_b))), _fmt_list(_b(df.relevant(df.newer_b)), 30)],
-            [f"Sadece {df.b_label}'de", str(len(df.relevant(df.only_b))), _fmt_list(_b(df.relevant(df.only_b)), 30)],
-            ["ES'te daha yeni", str(len(df.relevant(df.newer_a))), _fmt_list(_b(df.relevant(df.newer_a)), 30)],
-            ["Sadece ES'te", str(len(df.relevant(df.only_a))), _fmt_list(_b(df.relevant(df.only_a)), 30)],
+            [f"{df.b_label}'de daha yeni", str(len(df.relevant(df.newer_b))), _fmt_list(_b(df.relevant(df.newer_b)), FULL_LIST_MAX)],
+            [f"Sadece {df.b_label}'de", str(len(df.relevant(df.only_b))), _fmt_list(_b(df.relevant(df.only_b)), FULL_LIST_MAX)],
+            ["ES'te daha yeni", str(len(df.relevant(df.newer_a))), _fmt_list(_b(df.relevant(df.newer_a)), FULL_LIST_MAX)],
+            ["Sadece ES'te", str(len(df.relevant(df.only_a))), _fmt_list(_b(df.relevant(df.only_a)), FULL_LIST_MAX)],
         ]))
+    if an.os_diffs:
+        doc.append(Note("Dosya bazında tam liste: Excel 'ENG_SRV1_Farklar'."))
     if an.client_groups:
         doc.append(Heading(2, "Client grupları"))
         doc.append(Table(["Client'lar", "Dosya", "Referansa göre", "Fazla dosyalar"],
                          [[_fmt_list(_b(g.members), 10), str(g.n_files), "referans" if g.is_reference else
                            f"+{len(g.only_in_group)} / -{len(g.missing_in_group)}", _fmt_list(_b(g.only_in_group), 6)]
                           for g in an.client_groups]))
+
+    doc.append(Heading(1, "Ek B: Keşif ve uyarılar", fold=True))
+    unk = {(e.path, e.reason) for e in an.unknown.entries if e.path and e.path != "-"}
+    warns = [w for w in an.warnings if not any(p in w and r in w for p, r in unk)]   # Ek D'de olanlar tekrar edilmez
+    items = [f"Kaynak: {an.source} — {d.n_files} dosya, {d.total_bytes / 1e9:.2f} GB",
+             f"Block klasörü: {len(d.block_folders)} ({sum(1 for b in d.block_folders if b.is_empty)} boş); "
+             f".cfg: {len(d.cfg_exports)}, .s7h: {len(d.s7h_files)}, symbol table: {len(d.symbol_tables)}, "
+             f"symbol export: {len(d.symbol_exports)}, OS projesi: {len(d.os_projects)}"]
+    if an.stale_dirs:
+        items.append(f"Analiz dışı bırakılan eski kopyalar: {_fmt_list(an.stale_dirs, 4)}")
+    items += [f"Uyarı: {_first_sentence(w, 40)}" for w in warns[:FULL_LIST_MAX]]
+    if len(warns) > FULL_LIST_MAX:
+        items.append(_more(len(warns) - FULL_LIST_MAX, "Acik_Konular_Kaynak", "uyarı") + " (log.txt)")
+    if len(warns) < len(an.warnings):
+        items.append(f"{len(an.warnings) - len(warns)} okuma uyarısı Ek D'de.")
+    doc.append(Bullets(items))
+
     from .readiness import findings_rows
-    doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)"))
+    doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)", fold=True))
     doc.append(Para("KANIT = dosyada birebir görüldü; ÇIKARIM = heuristic / isimden yorum, teyit edilmeli (sarı)."))
     from .readiness import FINDINGS_COLUMNS
     doc.append(Table(FINDINGS_COLUMNS, findings_rows(an), badge_cols=[2, 3, 4], widths=[5, 11, 7, 6, 7, 34, 16, 14]))
-    doc.append(Heading(1, f"Ek D: Analiz edilemeyenler ({len(an.unknown)})"))
+
+    doc.append(Heading(1, f"Ek D: Analiz edilemeyenler ({len(an.unknown)})", fold=True))
     if len(an.unknown):
-        doc.append(Table(["Modül", "Dosya", "Neden", "Alan", "Ham değer"], an.unknown.rows(), widths=[10, 34, 40, 8, 8]))
+        ur = an.unknown.rows()
+        if len(ur) > FULL_LIST_MAX:   # aynı modül + neden tek satır (dosya sayısı + örnek)
+            grp: dict[tuple, list] = defaultdict(list)
+            for r in ur:
+                grp[(r[0], r[2])].append(r[1])
+            g = sorted(grp.items(), key=lambda kv: -len(kv[1]))
+            doc.append(Table(["Modül", "Neden", "Dosya sayısı", "Örnek dosya"],
+                             _cap_rows([[m, why, str(len(fs)), _fmt_list(fs, 2)] for (m, why), fs in g],
+                                       "Analiz_Edilemeyenler"), widths=[10, 44, 10, 36]))
+        else:
+            doc.append(Table(["Modül", "Dosya", "Neden", "Alan", "Ham değer"], ur, widths=[10, 34, 40, 8, 8]))
     else:
         doc.append(Para("Kayıt yok."))
-    doc.append(Heading(1, "Ek B: Keşif ve uyarılar"))
-    doc.append(Bullets([f"Kaynak: {an.source}", f"{d.n_files} dosya, {d.total_bytes / 1e9:.2f} GB",
-                        f"Block klasörü: {len(d.block_folders)} ({sum(1 for b in d.block_folders if b.is_empty)} boş)",
-                        f".cfg: {len(d.cfg_exports)}, .s7h: {len(d.s7h_files)}, symbol table: {len(d.symbol_tables)}, "
-                        f"symbol export: {len(d.symbol_exports)}, OS projesi: {len(d.os_projects)}"]
-                       + ([f"Analiz dışı bırakılan eski kopyalar: {', '.join(an.stale_dirs)}"] if an.stale_dirs else [])
-                       + [f"Uyarı: {w}" for w in an.warnings]))
 
 
 # ---------------------------------------------------------------------------
@@ -985,6 +1067,13 @@ tr:hover td {{ background: var(--light-sand); }}
 .kpi {{ flex: 1 1 140px; background: var(--deep-blue); color: var(--white); border-radius: 4px; padding: 10px 14px; }}
 .kpi b {{ display: block; font-size: 24px; color: var(--bold-green); }}
 .kpi span {{ font-size: 12px; color: var(--deep-blue-100); }}
+section.fold {{ padding: 12px 28px; }}
+section.fold summary {{ cursor: pointer; list-style: none; }}
+section.fold summary::-webkit-details-marker {{ display: none; }}
+section.fold summary h2 {{ display: inline; font-size: 18px; }}
+section.fold summary::before {{ content: "▸ "; color: var(--petrol); }}
+section.fold details[open] summary::before {{ content: "▾ "; }}
+nav a.fold {{ opacity: .75; }}
 footer {{ text-align: center; font-size: 12px; color: var(--deep-blue-500); padding: 20px; }}
 @media print {{
   body {{ background: var(--white); }} nav {{ display: none; }}
@@ -1018,22 +1107,29 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
     kpis = [(an.pcs7_family or "?", "PCS 7 (tespit)"), (str(len(an.stations)), "AS (HW Config)"),
             (str(sum(1 for b in an.block_folders if b.counts)), "Dolu block klasörü"),
             (str(len(d.os_projects)), "OS projesi"), (str(n_high), "Yüksek etki"), (str(n_med), "Orta etki")]
-    body, toc, open_, n, pending_topline = [], [], False, 0, ""
+    body, toc, open_, n, pending_topline = [], [], "", 0, ""
     for b in doc:
         if isinstance(b, Topline):
             pending_topline = b.text
             continue
         if isinstance(b, Heading) and b.level == 1:
             if open_:
-                body.append("</section>")
+                body.append(open_)
             n += 1
-            toc.append(f'<a href="#s{n}">{e(pending_topline.title() if pending_topline else b.text)}</a>')
-            body.append(f'<section id="s{n}">' + (f'<div class="topline">{e(pending_topline)}</div>' if pending_topline else "")
-                        + f"<h2>{e(b.text)}</h2>")
+            fold = getattr(b, "fold", False)
+            label = pending_topline.title() if pending_topline else b.text
+            toc.append(f'<a href="#s{n}"' + (' class="fold"' if fold else "") + f">{e(label)}</a>")
+            top = f'<div class="topline">{e(pending_topline)}</div>' if pending_topline else ""
+            if fold:   # ekler: kapalı; ilk ekran Sonuç / envanter / riskler
+                body.append(f'<section id="s{n}" class="fold">{top}<details><summary><h2>{e(b.text)}</h2></summary>')
+                open_ = "</details></section>"
+            else:
+                body.append(f'<section id="s{n}">{top}<h2>{e(b.text)}</h2>')
+                open_ = "</section>"
             if n == 1:
                 body.append('<div class="kpis">' + "".join(f"<div class='kpi'><b>{e(v)}</b><span>{e(k)}</span></div>"
                                                            for v, k in kpis) + "</div>")
-            pending_topline, open_ = "", True
+            pending_topline = ""
         elif isinstance(b, Heading):
             body.append(f"<h3>{e(b.text)}</h3>")
         elif isinstance(b, Para):
@@ -1050,7 +1146,7 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
             body.append(f'<div class="tw"><table><colgroup>{cols}</colgroup><thead><tr>{head}</tr></thead>'
                         f"<tbody>{rows}</tbody></table></div>" + (f'<div class="caption">{e(b.caption)}</div>' if b.caption else ""))
     if open_:
-        body.append("</section>")
+        body.append(open_)
     fam = an.pcs7_family or "?"
     who = " | ".join(x for x in (meta.author, meta.department, fmt_date(meta.date)) if x)
     customer = meta.customer or tr_upper(an.project_name)
@@ -1065,6 +1161,10 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
 <div class="sub">Proje backup'ı üzerinden yapılan upgrade edilebilirlik analizi{' · ' + e(who) if who else ''} · Kaynak: {e(an.source)}</div></header>
 <nav>{''.join(toc)}</nav>
 <main>{''.join(body)}</main>
+<script>/* nav'dan kapalı eke gidince aç */
+function _o(){{var s=location.hash&&document.querySelector(location.hash+' details');if(s)s.open=true;}}
+addEventListener('hashchange',_o);_o();
+addEventListener('beforeprint',function(){{document.querySelectorAll('details').forEach(function(d){{d.open=true;}});}});</script>
 <footer>{e(meta.classification)} · pcs7_analyzer {e(an.tool_version)} · Otomatik üretilmiştir; "teyit edilmeli" işaretli maddeler elle kontrol edilmelidir.</footer>
 </body></html>
 """

@@ -6,6 +6,7 @@ Gerçek bir PCS 7 V8.1 projesiyle (6 adet S7-400H) test edilmiş referans implem
 from __future__ import annotations
 
 import collections
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -140,6 +141,15 @@ class BlockFolder:
     local_data: dict = field(default_factory=dict)   # {(kind, nr): LOCDATALEN} (block'un kendi local data'sı)
     code_len: dict = field(default_factory=dict)     # {(kind, nr): MC5LEN} derlenmiş kod boyutu (byte), ana kayıttan
     other_types: collections.Counter = field(default_factory=collections.Counter)  # bilinen 6 tip dışı SUBBLKTYP
+    # Instance çözümleme tanısı: {neden: DB sayısı} + ilk örnekler [(DB no, neden, SSBPART ilk byte'lar hex)].
+    # Nedenler: INSTANCE_ISSUE_* sabitleri. Sadece EMPTY / SHORT / RANGE unresolved_instances'a sayılır.
+    unresolved_reasons: collections.Counter = field(default_factory=collections.Counter)
+    unresolved_examples: list = field(default_factory=list)
+    ssb_kind: collections.Counter = field(default_factory=collections.Counter)   # {SSBPART byte0: DB sayısı}
+    memo_format: str = ""                 # DBT header'ından: 'db3' / 'db4' ('' = DBT okunmadı)
+    memo_block_size: int = 0
+    memo_seen: dict = field(default_factory=dict)      # memo bazında tespit: {'db4': n, 'db3': n}
+    memo_issues: dict = field(default_factory=dict)    # DBT okuma anomalileri {neden: n}
 
     @property
     def is_empty(self) -> bool:
@@ -148,15 +158,143 @@ class BlockFolder:
 
 _KIND = {SUBBLK_FB: "FB", SUBBLK_FC: "FC", SUBBLK_OB: "OB", SUBBLK_DB: "DB"}
 
+# SSBPART byte0 (açık kaynak okuyucu: 0x05 normal / global DB, 0x0A FB instance, 0x0B SFB instance)
+SSB_GLOBAL_DB, SSB_FB_INSTANCE, SSB_SFB_INSTANCE = 0x05, 0x0A, 0x0B
+INSTANCE_ISSUE_EMPTY = "SSBPART memo referansı var ama DBT'de veri yok (boş memo)"
+INSTANCE_ISSUE_SHORT = "SSBPART instance işaretli (byte0 0x0A/0x0B) ama 3 byte'tan kısa"
+INSTANCE_ISSUE_RANGE = f"SSBPART FB numarası geçersiz (> {MAX_VALID_FB_NUMBER})"
+INSTANCE_ISSUE_KIND = "SSBPART byte0 bilinmiyor (0x05 global / 0x0A FB / 0x0B SFB değil) -> instance sayılmadı"
+_COUNTED_ISSUES = (INSTANCE_ISSUE_EMPTY, INSTANCE_ISSUE_SHORT, INSTANCE_ISSUE_RANGE)
+MAX_ISSUE_EXAMPLES = 20
+
+
+def _instance_issue(bf: "BlockFolder", db_nr: int, reason: str, raw: bytes) -> None:
+    bf.unresolved_reasons[reason] += 1
+    if reason in _COUNTED_ISSUES:
+        bf.unresolved_instances += 1
+    if len(bf.unresolved_examples) < MAX_ISSUE_EXAMPLES:
+        bf.unresolved_examples.append((db_nr, reason, raw[:8].hex(" ")))
+
+
+def record_instance_issues(bf: "BlockFolder", recorder, path: str, module: str = "blocks") -> int:
+    """Instance çözümleme nedenlerini UnknownRecorder'a neden başına bir satır yazar (ilk örnek DB'lerle). Satır sayısı."""
+    n = 0
+    for reason, cnt in sorted(bf.unresolved_reasons.items()):
+        ex = [e for e in bf.unresolved_examples if e[1] == reason][:5]
+        raw = "; ".join(f"DB{nr}: {h or '-'}" for nr, _, h in ex)
+        recorder.add(module, path, f"{cnt} DB: {reason}", where="SSBPART", raw=raw)
+        n += 1
+    for reason, cnt in sorted(bf.memo_issues.items()):
+        recorder.add(module, path, f"DBT ({bf.memo_format}, block {bf.memo_block_size}): {reason} ×{cnt}", where="DBT")
+        n += 1
+    return n
+
 
 def _to_bytes(v) -> bytes:
     return v if isinstance(v, bytes) else v.encode(DBF_ENCODING, "ignore")
+
+
+# ---------------------------------------------------------------- DBT (memo) okuyucu
+# dbfread'in memo okuyucuları SSBPART için güvenilir değil: DB3 okuyucusu ilk 0x1A'da, DB4 okuyucusu ilk 0x1F'de keser
+# (FB26 = 0A 1A 00, FB31 = 0A 1F 00 -> instance kaybolur) ve DB4'te block boyutunu 512 varsayar (header'daki değeri
+# okumaz). Burada ham byte, akış halinde (dosya belleğe alınmaz) okunur:
+#   DBT header (512 byte): 0-3 next free block, 16 sürüm (0x03 = dBASE III, 0x00 = dBASE IV), 20-21 block boyutu (DB4).
+#   dBASE IV memo: FF FF + int16 start offset (8) + int32 uzunluk (header dahil) -> uzunluk kadar okunur.
+#   dBASE III memo: 512 byte block'lar, 0x1A 0x1A ile biter -> tek 0x1A'da kesilmez.
+# Memo bazında imza kontrol edilir (header'dan bağımsız): FF FF imzası varsa DB4, yoksa DB3 taraması.
+# Kaynak: açık kaynak STEP 7 V5 okuyucusu (DotNetSiemensPLCToolBoxLibrary, DBF/ParseDBF.cs ReadMemoBlock: DB4 tarzı,
+# block boyutu header ofset 20, uzunluk - start; BlocksOfflineFolder.cs: SSBPART SSBLEN'e kısaltılır).
+MEMO_SCAN_LIMIT = 16 * 1024 * 1024      # DB3 sonlandırıcı aranırken en fazla okunacak byte
+_DB4_SIG = b"\xff\xff"
+
+
+class RawMemoFile:
+    """SUBBLK.DBT ham memo okuyucu (DB3 / DB4). memo[index] -> bytes; index 0 -> None; veri yoksa b''."""
+
+    def __init__(self, filename):
+        self.filename = str(filename)
+        self.file = open(self.filename, "rb")
+        self.size = os.fstat(self.file.fileno()).st_size
+        head = self.file.read(512)
+        self.header_version = head[16] if len(head) > 16 else None
+        bs = int.from_bytes(head[20:22], "little") if len(head) >= 22 else 0
+        self.flavor = "db3" if self.header_version == 0x03 else "db4"
+        # DB3'te block boyutu sabit 512; DB4'te header'dan (geçersizse 512)
+        self.block_size = bs if self.flavor == "db4" and 64 <= bs <= 32768 and bs % 64 == 0 else 512
+        self.seen = collections.Counter()      # {'db4': n, 'db3': n} memo bazında tespit edilen biçim
+        self.issues = collections.Counter()    # {neden: n} okuma anomalileri
+
+    def __getitem__(self, index):
+        if not index or index <= 0:
+            return None
+        f = self.file
+        pos = index * self.block_size
+        if pos >= self.size:
+            self.issues["memo index DBT dosya sonunun ötesinde"] += 1
+            return b""
+        f.seek(pos)
+        head = f.read(8)
+        if head[:2] == _DB4_SIG and len(head) == 8:
+            self.seen["db4"] += 1
+            start = int.from_bytes(head[2:4], "little")
+            length = int.from_bytes(head[4:8], "little")
+            if not 8 <= start < self.block_size:     # bazı yazıcılar FF FF 08 08 yazar -> standart 8
+                start = 8
+            n = length - start
+            if n <= 0:
+                return b""
+            if pos + start + n > self.size:
+                self.issues["DB4 memo uzunluğu dosya sonunu aşıyor (kısaltıldı)"] += 1
+                n = self.size - pos - start
+            f.seek(pos + start)
+            return f.read(n)
+        self.seen["db3"] += 1
+        f.seek(pos)
+        data = bytearray()
+        bsz = self.block_size
+        while len(data) < MEMO_SCAN_LIMIT:
+            chunk = f.read(bsz)
+            if not chunk:
+                self.issues["DB3 memo sonlandırıcısı (1A 1A) yok, dosya sonu"] += 1
+                return bytes(data)
+            scan_from = max(0, len(data) - 1)
+            data += chunk
+            end = data.find(b"\x1a\x1a", scan_from)
+            if end != -1:
+                return bytes(data[:end])
+            # Tek 0x1A'lı DB3 varyantında tarama sonraki memo'nun 1A 1A'sına kadar sürer: fazla byte gelir, baştaki
+            # byte'lar (SSBPART byte0-2) doğru kalır; SSBLEN alanı varsa memo ona kısaltılır.
+        self.issues["DB3 memo sonlandırıcısı tarama sınırında bulunamadı"] += 1
+        return bytes(data)
+
+    def close(self):
+        self.file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+
+class _SubblkDBF(dbfread.DBF):
+    """dbfread.DBF, memo dosyası olarak RawMemoFile kullanır (dbfread'in DB3/DB4 okuyucuları yerine)."""
+
+    raw_memo: RawMemoFile | None = None
+
+    def _open_memofile(self):
+        if self.memofilename and not self.raw:
+            self.raw_memo = RawMemoFile(self.memofilename)
+            return self.raw_memo
+        return super()._open_memofile()
 
 
 class _SubblkFieldParser(FieldParser):
     """
     Sadece SSBPART memo'sunu okur ve HAM byte döndürür (decode yok -> encoding'den bağımsız).
     MC5CODE / ADDINFO (block kodu, DBT'nin büyük kısmı) hiç okunmaz: 400+ MB DBT'de ciddi hız farkı.
+    Dönüş: None = memo referansı yok; b'' = referans var ama DBT'de veri yok.
     """
 
     def parseM(self, field, data):
@@ -206,7 +344,7 @@ def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) ->
     dbf_path = Path(dbf_path)
     dbt = dbf_path.with_suffix(".DBT")
     memo = dbt.exists() and with_instances
-    table = dbfread.DBF(
+    table = _SubblkDBF(
         str(dbf_path),
         encoding=DBF_ENCODING,
         ignore_missing_memofile=not memo,
@@ -253,16 +391,11 @@ def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) ->
         if ty == SUBBLK_DB:
             bf.db_families[rec["BLOCKFNAME"].strip()] += 1
             if memo:
-                ssb = rec.get("SSBPART")
-                if ssb:
-                    b = _to_bytes(ssb)
-                    if b[0] in (0x0A, 0x0B):
-                        fb_nr = b[1] | (b[2] << 8) if len(b) >= 3 else -1
-                        if 0 <= fb_nr <= MAX_VALID_FB_NUMBER:
-                            kind = "FB" if b[0] == 0x0A else "SFB"
-                            bf.instances_per_fb[(kind, fb_nr)] += 1
-                        else:
-                            bf.unresolved_instances += 1
+                _resolve_instance(bf, nr, rec)
+    if table.raw_memo is not None:
+        rm = table.raw_memo
+        bf.memo_format, bf.memo_block_size = rm.flavor, rm.block_size
+        bf.memo_seen, bf.memo_issues = dict(rm.seen), dict(rm.issues)
     c = collections.Counter(_KIND.get(t) or MAIN_KIND[t] for t, _ in present)
     bf.counts = dict(c)
     # Interface kaydı olmayan FB/FC'ler: başlık ana kayıttan
@@ -283,6 +416,32 @@ def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) ->
             )
         )
     return bf
+
+
+def _resolve_instance(bf: BlockFolder, nr: int, rec) -> None:
+    """DB kaydının SSBPART'ından instance -> FB eşlemesi; çözülemeyenin nedeni kaydedilir."""
+    ssb = rec.get("SSBPART")
+    if ssb is None:              # memo referansı yok (SSBPART'sız DB): instance değil, sorun değil
+        return
+    b = _to_bytes(ssb)
+    ssblen = _int0(rec.get("SSBLEN"))
+    if ssblen and len(b) > ssblen:   # açık kaynak okuyucu gibi: memo SSBLEN'e kısaltılır
+        b = b[:ssblen]
+    if not b:
+        _instance_issue(bf, nr, INSTANCE_ISSUE_EMPTY, b)
+        return
+    bf.ssb_kind[b[0]] += 1
+    if b[0] in (SSB_FB_INSTANCE, SSB_SFB_INSTANCE):
+        if len(b) < 3:
+            _instance_issue(bf, nr, INSTANCE_ISSUE_SHORT, b)
+            return
+        fb_nr = b[1] | (b[2] << 8)
+        if fb_nr > MAX_VALID_FB_NUMBER:
+            _instance_issue(bf, nr, INSTANCE_ISSUE_RANGE, b)
+            return
+        bf.instances_per_fb[("FB" if b[0] == SSB_FB_INSTANCE else "SFB", fb_nr)] += 1
+    elif b[0] != SSB_GLOBAL_DB:
+        _instance_issue(bf, nr, INSTANCE_ISSUE_KIND, b)
 
 
 def _int0(v) -> int:

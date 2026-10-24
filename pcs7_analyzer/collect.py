@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,12 @@ def needed(rel: str, size: int) -> bool:
         return True
     if name in ("subblk.dbf", "subblk.dbt", "baustein.dbf", "symlist.dbf", "linkhrs.lnk"):
         return True
+    if "/xutils/" in f"/{low}" and name.endswith((".dbf", ".dbt")):
+        # XUTILS cross-reference: CT (call tree), BS (block listesi), CTL/BSL/XRL link tabloları, CT112001 okunur;
+        # XR (operand cross-ref, 100k+ kayıt) okunmaz -> pakete girmez
+        if re.match(r"^xr\d+\.(dbf|dbt)$", name):
+            return False
+        return bool(re.match(r"^(ct|bs)\d+\.dbf$|^(ct|bs|xr)l\d+\.dbf$", name)) or size <= _MAX_DBF
     if name.endswith(".dbf"):
         return size <= _MAX_DBF
     if name.endswith(".dbt") and "/homsave7/" in f"/{low}":

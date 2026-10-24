@@ -46,8 +46,10 @@ def test_package_gives_same_analysis(tmp_path):
     assert not any(n.lower().endswith((".pdl", ".mdf", ".ldf")) for n in names)
     assert _comparable(analyze(bk)) == _comparable(analyze(z))
     inv_a, inv_b = build_inventory(bk), build_inventory(z)
-    sa = {s.name: s.rows for s in inv_a.sheets if s.name not in ("Özet", "Uyarılar")}
-    sb = {s.name: s.rows for s in inv_b.sheets if s.name not in ("Özet", "Uyarılar")}
+    def rows(s):   # Mevcut durum 'Genel' (kaynak adı / dosya sayısı) ve uyarı sayısı paket ile farklı olabilir
+        return [r for r in s.rows if r[0] != "Genel" and r[:2] != ["Not", "Uyarı"]] if s.name == "Mevcut durum" else s.rows
+    sa = {s.name: rows(s) for s in inv_a.sheets if s.name not in ("Özet", "Uyarılar")}
+    sb = {s.name: rows(s) for s in inv_b.sheets if s.name not in ("Özet", "Uyarılar")}
     assert sa == sb
 
 

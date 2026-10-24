@@ -17,15 +17,20 @@ SUBBLK_FIELDS = [
 ]
 
 
-def write_dbf(path: Path, fields, records, *, memo: str | None = "db4", language_driver: int = 0x00) -> None:
+def write_dbf(path: Path, fields, records, *, memo: str | None = "db4", language_driver: int = 0x00,
+              memo_block_size: int = 512) -> None:
     """
     records: list[dict]. Memo alanlarına bytes verilir (None = boş).
-    memo: 'db3' (0x83, 0x1A sonlandırıcı), 'db4' (0x8B, uzunluk header'lı) veya None (DBT yazma).
+    memo: 'db3' (0x83, 1A 1A sonlandırıcı, DBT header ofset 16 = 0x03) veya 'db4' (0x8B; memo block'u
+    FF FF 08 00 + int32 uzunluk (header dahil); DBT header ofset 20 = block boyutu) veya None (DBT yazma).
+    memo_block_size: sadece db4 (db3'te sabit 512).
     """
     path = Path(path)
     has_memo = any(t == "M" for _, t, _ in fields)
     version = {"db3": 0x83, "db4": 0x8B}.get(memo, 0x03) if has_memo else 0x03
     memo_blocks: list[bytes] = []
+    bs = memo_block_size if memo == "db4" else 512
+    first_block = -(-512 // bs)          # DBT header 512 byte; ilk memo block'u header'dan sonra
 
     def memo_ref(data: bytes | None) -> bytes:
         if not data or memo is None:
@@ -33,9 +38,9 @@ def write_dbf(path: Path, fields, records, *, memo: str | None = "db4", language
         if memo == "db3":
             raw = data + b"\x1a\x1a"
         else:
-            raw = b"\xff\xff\x08\x08" + struct.pack("<I", len(data) + 8) + data
-        raw += b"\x00" * (-len(raw) % 512)
-        index = 1 + sum(len(b) // 512 for b in memo_blocks)
+            raw = b"\xff\xff\x08\x00" + struct.pack("<I", len(data) + 8) + data
+        raw += b"\x00" * (-len(raw) % bs)
+        index = first_block + sum(len(b) // bs for b in memo_blocks)
         memo_blocks.append(raw)
         return str(index).rjust(10).encode()
 
@@ -62,8 +67,13 @@ def write_dbf(path: Path, fields, records, *, memo: str | None = "db4", language
     path.write_bytes(header + body + b"\x1a")
 
     if has_memo and memo is not None:
-        next_free = 1 + sum(len(b) // 512 for b in memo_blocks)
-        dbt_header = struct.pack("<I", next_free) + b"\x00" * 508
+        next_free = first_block + sum(len(b) // bs for b in memo_blocks)
+        dbt_header = bytearray(struct.pack("<I", next_free) + b"\x00" * 508)
+        if memo == "db3":
+            dbt_header[16] = 0x03
+        else:
+            dbt_header[20:22] = struct.pack("<H", bs)
+        dbt_header += b"\x00" * (first_block * bs - len(dbt_header))
         path.with_suffix(".DBT").write_bytes(dbt_header + b"".join(memo_blocks))
 
 
@@ -129,3 +139,44 @@ def write_project_links(proj: Path, programs: list[dict]) -> None:
                   [{"TOI": p["id"], "SOI": p["sym_id"]} for p in syms])
         write_dbf(yd / "SYMLISTS.DBF", [("_ID", "N", 10), ("_UNAME", "C", 24), ("_DBPATH", "C", 24)],
                   [{"_ID": p["sym_id"], "_UNAME": "Symbols", "_DBPATH": str(p["sym_id"])} for p in syms])
+
+
+XUTILS_CT_FIELDS = [("ID", "C", 10), ("BLTYPEDAD", "C", 2), ("BLNBDAD", "C", 5), ("BLTYPESON", "C", 2),
+                    ("BLNBSON", "C", 5), ("OPTYPE", "C", 2), ("LANGDAD", "C", 2)] + \
+                   [(f"LANGSPEC{i}", "C", 8) for i in range(1, 6)]
+XUTILS_BS_FIELDS = [("ID", "N", 10), ("BLOCKTYPE", "C", 2), ("BLOCKNB", "C", 5), ("LANGUAGE", "C", 2),
+                    ("TIMESTAMP", "C", 6), ("LOCDATALEN", "C", 8), ("LANGSPEC1", "C", 8), ("LANGSPEC2", "C", 8)]
+XUTILS_LINK_FIELDS = [(n, "N", 10) for n in ("SOT", "SOI", "TUT", "TUI", "TOT", "TOI", "RID")]
+
+
+def write_xutils(proj: Path, set_no: int, calls: list[tuple], blocks: list[tuple], *, toi: int | None = None,
+                 name: str = "", xr_records: int = 0) -> Path:
+    """
+    Test / demo: <proj>/XUTILS/<set_no>/ cross-reference seti (bkz. parsers/xutils.py).
+    calls: [(dad tip kodu, dad no, son tip kodu, son no, OPTYPE)] (tekrar = birden çok kayıt);
+    blocks: [(tip kodu, no, dil kodu)]; toi: CTL/BSL/XRL00001 link tablosu TOI (None = yazılmaz).
+    """
+    d = Path(proj) / "XUTILS" / str(set_no)
+    d.mkdir(parents=True, exist_ok=True)
+    write_dbf(d / "CT000001.DBF", XUTILS_CT_FIELDS,
+              [{"ID": i + 1, "BLTYPEDAD": dt, "BLNBDAD": dn, "BLTYPESON": st, "BLNBSON": sn, "OPTYPE": op,
+                "LANGDAD": 4} for i, (dt, dn, st, sn, op) in enumerate(calls)], memo=None)
+    write_dbf(d / "BS000001.DBF", XUTILS_BS_FIELDS,
+              [{"ID": i + 1, "BLOCKTYPE": t, "BLOCKNB": n, "LANGUAGE": lg, "TIMESTAMP": "", "LOCDATALEN": 0}
+               for i, (t, n, lg) in enumerate(blocks)], memo=None)
+    if toi is not None:
+        for f in ("CTL00001.DBF", "BSL00001.DBF", "XRL00001.DBF"):
+            write_dbf(d / f, XUTILS_LINK_FIELDS, [{"SOT": 1, "SOI": set_no, "TUT": 0, "TUI": 0, "TOT": 2,
+                                                   "TOI": toi, "RID": 1}], memo=None)
+    if xr_records:
+        write_dbf(d / "XR000001.DBF", [("ID", "C", 10), ("OPERAND", "C", 24)],
+                  [{"ID": i, "OPERAND": f"M{i}.0"} for i in range(xr_records)], memo=None)
+    ov = Path(proj) / "XUTILS" / "CT112001.DBF"
+    rows = []
+    if ov.exists():
+        from ._vendor import dbfread
+        rows = [dict(r) for r in dbfread.DBF(str(ov), encoding="latin1")]
+    rows.append({"ID": set_no, "NAME": name, "CRDATE1": "", "CRDATE2": "", "VERSION": 1, "LASTID": len(calls)})
+    write_dbf(ov, [("ID", "N", 10), ("NAME", "C", 40), ("CRDATE1", "C", 8), ("CRDATE2", "C", 8),
+                   ("VERSION", "N", 5), ("LASTID", "N", 10)], rows, memo=None)
+    return d

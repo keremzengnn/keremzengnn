@@ -182,6 +182,11 @@ class BlockFolderResult:
     symbol_source: str = ""
     symbol_only: list[str] = field(default_factory=list)   # symbol'de var, block klasöründe yok
     block_only: list[str] = field(default_factory=list)    # block'ta var, symbol'de yok
+    # XUTILS çağrı ağacı (parsers.xutils; ÇIKARIM): {FB no: [(çağıran tip, no, CT kayıt sayısı)]}, FC için aynısı
+    callers: dict = field(default_factory=dict)
+    fc_callers: dict = field(default_factory=dict)
+    callers_source: str = ""                                # XUTILS CT dosyası + eşleme yöntemi
+    callers_confidence: str = ""                            # "low" (XUTILS varsa)
     error: str = ""
 
 
@@ -315,6 +320,7 @@ class Analysis:
     kb_refs: dict = field(default_factory=dict)                    # {check_id: [kb.KbRef]} (doküman KB varsa)
     blockmap: object = None                                          # blockmap.BlockMap (ID zinciri)
     diag: object = None                                              # parsers.diag.DiagResult (DIAGNOSTICS arşivi varsa)
+    xutils: list = field(default_factory=list)                       # parsers.xutils.XutilsSet.summary() (çağrı ağacı setleri)
 
     @property
     def as_folders(self) -> list:
@@ -682,6 +688,25 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
             else:
                 bfr.mapping = (f"projede {bfr.info.n_programs} S7 program: hangi CPU'ya ait olduğu teyit edilmeli "
                                f"(klasör {bfr.info.path.rsplit('/', 1)[-1]})")
+
+
+def _analyze_xutils(src: Source, d: DiscoveryResult, an: Analysis, log) -> None:
+    """XUTILS (cross-reference) çağrı ağacı -> BlockFolderResult.callers. Eşleme ve semantik ÇIKARIM."""
+    from .parsers import xutils
+    pdirs = sorted({p.rsplit("/", 1)[0] if "/" in p else "" for p in d.projects + d.libraries})
+    sets = xutils.read_all(src, pdirs, progress=log)
+    if not sets:
+        return
+    hit = xutils.map_sets_to_folders(sets, an.block_folders, an.blockmap)
+    for bfr in an.block_folders:
+        xs = hit.get(bfr.info.path.lower())
+        if xs is not None:
+            xutils.attach(bfr, xs)
+    for xs in sets:
+        for u in xs.unknown:
+            path, _, reason = u.partition(" | ")
+            an.unknown.add("xutils", path, reason)
+        an.xutils.append(xs.summary())
 
 
 def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
@@ -1063,6 +1088,7 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
     symtabs: list = []
     _stage(an, "Symbol table", log, lambda: symtabs.extend(_symbol_tables(src, d, an)))
     _stage(an, "Block klasörü ↔ AS eşlemesi", log, _map_block_folders, an, symtabs)
+    _stage(an, "XUTILS çağrı ağacı", log, _analyze_xutils, src, d, an, log)
 
     log("OS projeleri...")
     _stage(an, "OS projeleri", log, _analyze_os, src, d, an)

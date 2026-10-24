@@ -47,8 +47,8 @@ def test_hw_colors_and_columns(xl):
     _, f = xl
     s = _sheet(f, "HW_Moduller")
     assert "Listedeki FW" in s and "FW uyumu" in s and "Discontinued" in s
-    red = re.search(r'<row r="\d+"><c r="A\d+" s="3" t="inlineStr"><is><t xml:space="preserve">6ES7 960-1AA06', s)
-    yellow = re.search(r'<c r="A\d+" s="4" t="inlineStr"><is><t xml:space="preserve">Festo CPX', s)
+    red = re.search(r'<c r="B\d+" s="3" t="inlineStr"><is><t xml:space="preserve">6ES7 960-1AA06', s)
+    yellow = re.search(r'<c r="B\d+" s="4" t="inlineStr"><is><t xml:space="preserve">Festo CPX', s)
     assert red and yellow
     assert "autoFilter" in s
 
@@ -171,3 +171,87 @@ def test_no_data_helper():
     assert len(_no_data([["A"], ["x"]], "neden")) == 2
     r = _no_data([["S"], ["A"]], "neden", header_index=1)
     assert r[-1][0].v == "Veri yok: neden"
+
+
+# ---------------- sıkı Excel: station bazında HW, sadece custom block, instance özeti, tekrar yok ----------------
+
+def _table(sheet_xml):
+    """[[metin / sayı, ...]] (formül önbellek değeri dahil)"""
+    out = []
+    for body in re.findall(r'<row r="\d+">(.*?)</row>', sheet_xml):
+        row = {}
+        for col, inner in re.findall(r'<c r="([A-Z]+)\d+"[^>]*?(?:/>|>(.*?)</c>)', body):
+            m = re.search(r"<t[^>]*>(.*?)</t>", inner) or re.search(r"<v>(.*?)</v>", inner)
+            row[col] = m.group(1) if m else ""
+        out.append([row.get(c, "") for c in "ABCDEFGHIJKLMNO"])
+    return out
+
+
+def test_hw_one_row_per_station_mlfb_fw(xl):
+    an, f = xl
+    t = _table(_sheet(f, "HW_Moduller"))
+    assert t[0][:5] == ["AS", "MLFB / GSD", "Model / açıklama", "FW (proje)", "Adet"]
+    keys = [(r[0], r[1], r[3]) for r in t[1:]]
+    assert len(keys) == len(set(keys))                                      # station + MLFB + FW tekil
+    exp = {(st.name, o, fw): n for st in an.stations for (o, fw), n in st.inventory.items()}
+    got = {(r[0], r[1], r[3]): int(r[4]) for r in t[1:] if r[9] == "modül"}
+    assert got == exp                                                       # adet station bazında
+    assert sum(got.values()) == sum(m.count for m in an.hw_matches if m.kind == "modül")
+    stations = [r[0] for r in t[1:]]
+    assert stations == sorted(stations)                                     # station'a göre gruplu
+    assert ("AS01", "Festo CPX (CPX_059E.GSE)") in {(r[0], r[1]) for r in t[1:]}
+
+
+def test_custom_blocks_only_custom(xl):
+    an, f = xl
+    t = _table(_sheet(f, "Custom_Blocklar"))
+    blocks = {r[1] for r in t[1:]}
+    assert {"FB1990", "FB1993", "FB2501"} <= blocks
+    std = {f"FB{nr}" for b in an.block_folders for nr, (_, lib, _) in b.fb_library.items()
+           if lib not in ("custom", "custom/unknown")}
+    assert not (blocks & std), blocks & std                                 # library block'u yok
+    assert all(r[0] in {b.as_label for b in an.as_folders} for r in t[1:])  # library projeleri hariç
+
+
+def test_instance_summary(xl):
+    an, f = xl
+    t = _table(_sheet(f, "Instance_Sayilari"))
+    assert t[0][:6] == ["AS", "Library", "Author", "Versiyon (author)", "FB tipi", "Instance"]
+    total = sum(n for b in an.as_folders for n in b.fb_instances.values())
+    assert sum(int(r[5]) for r in t[1:]) == total                           # özet kaybı yok
+    n_fb = sum(len(b.fb_instances) for b in an.as_folders)
+    assert len(t) - 1 < n_fb                                                # FB başına satır değil
+    apl = next(r for r in t[1:] if r[0] == "AS01" and r[2] == "AdvLib81")
+    assert apl[1] == "APL" and apl[3] == "V8.1" and "Pcs7DiIn ×6" in apl[6]
+
+
+def test_summary_findings_counts_no_detail(xl):
+    from pcs7_analyzer.readiness import findings_rows
+    an, f = xl
+    s = _sheet(f, "Ozet")
+    assert re.search(r'<f>COUNTIF\(Bulgular!\$C\$2:\$C\$\d+,"RİSK"\)</f>', s)
+    t = _table(s)
+    risk = next(r for r in t if r[0] == "RİSK")
+    assert int(risk[1]) == sum(1 for r in findings_rows(an) if r[2] == "RİSK")
+    flat = " ".join(" ".join(r) for r in t)
+    assert "F-001" in flat                                                  # Yüksek bulgu ID ile
+    assert an.findings[0].detail[:40] not in flat                           # detay Bulgular'da, tekrar yok
+
+
+def test_open_items_no_duplicates(xl):
+    _, f = xl
+    t = _table(_sheet(f, "Acik_Konular_Kaynak"))
+    konu = [r[1].strip().lower() for r in t[1:]]
+    assert len(konu) == len(set(konu))
+    assert "Kontrol edilemedi" not in {r[0] for r in t}                     # Bulgular'da VERİ YOK
+
+
+def test_widths_and_freeze_all_sheets(xl):
+    _, f = xl
+    names = re.findall(r'<sheet name="([^"]+)"', f["xl/workbook.xml"])
+    for i, name in enumerate(names, 1):
+        s = f[f"xl/worksheets/sheet{i}.xml"]
+        widths = [float(w) for w in re.findall(r'width="([\d.]+)"', s)]
+        assert widths and max(widths) <= 102, name
+        if name != "OS_WinCC":
+            assert 'state="frozen"' in s, name

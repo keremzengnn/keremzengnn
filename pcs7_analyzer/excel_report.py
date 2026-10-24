@@ -2,14 +2,17 @@
 Analiz Excel'i (rapor.xlsx) — 8 sayfa, Siemens renkleri (header #009999), Arial, freeze pane, filtre, sayılar #,##0,
 özet sayfası formüllerle diğer sayfalara bağlı. Yeni analizler bu 8 sayfaya yerleşir (sayfa sayısı artırılmaz).
 
-  1 Ozet                 genel bilgiler, lisans ihtiyacı (+toplam), ENG↔SRV fark özeti (COUNTIFS), hazırlık listesi, bulgular
+  1 Ozet                 genel bilgiler, lisans ihtiyacı (+toplam), ENG↔SRV fark özeti (COUNTIFS), bulgu durum sayıları
+                         (COUNTIF -> Bulgular), BLOCKER / Yüksek bulgu ID'leri, hazırlık listesi (detay tekrar edilmez)
   2 AS_Envanter          AS başına OS connection, CPU, CP, F, DP slave, FB/FC/DB, APL author, opsiyonlar (+toplam)
-  3 HW_Moduller          Released Modules durumu + projedeki / listedeki FW (kırmızı: listede yok, sarı: GSD)
-  4 Custom_Blocklar
-  5 Instance_Sayilari
+  3 HW_Moduller          station başına MLFB+FW tek satır (Adet) + Released Modules durumu (kırmızı: listede yok, sarı: GSD)
+  4 Custom_Blocklar      sadece custom / integratör block'ları (library block'ları yok; library projeleri hariç)
+  5 Instance_Sayilari    özet: AS × library × author başına FB tipi + instance toplamı + en çok kullanılanlar
   6 OS_WinCC             A) OS projeleri  B) connection ve tag sayıları (+MP toplamları)  C) alarm class  D) SFC / LM
   7 ENG_SRV1_Farklar     picture/script, tag, alarm, alarm metni farkları tek listede (Kategori sütunu)
-  8 Acik_Konular_Kaynak  müşteri soruları, eksik veriler, açık konular, kaynaklar
+  8 Acik_Konular_Kaynak  müşteri soruları, eksik veriler, açık konular, kaynaklar (tekrarsız; "kontrol edilemedi" Bulgular'da)
+  9-11 Backup_Yeterlilik, Teklif_Girdileri, Bulgular (Finding ID, durum renkleri), 12 Analiz_Edilemeyenler
+Sıkı tutulur: aynı bilgi iki sayfada detaylı tekrar edilmez (Ozet bulgu detayı yok -> Bulgular).
 """
 from __future__ import annotations
 
@@ -18,12 +21,11 @@ from pathlib import Path
 
 from .fmt import fmt_month, fmt_num
 from .analyze import Analysis, author_version, staged_path_from
-from .checks import CHECKS
 from .model import Severity
 from .mlfb_info import describe
 from .parsers.subblk import lang_name
 from .report import GENERIC_OPEN_ITEMS, REFERENCES, _natkey, decision, manual_items, prep_list, tr_upper
-from .xlsx import Cell, Workbook
+from .xlsx import Cell, Workbook, col_letter
 
 PETROL = "009999"
 SHEETS = ["Ozet", "AS_Envanter", "HW_Moduller", "Custom_Blocklar", "Instance_Sayilari", "OS_WinCC",
@@ -58,6 +60,61 @@ def _mps(an: Analysis) -> list[str]:
     mps = sorted({an.mp_of(b.info.project) for b in an.block_folders if b.counts}
                  | {an.mp_of(o.info.project) for o in an.os_projects if o.in_es})
     return mps or ["-"]
+
+
+TOP_INSTANCES = 5      # Instance_Sayilari: satır başına gösterilen en çok kullanılan FB sayısı
+
+
+def _hw_rows(an: Analysis) -> list[list]:
+    """Station başına MLFB+FW (GSD: cihaz tipi) tek satır, Adet = o station'daki modül sayısı.
+    Station envanterinde olmayan eşleşme (ör. station bilgisi yok) birleşik AS listesiyle eklenir."""
+    match = {(m.order, m.fw): m for m in an.hw_matches if m.kind == "modül"}
+    gsd = {m.order: m for m in an.hw_matches if m.kind != "modül"}
+    per: dict[str, Counter] = {}
+    for st in an.stations:
+        c = per.setdefault(st.name, Counter())
+        for (order, fw), n in st.inventory.items():
+            c[("modül", order, fw)] += n
+        for k, n in st.gsd.items():
+            c[("gsd", k, "")] += n
+    used: set = set()
+    out = []
+    for name in sorted(per, key=_natkey):
+        for (kind, order, fw), n in per[name].items():
+            m = match.get((order, fw)) if kind == "modül" else gsd.get(order)
+            if m is None:
+                continue
+            used.add(id(m))
+            out.append((name, m, n))
+    out += [(", ".join(m.stations) or "-", m, m.count) for m in an.hw_matches if id(m) not in used]
+
+    def bad(m):
+        return m.kind == "modül" and ("bulunamadı" in m.status or m.fw_status == "uyumsuz")
+    out.sort(key=lambda x: (_natkey(x[0]), not bad(x[1]), x[1].kind != "modül", x[1].order, x[1].fw))
+    rows = []
+    for name, m, n in out:
+        style = "yellow" if m.kind != "modül" else "red" if bad(m) else ""
+        rows.append([Cell(v, style) for v in (name, m.order, describe(m.order)[0], m.fw, n, m.status, m.fw_status,
+                                              m.listed_fw, m.discontinued, m.kind, m.note)])
+    return rows
+
+
+def _instance_rows(an: Analysis) -> list[list]:
+    """AS × library × author: instance'lı FB tipi sayısı, instance toplamı, en çok kullanılan FB'ler."""
+    rows = []
+    for b in sorted(an.as_folders, key=lambda b: _natkey(b.as_label)):
+        grp: dict[tuple[str, str], list] = {}
+        for nr, n in b.fb_instances.items():
+            name, lib, author = b.fb_library.get(nr, ("", "", ""))
+            grp.setdefault((lib or "(header yok)", author), []).append((n, nr, name))
+        for (lib, author), items in sorted(grp.items(), key=lambda kv: -sum(x[0] for x in kv[1])):
+            items.sort(key=lambda x: (-x[0], x[1]))
+            top = ", ".join(f"FB{nr}{' ' + nm if nm else ''} ×{n}" for n, nr, nm in items[:TOP_INSTANCES])
+            if len(items) > TOP_INSTANCES:
+                top += f" (+{len(items) - TOP_INSTANCES})"
+            note = "detay: Custom_Blocklar" if lib.startswith("custom") or lib == "(header yok)" else ""
+            rows.append([b.as_label, lib, author, author_version(author), len(items), sum(x[0] for x in items), top, note])
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -128,16 +185,26 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
         rows.append([cat, Cell(cnt.get(cat, 0), "num", f'COUNTIFS({diff_ref},"{cat}")'), ""])
     rows.append([])
     headers.add(len(rows))
-    rows.append(["Upgrade hazırlık listesi", "", ""])
-    rows += [[Cell(x, "wrap"), "", ""] for x in prep_list(an)]
+    from .readiness import FINDINGS_COLUMNS, findings_rows
+    frows = findings_rows(an)
+    i_st = FINDINGS_COLUMNS.index("Durum")
+    st_ref = f"Bulgular!${col_letter(i_st)}$2:${col_letter(i_st)}${max(2, len(frows) + 1)}"
+    rows.append(["Bulgu durumu (detay: Bulgular)", "Adet", ""])
+    st_cnt = Counter(r[i_st] for r in frows)
+    for st in ("BLOCKER", "RİSK", "BİLGİ", "VERİ YOK"):
+        rows.append([Cell(st, STATUS_STYLE.get(st, "")), Cell(st_cnt.get(st, 0), "num", f'COUNTIF({st_ref},"{st}")'), ""])
+    top = [(f, r) for f, r in zip(an.findings, frows) if r[i_st] == "BLOCKER" or f.severity is Severity.HIGH]
+    if top:
+        rows.append([])
+        headers.add(len(rows))
+        rows.append(["BLOCKER / Yüksek bulgular", "ID", "Durum"])
+        for f, r in top:
+            rows.append([f.title + (f" ({f.scope})" if f.scope else ""), r[0], Cell(r[i_st], STATUS_STYLE.get(r[i_st], ""))])
     rows.append([])
     headers.add(len(rows))
-    rows.append(["Öne çıkan bulgular", "Etki", "Açıklama"])
-    for f in an.findings:
-        if f.severity in (Severity.HIGH, Severity.MEDIUM):
-            rows.append([f.title + (f" ({f.scope})" if f.scope else ""),
-                         Cell(f.severity.value, "red" if f.severity is Severity.HIGH else "yellow"), f.detail])
-    wb.add_sheet("Ozet", rows, header_rows=headers, freeze=1, widths=[48, 22, 16, 100])
+    rows.append(["Upgrade hazırlık listesi", "", ""])
+    rows += [[Cell(x, "wrap"), "", ""] for x in prep_list(an)]
+    wb.add_sheet("Ozet", rows, header_rows=headers, freeze=1, widths=[70, 26, 14, 14])
 
     # ---------------- 2 AS_Envanter ----------------
     hdr = ["AS", "MP", "OS connection", "CPU", "CP", "F-capable / F-System", "DP/PN slave", "GSD", "FB", "FC", "DB", "OB",
@@ -165,22 +232,20 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     else:
         _no_data(rows, "backup'ta dolu block klasörü (AS) bulunamadı")
         n = len(rows)
-    wb.add_sheet("AS_Envanter", rows, header_rows={0}, filter_row=0, filter_last=n - 1, freeze=1)
+    wb.add_sheet("AS_Envanter", rows, header_rows={0}, filter_row=0, filter_last=n - 1, freeze=1,
+                 widths=[10, 12, 30, 28, 22, 18, 34, 30, 6, 6, 6, 6, 34, 30, 60])
 
     # ---------------- 3 HW_Moduller ----------------
-    rows = [["MLFB / GSD", "Model / açıklama", "FW (proje)", "Listedeki FW", "FW uyumu", "Released Modules durumu", "Discontinued", "Adet",
-             "AS", "Tür", "Bölüm / not"]]
-    for mm in sorted(an.hw_matches, key=lambda x: (x.kind != "modül", "bulunamadı" not in x.status, x.order)):
-        style = "yellow" if mm.kind != "modül" else "red" if "bulunamadı" in mm.status or mm.fw_status == "uyumsuz" else ""
-        rows.append([Cell(v, style) for v in (mm.order, describe(mm.order)[0], mm.fw, mm.listed_fw, mm.fw_status, mm.status, mm.discontinued)]
-                    + [Cell(mm.count, style), Cell(", ".join(mm.stations), style), Cell(mm.kind, style), Cell(mm.note, style)])
+    rows = [["AS", "MLFB / GSD", "Model / açıklama", "FW (proje)", "Adet", "Released Modules durumu", "FW uyumu",
+             "Listedeki FW", "Discontinued", "Tür", "Bölüm / not"]] + _hw_rows(an)
     _no_data(rows, "backup'ta HW Config (.cfg / .s7h) bulunamadı veya modül okunamadı")
-    wb.add_sheet("HW_Moduller", rows, header_rows={0}, filter_row=0, freeze=1)
+    wb.add_sheet("HW_Moduller", rows, header_rows={0}, filter_row=0, freeze=1,
+                 widths=[10, 26, 30, 10, 6, 30, 24, 12, 12, 14, 50])
 
     # ---------------- 4 Custom_Blocklar ----------------
     rows = [["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Not"]]
-    for b in an.block_folders:
-        for c in b.custom_blocks:
+    for b in sorted(an.as_folders, key=lambda b: _natkey(b.as_label)):       # library projeleri AS değil
+        for c in sorted(b.custom_blocks, key=lambda c: (c.kind, c.number)):
             rows.append([b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
                          lang_name(c.lang), c.version,
                          c.instances if b.memo_available else "", "header'sız" if c.headerless else ""])
@@ -188,16 +253,15 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
             rows.append([b.as_label, s.split(" ", 1)[0], s.split(" ", 1)[-1], "", "", "", "", "",
                          "symbol table'da var, block klasöründe yok"])
     _no_data(rows, "custom block bulunamadı (sadece library block'ları) veya block klasörü yok")
-    wb.add_sheet("Custom_Blocklar", rows, header_rows={0}, filter_row=0, freeze=1)
+    wb.add_sheet("Custom_Blocklar", rows, header_rows={0}, filter_row=0, freeze=1,
+                 widths=[10, 10, 30, 12, 12, 8, 9, 9, 40])
 
     # ---------------- 5 Instance_Sayilari ----------------
-    rows = [["AS", "Block", "İsim", "Library", "Author", "Versiyon (author)", "Instance"]]
-    for b in an.block_folders:
-        for nr, n in sorted(b.fb_instances.items(), key=lambda kv: -kv[1]):
-            name, lib, author = b.fb_library.get(nr, ("", "", ""))
-            rows.append([b.as_label, f"FB{nr}", name, lib, author, author_version(author), n])
+    rows = [["AS", "Library", "Author", "Versiyon (author)", "FB tipi", "Instance", f"En çok kullanılan (ilk {TOP_INSTANCES})",
+             "Not"]] + _instance_rows(an)
     _no_data(rows, "FB instance bulunamadı (SUBBLK.DBT yok veya instance DB yok)")
-    wb.add_sheet("Instance_Sayilari", rows, header_rows={0}, filter_row=0, freeze=1)
+    wb.add_sheet("Instance_Sayilari", rows, header_rows={0}, filter_row=0, freeze=1,
+                 widths=[10, 28, 12, 10, 8, 9, 80, 22])
 
     # ---------------- 6 OS_WinCC ----------------
     rows = [[Cell("A) OS projeleri", "section")], ["MP", "OS projesi", "Rol", "Rol notu", "Yer", "Client grubu", "Dosya", "Custom picture",
@@ -268,21 +332,21 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     # ---------------- 7 ENG_SRV1_Farklar ----------------
     rows = [["Kategori", "Karşılaştırma", "Öğe", "Durum", "Detay"]] + diff_rows
     _no_data(rows, "karşılaştırılacak OS projesi çifti / WinCC export yok veya fark bulunmadı")
-    wb.add_sheet("ENG_SRV1_Farklar", rows, header_rows={0}, filter_row=0, freeze=1)
+    wb.add_sheet("ENG_SRV1_Farklar", rows, header_rows={0}, filter_row=0, freeze=1, widths=[16, 30, 40, 26, 60])
 
     # ---------------- 8 Acik_Konular_Kaynak ----------------
     rows = [["Tür", "Konu", "Detay"]]
     for k, v in manual_items(an):
         rows.append(["Müşteri sorusu" if k == "Müşteri sorusu" else "Manuel giriş",
                      v if k == "Müşteri sorusu" else k, "" if k == "Müşteri sorusu" else v])
-    rows += [["Açık konu", x, ""] for x in an.open_items]
-    titles = {c.id: c.title for c in CHECKS}
-    rows += [["Kontrol edilemedi", titles.get(i, i), why] for i, why in an.not_checked]
-    rows += [["Açık konu", x, ""] for x in GENERIC_OPEN_ITEMS]
+    rows += [["Açık konu", x, ""] for x in list(an.open_items) + list(GENERIC_OPEN_ITEMS)]
     rows += [["Uyarı", w, ""] for w in an.warnings]
     rows += [["Kaynak", f"{r[0]} {r[1]}", f"{r[2]} ({r[3]})"] for r in REFERENCES]
+    # "Kontrol edilemedi" satırları Bulgular'da (VERİ YOK); aynı konu (ör. müşteri sorusu = açık konu) bir kez
+    seen: set[str] = set()
+    rows = [r for r in rows if not (str(r[1]).strip().lower() in seen or seen.add(str(r[1]).strip().lower()))]
     _no_data(rows, "açık konu yok")
-    wb.add_sheet("Acik_Konular_Kaynak", rows, header_rows={0}, filter_row=0, freeze=1)
+    wb.add_sheet("Acik_Konular_Kaynak", rows, header_rows={0}, filter_row=0, freeze=1, widths=[16, 90, 50])
 
     # ---------------- 9-11 Readiness ----------------
     from .readiness import backup_coverage, findings_rows, quote_inputs
