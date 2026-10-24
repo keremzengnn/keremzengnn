@@ -20,6 +20,19 @@ SUBBLK_DB = "00010"
 SUBBLK_SFB = "00015"
 SUBBLK_SFC = "00013"
 
+# Ana (MC7 / header) kayıtları: S7 block tipi kodu (0x08 OB, 0x0A DB, 0x0C FC, 0x0D SFC, 0x0E FB, 0x0F SFB).
+# 00004 / 00005 = FB / FC'nin plaintext interface kaydı (sadece offline oluşturulmuş block'larda var; PLC'den yüklenen,
+# bazı korumalı block'larda yok). Sayım iki kaydın birleşimiyle yapılır. Kaynak: gerçek proje kayıt sayıları +
+# açık kaynak STEP 7 V5 okuyucusu (DotNetSiemensPLCToolBoxLibrary, BlocksOfflineFolder.cs).
+SUBBLK_FB_MAIN = "00014"
+SUBBLK_FC_MAIN = "00012"
+MAIN_KIND = {SUBBLK_FB_MAIN: "FB", SUBBLK_FC_MAIN: "FC", SUBBLK_OB: "OB", SUBBLK_DB: "DB", SUBBLK_SFC: "SFC",
+             SUBBLK_SFB: "SFB"}
+# Bilinen alt kayıtlar (sayılmaz, Unknown'a da yazılmaz): plaintext interface / yorum / DB yapısı / VAT
+KNOWN_SUBRECORDS = {"00001", "00003", "00006", "00007", "00009", "00017", "00018", "00019", "00020", "00021", "00022",
+                    "00027", "00038", "00066"}
+KNOW_HOW_PASSWORD = 3        # ana kayıtta PASSWORD = 3 -> know-how protection (açık kaynak okuyucu; ÇIKARIM)
+
 # SSBPART'tan okunan FB numarası bunun üstündeyse geçersiz kabul edilir.
 MAX_VALID_FB_NUMBER = 8191
 
@@ -32,6 +45,7 @@ DBF_ENCODING = "latin1"
 AUTHOR_LIBRARY = {
     "AdvLib": "APL",            # AdvLib81 = APL V8.1, AdvLib82 = APL V8.2 ...
     "AdvLibLM": "Logic Matrix",
+    "AdvLibIL": "PCS 7 Industry Library",   # IL_BS, IL_BR … (APL değil)
     "DRIVER": "Basis Library",  # DRIVER81 = Basis Library V8.1
     "ELEMENTA": "CFC ELEMENTA",
     "ELEM_300": "CFC ELEMENTA",
@@ -52,10 +66,21 @@ def decode_block_version(v: int | None) -> str:
     return f"{v >> 4}.{v & 15}"
 
 
-def classify_author(author: str) -> str:
-    """Author string'inden library adını döndür. En uzun prefix kazanır."""
+# Header'ı boş olsa da isminden tanınan Siemens standart block'ları (S7 Standard Library / Communication Blocks,
+# CP PtP library, IEC). Kaynak: block adı (ÇIKARIM) -> custom sayılmaz.
+STANDARD_BLOCK_NAMES = {"TCON", "TDISCON", "TSEND", "TRCV", "TUSEND", "TURCV", "TSEND_C", "TRCV_C", "P_SND_RK",
+                        "P_RCV_RK", "P_PRINT_RK", "PUT", "GET", "BSEND", "BRCV", "USEND", "URCV", "AG_SEND",
+                        "AG_RECV", "AG_LSEND", "AG_LRECV", "AG_CNTRL", "R_TRIG", "F_TRIG", "TP", "TON", "TOF",
+                        "CTU", "CTD", "CTUD", "SFC_RTS"}
+STANDARD_LIBRARY = "Siemens Standard Library (isimden)"
+
+
+def classify_author(author: str, name: str = "") -> str:
+    """Author string'inden library adını döndür. En uzun prefix kazanır. Author boşsa standart block adı denenir."""
     a = author.strip()
     if not a:
+        if name.strip().upper() in STANDARD_BLOCK_NAMES:
+            return STANDARD_LIBRARY
         return "custom/unknown"
     best = ""
     for prefix in AUTHOR_LIBRARY:
@@ -93,7 +118,7 @@ class BlockHeader:
 
     @property
     def library(self) -> str:
-        return classify_author(self.author)
+        return classify_author(self.author, self.name)
 
 
 @dataclass
@@ -108,6 +133,8 @@ class BlockFolder:
     # SSBPART'ı instance gibi görünen ama FB numarası çözülemeyen / geçersiz DB sayısı.
     unresolved_instances: int = 0
     bad_records: int = 0          # BLKNUMBER okunamayan kayıt (atlandı)
+    protected: set = field(default_factory=set)      # {(kind, nr)} know-how protected (PASSWORD = 3)
+    local_data: dict = field(default_factory=dict)   # {(kind, nr): LOCDATALEN} (block'un kendi local data'sı)
     other_types: collections.Counter = field(default_factory=collections.Counter)  # bilinen 6 tip dışı SUBBLKTYP
 
     @property
@@ -163,6 +190,7 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
     bf = BlockFolder(path=dbf_path.parent, memo_available=memo)
     present = set()
     headers: dict[tuple, dict] = {}
+    main_headers: dict[tuple, dict] = {}
     for rec in table:
         bf.n_records += 1
         if progress and bf.n_records % 20000 == 0:
@@ -175,7 +203,18 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
             continue
         if ty in _KIND:
             present.add((ty, nr))
-        elif ty not in (SUBBLK_SFC, SUBBLK_SFB):
+        if ty in MAIN_KIND:
+            kind = MAIN_KIND[ty]
+            if ty not in _KIND:
+                present.add(({"FB": SUBBLK_FB, "FC": SUBBLK_FC}.get(kind, ty), nr))
+            if _int0(rec.get("PASSWORD")) == KNOW_HOW_PASSWORD:
+                bf.protected.add((kind, nr))
+            ld = _int0(rec.get("LOCDATALEN"))
+            if ld:
+                bf.local_data[(kind, nr)] = ld
+            if kind in ("FB", "FC"):
+                main_headers.setdefault((kind, nr), rec)
+        elif ty not in _KIND and str(ty).strip() not in KNOWN_SUBRECORDS:
             bf.other_types[str(ty).strip() or "(boş)"] += 1
         if ty in (SUBBLK_FB, SUBBLK_FC):
             key = (ty, nr)
@@ -194,8 +233,13 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
                             bf.instances_per_fb[(kind, fb_nr)] += 1
                         else:
                             bf.unresolved_instances += 1
-    c = collections.Counter(_KIND[t] for t, _ in present)
+    c = collections.Counter(_KIND.get(t) or MAIN_KIND[t] for t, _ in present)
     bf.counts = dict(c)
+    # Interface kaydı olmayan FB/FC'ler: başlık ana kayıttan
+    for (kind, nr), rec in main_headers.items():
+        key = (SUBBLK_FB if kind == "FB" else SUBBLK_FC, nr)
+        if key not in headers or (not headers[key]["BLOCKNAME"].strip() and str(rec.get("BLOCKNAME") or "").strip()):
+            headers[key] = rec
     for (ty, nr), rec in sorted(headers.items()):
         name = rec["BLOCKNAME"].strip()
         if ty == SUBBLK_FC and not name:
@@ -209,6 +253,13 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
             )
         )
     return bf
+
+
+def _int0(v) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def library_summary(bf: BlockFolder) -> dict[str, collections.Counter]:

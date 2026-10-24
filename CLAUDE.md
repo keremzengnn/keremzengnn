@@ -58,7 +58,16 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
 - **`encoding='latin1'` zorunlu.** dbfread language driver 0x00'da 'ascii' seçer; `char_decode_errors='ignore'` ile
   SSBPART memo'sundaki ≥0x80 byte'lar silinir ve FB numaraları bozulur (FB1990 -> FB7). Test ile korunuyor.
 - Alanlar: `SUBBLKTYP, BLKNUMBER, BLOCKFNAME (family), BLOCKNAME, VERSION, USERNAME (author), BLKLANG, MC5CODE, SSBPART, ADDINFO`
-- `SUBBLKTYP`: 00004=FB, 00005=FC, 00008=OB, 00010=DB, 00013=SFC, 00015=SFB. Diğer kodlar aynı block'un alt kayıtları.
+- `SUBBLKTYP` (gerçek proje MP_PDCS kayıt sayıları + açık kaynak STEP 7 V5 okuyucusu ile güncellendi, 2026-10-24):
+  ana (MC7/header) kayıtlar = S7 block tipi kodu: 00008 OB, 00010 DB, **00012 FC**, 00013 SFC, **00014 FB**, 00015 SFB.
+  00004 / 00005 = FB / FC'nin **plaintext interface** kaydı (sadece offline oluşturulan block'larda; PLC'den yüklenen /
+  korumalı block'ta yok). Sayım ana + interface kaydının birleşimi; isim/author önce interface kaydından, yoksa ana kayıttan.
+  Alt kayıtlar (sayılmaz): 1 UDT, 3/7/9 OB/SFC/SFB interface, 6 DB yapısı, 17-22 yorum, 27/38 VAT, 66.
+  Ana kayıtta `PASSWORD = 3` -> know-how protection (ÇIKARIM); `LOCDATALEN` = block'un kendi local data'sı.
+- Gerçek projede görülen yanlış pozitifler (test ile korunuyor): `F_TRIG` F-System değil (IEC edge trigger);
+  `ELEM_400`/`ELEM_300` sürüm değil; `AdvLibIL` = PCS 7 Industry Library (APL değil); header'sız TCON/TSEND/TRCV/
+  P_SND_RK/PUT… = Siemens standart (isimden), custom değil; `@@*.pdl` sistem dosyası; arşivi olan "OS1" = server.
+- STEP 7 DBF'lerinde mantıksal alan `\x00` olabilir (YDBs/SYMLISTS.DBF): `blockmap._TolerantParser`.
 - `VERSION` tek byte: `0x30 -> 3.0` (high nibble major, low nibble minor).
 - Author → library: `AdvLib81`=APL V8.1, `AdvLib82`=APL V8.2, `AdvLibLM`=Logic Matrix, `DRIVER81`=Basis Library V8.1,
   `ELEMENTA/ELEM_300/ELEM_400`=CFC ELEMENTA, `ES_MAP`=CFC'nin ürettiği FC/DB, `ES_SFC`=SFC system block,

@@ -551,6 +551,10 @@ def _software_rows(an: Analysis) -> list[list[str]]:
             fb = [x.split(" ", 1)[-1] for x in b.f_blocks_from_symbols]
             lines.append("S7 F Systems" + (f", Failsafe Blocks {'/'.join(vs)}" if vs else "")
                          + (f" ({_fmt_list(fb, 5)})" if fb else ""))
+        if b.standard_blocks:
+            lines.append("Siemens standart (isimden): " + _fmt_list(sorted({x.split(" ", 1)[-1] for x in b.standard_blocks}), 6))
+        if b.protected:
+            lines.append(f"Know-how protected: {_fmt_list(b.protected, 5)}")
         custom = []
         if b.custom_blocks:
             names = [c.name.replace(" (symbol)", "") or f"FB{c.number}" for c in b.custom_blocks]
@@ -699,15 +703,28 @@ def _appendix(an: Analysis, doc: list) -> None:
                          "; ".join(f"{o} {fw}".strip() for o, fw, _ in s.cps) or "-",
                          _fmt_list([f"{k} ×{n}" for k, n in s.slaves.items()], 6), _fmt_list([f"{k} ×{n}" for k, n in s.gsd.items()], 3),
                          str(s.h_sync or "-"), "-" if s.f_capable is None else ("Evet" if s.f_capable else "Hayır"),
-                         "-" if s.pdm_used is None else ("Evet" if s.pdm_used else "Hayır"), f"{s.kind}: {s.source}"])
+                         "-" if s.pdm_used is None else ("Evet" if s.pdm_used else "Hayır"), (f"s7h: {len(s.source.split(', '))} dosya ({s.source.split(', ')[0].rsplit('/', 1)[0]})" if s.kind == "s7h"
+                          else f"{s.kind}: {s.source}")])
         doc.append(Table(["AS", "CPU", "CP", "Slave'ler", "GSD", "H-Sync", "F-capable", "PDM", "Kaynak"], rows))
     doc.append(Heading(2, "Hardware uyumluluk"))
-    doc.append(Para(f"Released Modules listesi: {an.released_list}" if an.released_list else
+    doc.append(Para(f"Released Modules listesi: {Path(an.released_list).name}" if an.released_list else
                     "Released Modules listesi (data/released_modules_<versiyon>.csv) yok: eşleştirme yapılmadı."))
     if an.hw_matches:
         doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
                          [[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4), m.status] for m in
                           sorted(an.hw_matches, key=lambda m: ("bulunamadı" not in m.status, m.order))], badge_cols=[5]))
+    ld_rows = []
+    for b in an.as_folders:
+        obs = {k: v for k, v in b.local_data.items() if k.startswith("OB")}
+        if obs:
+            top = sorted(obs.items(), key=lambda x: -x[1])[:6]
+            ld_rows.append([b.as_label, ", ".join(f"{k} {v} B" for k, v in top), str(max(b.local_data.values()))])
+    if ld_rows:
+        doc.append(Heading(2, "Local data (block'ların kendi değeri)"))
+        doc.append(Table(["AS", "OB local data (en büyük)", "En büyük block local data (byte)"], ld_rows))
+        doc.append(Note("SUBBLK LOCDATALEN: block'un kendi local data'sı; iç içe çağrılarla priority class toplamı ve CPU "
+                        "ayarı backup'tan hesaplanmadı (VERİ YOK). V10'da güncellenen block'lar daha fazla local data "
+                        "isteyebilir -> download öncesi CPU local data ayarı kontrol edilmeli."))
     if an.blockmap is not None and an.blockmap.links:
         doc.append(Heading(2, "S7 program ↔ CPU ↔ station (ID zinciri)"))
         doc.append(Table(["S7 program", "Block klasörü", "CPU", "Station", "Symbol table", "Güven"],

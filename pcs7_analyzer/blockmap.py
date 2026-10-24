@@ -24,6 +24,17 @@ import struct
 from dataclasses import dataclass, field
 
 from ._vendor import dbfread
+from ._vendor.dbfread.field_parser import FieldParser
+
+
+class _TolerantParser(FieldParser):
+    """STEP 7 DBF'lerinde mantıksal (L) alan \\x00 olabilir (ör. YDBs/SYMLISTS.DBF _SAVED/_DELETED): None döner, hata değil."""
+
+    def parseL(self, field, data):
+        try:
+            return super().parseL(field, data)
+        except ValueError:
+            return None
 
 STATION_TYPES = {1314969: "S7-300", 1314970: "S7-400", 1315650: "S7-400H", 1315651: "RTX"}
 CPU_DIRS = ("s7hk41ax", "s7hk31ax", "s7hkcomx")
@@ -61,6 +72,17 @@ class BlockMap:
     links: list[ProgramLink] = field(default_factory=list)
     unknown: list[str] = field(default_factory=list)       # modül | dosya | neden
     files: dict = field(default_factory=dict)              # {proje: {dosya: var/yok}}
+    stats: dict = field(default_factory=dict)              # {proje: {sayısal tanı}} (isim yok)
+    stations: dict = field(default_factory=dict)           # {(proje, station ID): (ad, tip)} (s7hstatx/HOBJECT1)
+
+    def station_for_s7h(self, project: str, s7h_rel: str) -> tuple[str, str] | None:
+        """hOmSave7/s7hstatx/<ID hex>.s7h -> (station adı, tip); bulunamazsa None."""
+        stem = s7h_rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        try:
+            sid = int(stem, 16)
+        except ValueError:
+            return None
+        return self.stations.get((project, sid))
 
     def for_folder(self, path: str) -> ProgramLink | None:
         low = path.lower()
@@ -70,7 +92,7 @@ class BlockMap:
 def _rows(src, rel: str) -> list[dict]:
     """DBF kayıtları; alan adları büyük harfe çevrilir (silinmiş kayıtlar dbfread tarafından atlanır)."""
     t = dbfread.DBF(str(src.materialize(rel)), encoding="latin1", char_decode_errors="replace",
-                    ignore_missing_memofile=True)
+                    ignore_missing_memofile=True, parserclass=_TolerantParser)
     return [{k.upper(): v for k, v in r.items()} for r in t]
 
 
@@ -161,11 +183,27 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
             sid, typ = _int(r.get("ID")), _int(r.get("OBJTYP"))
             if sid is not None and typ in STATION_TYPES:
                 stations[sid] = (_str(r.get("NAME")), STATION_TYPES[typ])
+                bm.stations[(pd, sid)] = stations[sid]
+    st = bm.stats.setdefault(pd or ".", {})
+    st["program"] = len(progs)
+    st["program_with_block_folder"] = sum(1 for p in progs.values() if p.block_folder)
+    st["station_in_s7hstatx"] = len(stations)
     for d in CPU_DIRS:
         rel_f, obj_f = files[f"hOmSave7/{d}/HRELATI1.DBF"], files[f"hOmSave7/{d}/HOBJECT1.DBF"]
         if not rel_f:
             continue
         rels = _rows(src, rel_f)
+        st[f"{d}: HRELATI1 satır"] = len(rels)
+        st[f"{d}: RELID=16 satır"] = sum(1 for r in rels if _int(r.get("RELID")) == REL_PROGRAM)
+        hist: dict = {}
+        for r in rels:
+            for col in ("TOBJID", "SOBJID"):
+                if _int(r.get(col)) in progs:
+                    k = f"{col}=program, RELID {_int(r.get('RELID'))}, TOBJTYP {_int(r.get('TOBJTYP'))}"
+                    hist[k] = hist.get(k, 0) + 1
+        st[f"{d}: program ID geçen ilişkiler"] = hist or "yok"
+        st[f"{d}: CPU-station ilişkisi (TOBJTYP 1314972/1315656)"] = sum(
+            1 for r in rels if _int(r.get("TOBJTYP")) in REL_CPU_IN_STATION)
         cpus = {}
         if obj_f:
             for r in _rows(src, obj_f):
@@ -199,7 +237,15 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
             bm.unknown.append(f"blockmap | {pd or '.'} | program {p.program_id}: CPU / station bağı "
                               "bulunamadı (HRELATI1 RELID 16 yok; CPU'suz program olabilir)")
 
-    # 6) symbol table
+    # 6) symbol table (hata olursa program/CPU/station sonuçları kaybolmaz)
+    try:
+        _symbol_links(src, pd, files, index, progs)
+    except Exception as e:  # noqa: BLE001
+        bm.unknown.append(f"blockmap | {pd or '.'}/YDBs | symbol table bağı okunamadı: {type(e).__name__}: {e}")
+    bm.links += sorted(progs.values(), key=lambda x: (x.block_folder or "~", x.program_id))
+
+
+def _symbol_links(src, pd: str, files: dict, index: dict, progs: dict) -> None:
     if files["YDBs/YLNKLIST.DBF"]:
         soi = {}
         for r in _rows(src, files["YDBs/YLNKLIST.DBF"]):
@@ -215,7 +261,6 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
             if rel:
                 progs[pid].symbol_table = rel
                 progs[pid].evidence.append(f"{files['YDBs/YLNKLIST.DBF']}: program {pid} -> symbol table {sub}")
-    bm.links += sorted(progs.values(), key=lambda x: (x.block_folder or "~", x.program_id))
 
 
 def cross_check(bm: BlockMap, station_names: set[str], symtab_jaccard: dict | None = None) -> None:
@@ -240,6 +285,10 @@ def diagnostics(bm: BlockMap) -> str:
         masks[pd] = f"<proje {i}>"
         out.append(f"## proje {i}")
         out += [f"- {k}: {v}" for k, v in fs.items()]
+    out.append("")
+    for i, (pd, stt) in enumerate(sorted(bm.stats.items()), 1):
+        out.append(f"## proje {list(sorted(bm.files)).index(pd) + 1 if pd in bm.files else i} sayılar")
+        out += [f"- {k}: {v}" for k, v in stt.items()]
     out.append("")
     for p in bm.links:
         out.append(f"- program {p.program_id}: block klasörü {p.block_folder.rsplit('/', 1)[-1] if p.block_folder else '-'}, "

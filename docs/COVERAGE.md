@@ -16,13 +16,13 @@ Durum: **YAPILDI** / **KISMİ** / **YAPILAMADI** (neden). Test sütunu: ilgili t
 | 10 | Tanınmayan SUBBLKTYP → Unknown | subblk.other_types → unknown.py | test_cli (unknown.log) | YAPILDI |
 | 11 | author→library eşleme tablosu dosyada (`data/author_library_map.yaml`) | subblk.AUTHOR_LIBRARY (Python dict) | test_subblk | KISMİ (YAML değil, bkz. DECISIONS) |
 | 12 | Mixed-version, custom block listesi, instance sayıları, source var mı | analyze, checks BLK_*, readiness | test_analyze, test_readiness | YAPILDI (source: s7asrcom/AWL/SCL varlığı, block bazında değil) |
-| 13 | Know-how protection / şifreli block sayısı | - | - | YAPILAMADI (SUBBLK'ta koruma bayrağı yeri bilinmiyor; header'sız block'lar ayrı listeleniyor) |
-| 14 | Runtime group / chart başına block (FC 64 KB riski) | - | - | YAPILAMADI (CFC chart formatı okunmuyor; coverage'da "VERİ YOK") |
+| 13 | Know-how protection / şifreli block sayısı | subblk (PASSWORD = 3), checks BLK_KNOW_HOW | test_subblk | KISMİ (alan anlamı açık kaynak okuyucudan; gerçek projede teyit bekliyor) |
+| 14 | Runtime group / chart başına block (FC 64 KB riski) | - (yapi_tanisi'nde XUTILS CT* kod dağılımı toplanıyor) | - | YAPILAMADI (XUTILS çağrı ağacı CT*.DBF ile mümkün görünüyor; kod anlamları gerçek tanı dosyasıyla çözülecek) |
 | 15 | hwconfig: .cfg, USED_S7_VERSIONS, F-capable, PDM, modül/FW, GSD ayrı | parsers/hwconfig.py | test_hwconfig | YAPILDI |
 | 16 | MLFB yanında model / açıklama | mlfb_info.py | test_source | YAPILDI |
 | 17 | IP / MPI adresleri, slot listesi | inventory "HW modüller (export)" (Konum) | test_inventory | KISMİ (rack/slot var; IP/MPI ayrıştırılmıyor) |
 | 18 | F-capable CPU'da F-I/O yoksa "export eksik olabilir" | checks HW_F_EXPORT_MISSING | test_checks | YAPILDI |
-| 19 | CPU Local Data | readiness (VERİ YOK) | test_readiness | YAPILAMADI (export'ta yok → VERİ YOK) |
+| 19 | CPU Local Data | subblk LOCDATALEN (block'un kendi değeri), rapor "Local data" | test_subblk | KISMİ (priority class toplamı ve CPU ayarı VERİ YOK) |
 | 20 | symbols: SYMLIST + ASC, çift adres, çift isim, adres aralığı | parsers/symbols.symbol_stats, inventory | test_symbols | YAPILDI (bit/word çakışması yok) |
 | 21 | Kullanılmayan semboller | - | - | YAPILAMADI (block kodu / chart bağlantısı okunmuyor) |
 | 22 | os_wincc: mcp, PDL, script, SfcRtBase, arşiv, Config Studio export, rol, client grupları | parsers/wincc*.py, analyze._analyze_os | test_wincc, test_wincc_os | YAPILDI |

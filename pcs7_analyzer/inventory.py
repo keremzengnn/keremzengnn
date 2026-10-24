@@ -387,7 +387,56 @@ def diagnostics(src: Source) -> str:
     s7h = [e for e in src.entries if e.name.lower().endswith(".s7h")]
     if s7h:
         lines += ["", f"## .s7h dosyaları: {len(s7h)} adet, boyut min {min(e.size for e in s7h)} / max {max(e.size for e in s7h)} byte"]
+    lines += _format_probe(src)
     return "\n".join(lines) + "\n"
+
+
+# Kod alanları (müşteri verisi değil: tip / dil / işlem kodları). FC 64 KB (runtime group) ve block tipi analizleri için.
+_PROBE_FIELDS = {"CT": ("BLTYPEDAD", "BLTYPESON", "OPTYPE", "LANGDAD"), "BS": ("BLOCKTYPE", "LANGUAGE"),
+                 "BAUSTEIN": ("TYP",), "SUBBLK": ("SUBBLKTYP", "PASSWORD", "BLKLANG"), "XR": ("OPTYPE", "OPACCESS",
+                 "BLOCKTYPE")}
+_VER_TOKEN = re.compile(rb"V?\d{1,2}\.\d{2}\.\d{2}\.\d{2}")
+
+
+def _format_probe(src: Source, max_records: int = 200_000) -> list[str]:
+    """Format çözümü için sayısal tanı: kod alanlarının değer dağılımı, .mcp versiyon dizileri (isim / içerik yok)."""
+    out = ["", "## Kod alanı dağılımları (ilk dosya / tür, değerler kod; isim yok)"]
+    done = set()
+    for e in src.entries:
+        name = e.name.upper()
+        kind = ("CT" if name.startswith("CT0") else "BS" if name.startswith("BS0") else "XR" if name.startswith("XR0")
+                else "BAUSTEIN" if name == "BAUSTEIN.DBF" else "SUBBLK" if name == "SUBBLK.DBF" else None)
+        if not kind or not name.endswith(".DBF") or kind in done or e.size < 200:
+            continue
+        try:
+            t = dbfread.DBF(str(src.materialize(e.rel)), encoding="latin1", char_decode_errors="replace",
+                            ignore_missing_memofile=True)
+            fields = [f for f in _PROBE_FIELDS[kind] if f in t.field_names]
+            hist = {f: Counter() for f in fields}
+            n = 0
+            for rec in t:
+                for f in fields:
+                    hist[f][str(rec.get(f)).strip()[:6]] += 1
+                n += 1
+                if n >= max_records:
+                    break
+            done.add(kind)
+            out.append(f"- {kind} ({n} kayıt, {mask_path(e.rel)}):")
+            for f, c in hist.items():
+                out.append(f"    {f}: " + ", ".join(f"{k}×{v}" for k, v in c.most_common(30)))
+        except Exception as ex:  # noqa: BLE001 - tanı bölümü; hata metni yazılır
+            out.append(f"- {kind}: okunamadı ({type(ex).__name__})")
+    toks = Counter()
+    for e in src.entries:
+        if e.name.lower().endswith(".mcp") and e.size < 50_000_000:
+            try:
+                raw = src.read_bytes(e.rel)
+                for t in set(_VER_TOKEN.findall(raw) + _VER_TOKEN.findall(raw.replace(b"\x00", b""))):
+                    toks[t.decode("latin1")] += 1
+            except Exception as ex:  # noqa: BLE001
+                out.append(f"- .mcp okunamadı ({type(ex).__name__})")
+    out += ["", "## .mcp içindeki versiyon dizileri", ", ".join(f"{k}×{v}" for k, v in toks.most_common(20)) or "-"]
+    return out
 
 
 # ---------------------------------------------------------------------------

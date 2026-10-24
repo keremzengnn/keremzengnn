@@ -168,3 +168,19 @@ def test_no_star_import():
     root = pathlib.Path(__file__).parents[1] / "pcs7_analyzer"
     offenders = [str(p) for p in root.rglob("*.py") if "_vendor" not in p.parts and "import *" in p.read_text(encoding="utf-8")]
     assert not offenders
+
+
+def test_client_named_project_with_archives_is_server(tmp_path):
+    from pcs7_analyzer.analyze import analyze
+    for os_name, extra in (("OS1", ["OS1ALG.mdf", "OS1TLG.mdf"]), ("OSC1", [])):
+        d = tmp_path / "MP" / "OS" / "wincproj" / os_name
+        (d / "GraCS").mkdir(parents=True)
+        (d / f"{os_name}.mcp").write_bytes(b"V07.03.20.04")
+        (d / "GraCS" / "Tank.pdl").write_bytes(b"x")
+        for f in extra:
+            (d / f).write_bytes(b"x" * 100)
+    (tmp_path / "MP" / "OS" / "OS.s7p").write_bytes(b"x")
+    an = analyze(tmp_path)
+    roles = {o.info.name: o.role for o in an.os_projects}
+    assert roles == {"OS1": "server", "OSC1": "client"}
+    assert "arşiv dosyaları var" in next(o for o in an.os_projects if o.info.name == "OS1").role_note

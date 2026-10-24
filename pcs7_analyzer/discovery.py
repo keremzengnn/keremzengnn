@@ -263,7 +263,8 @@ def discover_source(src: Source) -> DiscoveryResult:
     for d in os_dirs:
         files = [e for e in src.entries if e.rel.startswith(d + "/")]
         mcp = next(f for f in sorted(by_dir[d], key=lambda x: x.name) if f.name.lower().endswith(".mcp"))
-        m = _WINCC_BUILD.search(whole(mcp.rel)) if mcp.size < 50_000_000 else None
+        raw = whole(mcp.rel) if mcp.size < 50_000_000 else b""
+        m = _WINCC_BUILD.search(raw) or _WINCC_BUILD.search(raw.replace(b"\x00", b""))   # ASCII veya UTF-16
         s = _summarize_os(files, d)
         res.os_projects.append(OsProjectInfo(
             path=d, project=owner_project(d, project_dirs), mcp=mcp.name,

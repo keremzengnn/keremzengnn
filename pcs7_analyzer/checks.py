@@ -253,10 +253,20 @@ def proj_min_version(c, an):
 
 
 # Standart haberleşme block'ları (isimle tanınır; numaralar standart library numaralarıdır)
-STD_COMM = {"TCON", "TDISCON", "TSEND", "TRCV", "TUSEND", "TURCV", "AG_SEND", "AG_RECV", "AG_LSEND", "AG_LRECV",
+STD_COMM = {"TCON", "TDISCON", "TSEND", "TRCV", "P_SND_RK", "P_RCV_RK", "TUSEND", "TURCV", "AG_SEND", "AG_RECV", "AG_LSEND", "AG_LRECV",
             "AG_CNTRL", "BSEND", "BRCV", "USEND", "URCV", "PUT", "GET", "MB_CPCLI", "MB_CPSRV", "MB_REDCL", "MB_REDSV",
             "MB_RED_CLNT", "MB_RED_SRV", "MODBUSCP", "SEND_R", "REC_R"}
 STD_COMM_SFB = {8: "USEND", 9: "URCV", 12: "BSEND", 13: "BRCV", 14: "GET", 15: "PUT"}
+
+
+def blk_know_how(c, an):
+    out = []
+    for b in an.as_folders:
+        if b.protected:
+            out.append(_f(c, f"{b.as_label}: {len(b.protected)} know-how protected block: " + _short(b.protected, 8)
+                          + ". Update / recompile için şifre veya üreticiden yeni sürüm gerekir.", [b.info.dbf],
+                          Confidence.LOW, scope=b.as_label))
+    return out
 
 
 def comm_std(c, an):
@@ -266,6 +276,11 @@ def comm_std(c, an):
         for name, nr in sorted(b.fb_by_name.items()):
             if name.upper() in STD_COMM:
                 hits.append(f"{name} (FB{nr}, {b.fb_instances.get(nr, 0)} inst.)")
+        for x in b.standard_blocks:                      # header'sız, symbol adından (FB63 TSEND …)
+            nr_s, _, nm = x.partition(" ")
+            nr = int(nr_s[2:]) if nr_s[2:].isdigit() else -1
+            if nm.upper() in STD_COMM and not any(h.startswith(f"{nm} (") for h in hits):
+                hits.append(f"{nm} (FB{nr}, {b.fb_instances.get(nr, 0)} inst., isimden)")
         for nr, n in sorted(b.sfb_instances.items()):
             if nr in STD_COMM_SFB and n:
                 hits.append(f"{STD_COMM_SFB[nr]} (SFB{nr}, {n} inst.)")
@@ -704,6 +719,8 @@ CHECKS: list[Check] = [
     Check("BLK_SYMBOL_MISMATCH", "Symbol ↔ block", "Symbol'de olup block'u olmayan block'lar", M, "-", blk_symbol),
     Check("PROJ_MIN_VERSION", "Proje versiyonu", "Proje en az PCS 7 V7.1 SP4 olmalı", H, f"{SW_UPDATE}, 4.3",
           proj_min_version),
+    Check("BLK_KNOW_HOW", "Know-how protection", "Know-how protected block'lar (SUBBLK PASSWORD = 3)", M, "-",
+          blk_know_how),
     Check("COMM_STD", "Haberleşme block'ları", "TCON/TSEND/BSEND/PUT/GET/Modbus… kullanımı (parametreler VERİ YOK)", M, "-",
           comm_std),
     Check("COMM_AS_AS", "AS-AS haberleşme", "AS-AS / multiproject'ler arası haberleşme", M, "-", comm_as_as),

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .discovery import BlockFolderInfo, DiscoveryResult, OsProjectInfo, discover_source, owner_project
+from .parsers.subblk import STANDARD_LIBRARY
 from .unknown import UnknownRecorder
 from .model import Confidence, Finding
 from .parsers import (
@@ -78,11 +79,16 @@ def staged_path_from(pcs7: str | None) -> list[str]:
     return STAGED_PATH
 
 
+# Sürüm taşıyan author önekleri (AdvLib81, DRIVER81, F_SAFE13, COMM71 …). ELEM_400 / ELEM_300 = CPU ailesi, sürüm değil.
+_VERSIONED_AUTHOR = re.compile(r"^(AdvLib|DRIVER|F_SAFE|COMM|SFC|LIB)\D*(\d)(\d)$", re.I)
+
+
 def author_version(author: str) -> str:
-    """'AdvLib81' -> 'V8.1', 'DRIVER81' -> 'V8.1', 'F_SAFE13' -> 'V1_3'."""
-    m = re.search(r"(\d)(\d)$", author)
+    """'AdvLib81' -> 'V8.1', 'DRIVER81' -> 'V8.1', 'F_SAFE13' -> 'V1_3'; 'ELEM_400' / 'AdvLibIL' -> ''."""
+    m = _VERSIONED_AUTHOR.match(author.strip())
     if not m:
         return ""
+    m = re.search(r"(\d)(\d)$", author.strip())
     return f"V{m.group(1)}_{m.group(2)}" if author.startswith("F_SAFE") else f"V{m.group(1)}.{m.group(2)}"
 
 
@@ -161,7 +167,10 @@ class BlockFolderResult:
     unresolved_instances: int = 0
     bad_records: int = 0
     sfb_instances: dict = field(default_factory=dict)     # {SFB no: instance DB sayısı}
-    other_types: dict = field(default_factory=dict)       # {SUBBLKTYP kodu: kayıt sayısı} (bilinen 6 tip dışı)
+    other_types: dict = field(default_factory=dict)       # {SUBBLKTYP kodu: kayıt sayısı} (bilinmeyen alt kayıt)
+    standard_blocks: list = field(default_factory=list)  # header'sız, isimden Siemens standart block (ÇIKARIM)
+    protected: list = field(default_factory=list)        # know-how protected block'lar ["FB909", …] (ÇIKARIM)
+    local_data: dict = field(default_factory=dict)       # {"OB35": 2048, …} block'un kendi local data'sı (byte)
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
@@ -348,6 +357,16 @@ def _unk(an: "Analysis", module: str, path: str, reason: str, **kw) -> None:
     an.warnings.append(f"{path}: {reason}")
 
 
+# Failsafe sanılmaması gereken "F_" ile başlayan standart block'lar (IEC edge trigger vb.)
+NOT_F_BLOCKS = {"F_TRIG"}
+
+
+def is_f_block_name(name: str) -> bool:
+    """F-System block adı mı? (F_CH_DI, F_PLK … evet; F_TRIG = IEC falling edge, hayır)."""
+    n = (name or "").strip().upper()
+    return n.startswith("F_") and n not in NOT_F_BLOCKS
+
+
 def _norm(s: str) -> str:
     return re.sub(r"[^0-9a-z]", "", s.lower())
 
@@ -422,10 +441,17 @@ def _analyze_stations(src: Source, d: DiscoveryResult, an: Analysis, log) -> Non
     by_project: dict[str, list[str]] = defaultdict(list)
     for rel in d.s7h_files:
         by_project[owner_project(rel.rsplit("/", 1)[0], project_dirs)].append(rel)
+    groups: dict[tuple, list[str]] = defaultdict(list)      # (proje, station adı, tip) -> s7h dosyaları
     for pd, rels in sorted(by_project.items()):
         if pd in projects_with_cfg:
             continue
-        st = Station(name=pd.rsplit("/", 1)[-1] or "-", source=", ".join(rels), project=pd, kind="s7h")
+        for rel in rels:
+            hit = an.blockmap.station_for_s7h(pd, rel) if an.blockmap is not None else None
+            groups[(pd, hit[0] if hit else "", hit[1] if hit else "")].append(rel)
+    for (pd, sname, stype), rels in sorted(groups.items()):
+        pname = pd.rsplit("/", 1)[-1] or "-"
+        st = Station(name=sname or pname, source=", ".join(rels), project=pd, kind="s7h",
+                     station_text=stype)
         for rel in rels:
             try:
                 for (order, fw), n in scan_s7h(src.materialize(rel)).items():
@@ -444,7 +470,7 @@ def _analyze_stations(src: Source, d: DiscoveryResult, an: Analysis, log) -> Non
             if _F_ORDER.match(order):
                 st.f_modules += n
         an.stations.append(st)
-        log(f"HW (.s7h fallback): {st.name}")
+        log(f"HW (.s7h fallback): {st.name}" + (f" ({stype}, ID zinciri)" if sname else " (proje bazında)"))
 
 
 def _analyze_released(an: Analysis, released_csv: Path | None) -> None:
@@ -529,6 +555,8 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.unresolved_instances = bf.unresolved_instances
     res.bad_records = bf.bad_records
     res.other_types = dict(bf.other_types)
+    res.protected = [f"{k}{n}" for k, n in sorted(bf.protected)]
+    res.local_data = {f"{k}{n}": v for (k, n), v in sorted(bf.local_data.items())}
     summary = library_summary(bf)
     res.libraries = {lib: dict(c) for lib, c in sorted(summary.items())}
     for lib, c in summary.items():
@@ -546,10 +574,12 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
         if b.kind != "FB":
             continue
         n = inst.get(("FB", b.number), 0)
+        if b.library == STANDARD_LIBRARY:
+            res.standard_blocks.append(f"FB{b.number} {b.name}")
         if b.library in ("custom", "custom/unknown"):
             res.custom_blocks.append(CustomBlock(b.kind, b.number, b.name, b.family, b.author, b.lang,
                                                  b.version, n, headerless=not b.author and not b.name))
-        elif n == 0 and b.library not in ("SFC system", "SIMATIC system / Standard Library"):
+        elif n == 0 and b.library not in ("SFC system", "SIMATIC system / Standard Library", STANDARD_LIBRARY):
             res.unused_library_fbs.append(f"FB{b.number} {b.name} ({b.author})")
         if b.name.upper().startswith("F_CH_") or b.library == "S7 F Systems Failsafe Blocks":
             res.f_driver_instances += n
@@ -568,7 +598,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     if names_up & {"MB_CPCLI", "MB_REDCL", "MB_CPSRV", "MB_RED_CLNT", "MB_RED_SRV"} or \
             any(a.startswith("SIEMENS") for c in summary.values() for a in c):
         feat.append("Modbus TCP / Siemens add-on")
-    if any(n.startswith("F_") for n in names_up) and "F-System" not in feat:
+    if any(is_f_block_name(n) for n in names_up) and "F-System" not in feat:
         feat.append("F-System")
     res.features = feat
     return res
@@ -616,7 +646,7 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
             bfr.symbol_only = [f"FB{n} {sfb[n]}" for n in sorted(set(sfb) - fbs)]
             bfr.block_only = [f"FB{n}" for n in sorted(fbs - set(sfb))]
             # F-block'ların header'ı boş (korumalı): symbol isminden tanı
-            f_nrs = [n for n in fbs if sfb.get(n, "").upper().startswith("F_")]
+            f_nrs = [n for n in fbs if is_f_block_name(sfb.get(n, ""))]
             if f_nrs:
                 bfr.f_blocks_from_symbols = [f"FB{n} {sfb[n]}" for n in sorted(f_nrs)]
                 bfr.custom_blocks = [c for c in bfr.custom_blocks if c.number not in f_nrs]
@@ -627,6 +657,13 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
             for c in bfr.custom_blocks:
                 if c.headerless and (c.kind, c.number) in syms:
                     c.name = f"{syms[(c.kind, c.number)]} (symbol)"
+            # Header'sız ama symbol adı Siemens standart block'u olanlar (FB63 TSEND, FB65 TCON …) custom değil
+            from .parsers.subblk import STANDARD_BLOCK_NAMES
+            std = [c for c in bfr.custom_blocks if c.headerless
+                   and c.name.replace(" (symbol)", "").strip().upper() in STANDARD_BLOCK_NAMES]
+            if std:
+                bfr.standard_blocks += [f"FB{c.number} {c.name.replace(' (symbol)', '')}" for c in std]
+                bfr.custom_blocks = [c for c in bfr.custom_blocks if c not in std]
             stem = Path(rel).stem
             if bfr.mapping == "-" and rel.lower().endswith((".asc", ".sdf")) and re.search(r"AS\s*\d+", stem, re.I):
                 bfr.as_label = re.search(r"AS\s*\d+", stem, re.I).group().replace(" ", "").upper()
@@ -663,6 +700,12 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
             op.role, op.role_note = "client", "isimden tespit edilemedi"
         op.sfc = sfc_visualization(src.entries, info.path, src.read_bytes)
         op.archives = archive_files(src.entries, info.path, info.name)
+        # İsimden client görünen ama runtime arşivi (Alg/Tlg / segment) olan proje: server (client'larda arşiv olmaz)
+        arch = op.archives.get("alg_tlg") or op.archives.get("segments")
+        if op.role == "client" and arch:
+            op.role = "server"
+            op.role_note = ((op.role_note + "; ") if op.role_note else "") + \
+                f"isimden client görünüyor ama arşiv dosyaları var ({len(arch)}) → server kabul edildi (çıkarım, teyit)"
         for rel in lst:
             k = picture_kind(rel)
             if k != "other":
@@ -970,6 +1013,15 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
     except Exception as e:  # noqa: BLE001
         an.warnings.append(f"Eski kopyalar ayıklanamadı: {e}")
 
+    def _bm():
+        from .blockmap import resolve
+        pdirs = sorted({p.rsplit("/", 1)[0] if "/" in p else "" for p in d.projects + d.libraries})
+        an.blockmap = resolve(src, pdirs)
+        for u in an.blockmap.unknown:
+            parts = [x.strip() for x in u.split("|", 2)]
+            an.unknown.add("blockmap", parts[1] if len(parts) > 2 else "-", parts[-1])
+        an.warnings += [f"Block↔AS zinciri: {u}" for u in an.blockmap.unknown]
+    _stage(an, "Block klasörü ↔ AS ID zinciri", log, _bm)
     log("HW Config...")
     _stage(an, "HW Config", log, _analyze_stations, src, d, an, log)
     _stage(an, "Released Modules", log, _analyze_released, an, released_csv)
@@ -989,23 +1041,14 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
         if bfr.unresolved_instances:
             an.unknown.add("blocks", info.dbt or info.dbf, f"{bfr.unresolved_instances} instance DB'nin FB numarası "
                            "çözülemedi (SSBPART geçersiz / ≥ 8192)", where="SSBPART")
-        for code, n in sorted(bfr.other_types.items()):
-            an.unknown.add("blocks", info.dbf, f"SUBBLKTYP {code}: {n} kayıt (FB/FC/OB/DB/SFC/SFB dışı; alt kayıt "
-                           "olduğu varsayıldı, sayılmadı)", where="SUBBLKTYP", raw=code)
+        if bfr.other_types:
+            an.unknown.add("blocks", info.dbf, "tanınmayan SUBBLKTYP alt kayıtları (sayılmadı): " + ", ".join(
+                f"{c}×{n}" for c, n in sorted(bfr.other_types.items())), where="SUBBLKTYP")
         an.block_folders.append(bfr)
 
     log("Symbol table'lar...")
     symtabs: list = []
     _stage(an, "Symbol table", log, lambda: symtabs.extend(_symbol_tables(src, d, an)))
-    def _bm():
-        from .blockmap import resolve
-        pdirs = sorted({b.info.project for b in an.block_folders if b.info.project not in ("-", None)})
-        an.blockmap = resolve(src, pdirs)
-        for u in an.blockmap.unknown:
-            parts = [x.strip() for x in u.split("|", 2)]
-            an.unknown.add("blockmap", parts[1] if len(parts) > 2 else "-", parts[-1])
-        an.warnings += [f"Block↔AS zinciri: {u}" for u in an.blockmap.unknown]
-    _stage(an, "Block klasörü ↔ AS ID zinciri", log, _bm)
     _stage(an, "Block klasörü ↔ AS eşlemesi", log, _map_block_folders, an, symtabs)
 
     log("OS projeleri...")

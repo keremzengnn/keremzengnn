@@ -59,3 +59,15 @@ def test_is_custom_picture():
     assert not is_custom_picture("gracs/@pcs7typicalsapl.pdl")
     assert not is_custom_picture("scriptlib/tank.pdl")
     assert not is_custom_picture("gracs/tank.bmp")
+
+
+def test_system_pictures_and_utf16_mcp(tmp_path):
+    from pcs7_analyzer.discovery import discover
+    from pcs7_analyzer.parsers.wincc import picture_kind
+    assert picture_kind("GraCS/@@ConfigTypicals.PDL".lower()) == "system"
+    assert picture_kind("gracs/@@maintenancetypicals.pdl") == "system"
+    d = tmp_path / "MP" / "OS" / "wincproj" / "OS1"
+    d.mkdir(parents=True)
+    (d / "OS1.mcp").write_bytes("xx V07.03.00.00 yy".encode("utf-16-le"))
+    r = discover(tmp_path)
+    assert r.os_projects[0].wincc_build == "V07.03.00.00"

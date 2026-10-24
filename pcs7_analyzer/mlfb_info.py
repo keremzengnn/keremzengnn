@@ -46,7 +46,9 @@ def _cpu4(m: re.Match) -> str:
 # (regex normalize edilmiş MLFB üzerinde, ad üreteci) — en spesifik önce
 _FAMILY: list[tuple[str, object]] = [
     (r"^6ES741(\d)(\d)(\w)", _cpu4),
-    (r"^6ES731(\d)", lambda m: f"CPU 31{m.group(1)} (S7-300)"),
+    (r"^6ES731(\d)(\d)(\w)", lambda m: (f"CPU 31{m.group(1)}C" if m.group(3) == "C" else
+                                         f"CPU 31{m.group(1)}-{m.group(2)}" + {"E": " PN/DP", "A": " DP"}.get(m.group(3), ""))
+                                        + " (S7-300)"),
     (r"^6ES7960", "H-Sync modülü (FO, S7-400H)"),
     (r"^6ES7400", "Rack (S7-400 UR)"),
     (r"^6ES740[57]", "Power supply PS 40x (S7-400)"),

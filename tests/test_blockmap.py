@@ -75,3 +75,42 @@ def test_missing_folder_and_masked_diagnostics(tmp_path):
     for secret in ("Prog_A", "ST_NORTH", "CPU 417-4H", "MP/P1"):
         assert secret not in txt
     assert "<proje 1>" in txt
+
+
+def test_logical_field_nul_does_not_drop_chain(tmp_path):
+    """Gerçek projede görüldü: SYMLISTS.DBF _SAVED/_DELETED (L) alanında \\x00 -> zincir kaybolmamalı."""
+    proj = _project(tmp_path)
+    write_dbf(proj / "YDBs" / "SYMLISTS.DBF", [("_ID", "N", 10), ("_DBPATH", "C", 24), ("_SAVED", "L", 1),
+                                              ("_DELETED", "L", 1)],
+              [{"_ID": 4, "_DBPATH": "4", "_SAVED": b"\x00", "_DELETED": b"\x00"}])
+    with open_source(tmp_path) as src:
+        bm = resolve(src, ["MP/P1"])
+    a = bm.for_folder("MP/P1/ombstx/offline/00000011")
+    assert a.station_name == "ST_NORTH" and a.symbol_table == "MP/P1/YDBs/4/SYMLIST.DBF"
+    assert not any("okunamadı" in u for u in bm.unknown)
+
+
+def test_symbol_step_failure_keeps_station_links(tmp_path):
+    proj = _project(tmp_path)
+    (proj / "YDBs" / "YLNKLIST.DBF").write_bytes(b"\x03bozuk")
+    with open_source(tmp_path) as src:
+        bm = resolve(src, ["MP/P1"])
+    assert bm.for_folder("MP/P1/ombstx/offline/00000011").station_name == "ST_NORTH"
+    assert any("symbol table bağı okunamadı" in u for u in bm.unknown)
+
+
+def test_s7h_hw_grouped_per_station(tmp_path):
+    """HW export yokken .s7h dosyaları (<station ID hex>.s7h) station adıyla ayrı AS olur; F_TRIG F-System değildir."""
+    from pcs7_analyzer.demo import _s7h
+    proj = _project(tmp_path)
+    st = proj / "hOmSave7" / "s7hstatx"
+    (st / "21.s7h").write_bytes(_s7h([("6ES7 417-4HT14-0AB0", "V4.5"), ("6ES7 960-1AA04-0XA0", "")]))
+    (st / "22.s7h").write_bytes(_s7h([("6ES7 410-5HX08-0AB0", "V8.1")]))
+    (st / "99.s7h").write_bytes(_s7h([("6ES7 315-2EH14-0AB0", "V3.2")]))          # station listesinde yok
+    an = analyze(tmp_path)
+    by = {s.name: s for s in an.stations}
+    assert set(by) == {"ST_NORTH", "ST_SOUTH", "P1"}
+    assert by["ST_NORTH"].cpus[0][0] == "6ES7 417-4HT14-0AB0" and by["ST_NORTH"].station_text == "S7-400H"
+    assert by["P1"].cpus[0][0] == "6ES7 315-2EH14-0AB0"
+    from pcs7_analyzer.analyze import is_f_block_name
+    assert not is_f_block_name("F_TRIG") and is_f_block_name("F_CH_DI")

@@ -125,3 +125,36 @@ def test_library_summary_shows_mixed_versions(sample_folder):
     assert s["APL"] == {"AdvLib81": 1, "AdvLib82": 1}
     assert s["Basis Library"] == {"DRIVER81": 1}
     assert "CFC generated" not in s
+
+
+def test_main_records_know_how_local_data(tmp_path):
+    """Gerçek projede görülen yapı: FB/FC ana kaydı 00014/00012 (00004/00005 interface kaydı olmayabilir),
+    PASSWORD = 3 know-how protection, LOCDATALEN, bilinen alt kayıtlar (00019) Unknown'a gitmez."""
+    from dbfwriter import SUBBLK_FIELDS, block, write_dbf
+    from pcs7_analyzer.parsers.subblk import parse_subblk
+    fields = SUBBLK_FIELDS + [("PASSWORD", "N", 11), ("LOCDATALEN", "N", 5)]
+    recs = [dict(block("00014", 909, "MODBUS", "MB_RED", author="SIEMENS"), PASSWORD=3, LOCDATALEN=120),
+            dict(block("00012", 18, "", "", author="ES_MAP"), PASSWORD=0, LOCDATALEN=0),
+            dict(block("00004", 1800, "Drv", "Pcs7DiIn", author="AdvLib81")),
+            dict(block("00014", 1800, "Drv", "Pcs7DiIn", author="AdvLib81"), LOCDATALEN=40),
+            dict(block("00008", 35, "", "", author=""), LOCDATALEN=2048),
+            dict(block("00019", 18)), dict(block("00024", 18))]
+    p = tmp_path / "SUBBLK.DBF"
+    write_dbf(p, fields, recs, memo="db4")
+    bf = parse_subblk(p)
+    assert bf.counts == {"FB": 2, "FC": 1, "OB": 1}                 # FB909 sadece ana kayıtla; FB1800 tek sayılır
+    assert ("FB", 909) in bf.protected and len(bf.protected) == 1
+    assert bf.local_data[("OB", 35)] == 2048 and bf.local_data[("FB", 909)] == 120
+    fb909 = next(b for b in bf.blocks if b.number == 909)
+    assert fb909.author == "SIEMENS" and fb909.name == "MB_RED"
+    assert dict(bf.other_types) == {"00024": 1}                     # 00019 bilinen alt kayıt
+
+
+def test_real_project_false_positives():
+    """Gerçek projede görülen yanlış pozitifler: ELEM_400 sürüm değil, AdvLibIL APL değil, TCON custom değil."""
+    from pcs7_analyzer.analyze import author_version
+    from pcs7_analyzer.parsers.subblk import STANDARD_LIBRARY, classify_author
+    assert author_version("ELEM_400") == "" and author_version("ELEM_300") == ""
+    assert author_version("AdvLibIL") == "" and classify_author("AdvLibIL") == "PCS 7 Industry Library"
+    assert author_version("AdvLib82") == "V8.2" and author_version("F_SAFE13") == "V1_3"
+    assert classify_author("", "TCON") == STANDARD_LIBRARY and classify_author("", "MYBLOCK") == "custom/unknown"

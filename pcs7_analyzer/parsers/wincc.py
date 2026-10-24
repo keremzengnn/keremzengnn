@@ -119,6 +119,8 @@ def picture_kind(rel: str) -> str:
         return "other"
     if not name.startswith("@"):
         return "custom"
+    if name.startswith("@@"):
+        return "system"           # @@ConfigTypicals, @@MaintenanceTypicals … PCS 7 / WinCC sistem dosyaları
     if name.startswith(F_FACEPLATE_PREFIXES):
         return "f_faceplate"
     if "typicals" in name or name.startswith("@template"):
