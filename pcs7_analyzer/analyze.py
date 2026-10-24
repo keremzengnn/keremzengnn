@@ -564,9 +564,9 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     for lib, c in summary.items():
         if lib in ("custom", "custom/unknown", "CFC generated"):
             continue
-        versions = sorted({author_version(a) or a for a in c})
-        if len(versions) > 1:
-            res.mixed_versions[lib] = [f"{v} ({sum(n for a, n in c.items() if (author_version(a) or a) == v)})"
+        versions = sorted({author_version(a) for a in c if author_version(a)})   # sadece gerçek sürümler
+        if len(versions) > 1:                                                     # (ELEMENTA / ELEM_400 sürüm değil)
+            res.mixed_versions[lib] = [f"{v} ({sum(n for a, n in c.items() if author_version(a) == v)})"
                                        for v in versions]
     inst = Counter(bf.instances_per_fb)
     res.fb_instances = {nr: n for (kind, nr), n in inst.items() if kind == "FB"}
@@ -698,6 +698,8 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
             if e.rel.startswith(info.path + "/"):
                 display.setdefault(e.rel[len(info.path) + 1:].lower(), e.rel[len(info.path) + 1:])
         op = OsProject(info=info, role=os_role(info.name), in_es=info.project != "-")
+        if info.is_library:
+            op.role, op.role_note = "library", "library projesindeki (.s7l) OS: master data, karşılaştırmaya girmez"
         if op.role == "?":
             op.role, op.role_note = "client", "isimden tespit edilemedi"
         op.sfc = sfc_visualization(src.entries, info.path, src.read_bytes)
@@ -947,13 +949,15 @@ def _versions(an: Analysis) -> None:
     seen = set()
     for op in an.os_projects:
         b = op.info.wincc_build
-        if not b or b in seen:
+        if not b or b in seen or op.role == "library":
             continue
         seen.add(b)
         mm = re.match(r"V0?(\d+)\.(\d\d)", b)
         key = f"{int(mm.group(1)):02d}.{mm.group(2)}" if mm else ""
         wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
-        an.versions.append(VersionInfo("WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" if fam else ""),
+        others = [x for x in op.info.build_candidates if x != b]
+        an.versions.append(VersionInfo("WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" if fam else "")
+                                       + (f"; .mcp'deki diğer diziler: {', '.join(others)}" if others else ""),
                                        f"{op.info.path}/{op.info.mcp}", Confidence.HIGH.value if ok else Confidence.LOW.value))
         if fam:
             cands.append((fam, "WinCC", ok))

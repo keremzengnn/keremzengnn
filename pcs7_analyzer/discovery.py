@@ -95,6 +95,8 @@ class OsProjectInfo:
     vbs_actions: int
     c_actions: int
     newest_mtime: str
+    build_candidates: list = field(default_factory=list)   # .mcp'deki tüm versiyon dizileri
+    is_library: bool = False                               # .s7l library projesinin içindeki OS (gerçek OS değil)
 
     @property
     def name(self) -> str:
@@ -143,6 +145,23 @@ def _markers(rel: str) -> list[str]:
     if "/diagnose/" in low or "/diagnostics/" in low:
         out.append("diagnose")
     return out
+
+
+def pick_wincc_build(raw: bytes) -> tuple[str, list[str]]:
+    """
+    .mcp'deki versiyon dizilerinden WinCC build'i seçer. Gerçek projede (2026-10) .mcp'de 'V08.00.00.00' (format
+    sürümü, build değil) ile 'V07.03.20.04' birlikte görüldü: sıfır build'li ('xx.00.00.00') diziler ancak başka aday
+    yoksa kullanılır. -> (seçilen, tüm adaylar)
+    """
+    found = []
+    for blob in (raw, raw.replace(b"\x00", b"")):          # ASCII veya UTF-16
+        for m in _WINCC_BUILD.finditer(blob):
+            v = m.group().decode()
+            if v not in found:
+                found.append(v)
+    real = [v for v in found if not v.endswith(".00.00")]
+    pick = real[0] if real else (found[0] if found else "")
+    return pick, found
 
 
 def owner_project(rel_dir: str, project_dirs: list[str]) -> str:
@@ -264,11 +283,13 @@ def discover_source(src: Source) -> DiscoveryResult:
         files = [e for e in src.entries if e.rel.startswith(d + "/")]
         mcp = next(f for f in sorted(by_dir[d], key=lambda x: x.name) if f.name.lower().endswith(".mcp"))
         raw = whole(mcp.rel) if mcp.size < 50_000_000 else b""
-        m = _WINCC_BUILD.search(raw) or _WINCC_BUILD.search(raw.replace(b"\x00", b""))   # ASCII veya UTF-16
+        build, cands = pick_wincc_build(raw)
         s = _summarize_os(files, d)
         res.os_projects.append(OsProjectInfo(
-            path=d, project=owner_project(d, project_dirs), mcp=mcp.name,
-            wincc_build=m.group().decode() if m else "", n_files=s["n_files"],
+            path=d, project=owner_project(d, project_dirs + library_dirs), mcp=mcp.name,
+            wincc_build=build, build_candidates=cands, n_files=s["n_files"],
+            is_library=owner_project(d, project_dirs + library_dirs) in library_dirs
+            and owner_project(d, project_dirs + library_dirs) not in project_dirs,
             custom_pictures=s["custom_pictures"], faceplates_and_templates=s["faceplates_and_templates"],
             vbs_modules=s["vbs_modules"], vbs_actions=s["vbs_actions"], c_actions=s["c_actions"],
             newest_mtime=_iso(s["newest"]),

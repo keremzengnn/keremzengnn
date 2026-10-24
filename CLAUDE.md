@@ -203,6 +203,10 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 - MP_PDCS gerçek proje turu (2026-10-24): zincir 15/15 program -> block klasörü; station yoksa CPU HOBJECT1.UNITID
   (H yedek CPU); SUBBLK MC5LEN = kod boyutu -> `BLK_FC_SIZE` (64 KB); ek alt kayıt kodları 24-26/64-67/70/71 bilinen;
   `parse_subblk` çalışma başına önbellek (`clear_cache`), analiz + envanter iki kez okumaz.
+- AKSA turu (2026-10-24): `.mcp`'de 'V08.00.00.00' format dizisi + gerçek build 'V07.03.20.04' -> `discovery.pick_wincc_build`
+  sıfır build'li diziyi ancak tek adaysa kullanır (yoksa PCS 7 V10.x diye yanlış tespit). `.s7l` içindeki OS = role
+  "library" (OS PC kopyası değil). Karışık versiyon sadece gerçek sürümlerle (ELEMENTA/ELEM_400 değil). OS-only projede
+  S7RESOFF yok uyarısı verilmez. yapi_tanisi'nde block author dağılımı (eski PCS 7 Library author'larını eşlemek için).
 - Kapsam: `docs/COVERAGE.md` (her madde YAPILDI / KISMİ / YAPILAMADI + neden), kararlar `docs/DECISIONS.md`.
 - `blockmap.py`: ID zinciri hrs/S7RESOFF → linkhrs.lnk (01 60 11 00 + int16) → ombstx/offline/<ID:08X>; HRELATI1 RELID 16
   (CPU→program), TOBJTYP 1314972/1315656 (CPU→station); YDBs/YLNKLIST → SYMLISTS. Gerçek projede teyit edilmedi:

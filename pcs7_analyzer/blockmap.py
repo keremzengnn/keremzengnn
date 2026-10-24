@@ -133,7 +133,10 @@ def _resolve_project(src, pd: str, find, index: dict, bm: BlockMap) -> None:
         files[f"hOmSave7/{d}/HOBJECT1.DBF"] = find(f"hOmSave7/{d}/HOBJECT1.DBF")
     bm.files[pd or "."] = {k: ("var" if v else "yok") for k, v in files.items()}
     if not files["hrs/S7RESOFF.DBF"]:
-        if any(k.startswith(f"{pd}/ombstx/offline/".lower() if pd else "ombstx/offline/") for k in index):
+        pre = f"{pd}/ombstx/offline/".lower() if pd else "ombstx/offline/"
+        filled = any(e.rel.lower().startswith(pre) and e.name.lower() == "subblk.dbf" and e.size > 900
+                     for e in src.entries)                  # boş SUBBLK.DBF ≈ 834 byte (OS-only projede normal)
+        if filled:
             bm.unknown.append(f"blockmap | {pd or '.'}/hrs/S7RESOFF.DBF | yok: S7 program listesi okunamadı")
         return
 

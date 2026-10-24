@@ -175,3 +175,17 @@ def test_fc_code_length_and_64kb_check(tmp_path):
     assert an.block_folders[0].code_len == {"FB1800": 9000, "FC18": 60000, "FC19": 1000}
     f = [x for x in an.findings if x.check_id == "BLK_FC_SIZE"]
     assert f and "FC18 59 KB (%92)" in f[0].detail and f[0].severity.value == "Yüksek"
+
+
+def test_elementa_authors_not_mixed_versions(tmp_path):
+    from dbfwriter import SUBBLK_FIELDS, block, write_dbf
+    from pcs7_analyzer.analyze import analyze
+    d = tmp_path / "P" / "ombstx" / "offline" / "00000001"
+    d.mkdir(parents=True)
+    (tmp_path / "P" / "P.s7p").write_bytes(b"x")
+    write_dbf(d / "SUBBLK.DBF", SUBBLK_FIELDS, [block("00004", 1, "", "A", author="ELEMENTA"),
+                                                block("00004", 2, "", "B", author="ELEM_400"),
+                                                block("00004", 3, "", "C", author="AdvLib81"),
+                                                block("00004", 4, "", "D", author="AdvLib82")], memo="db4")
+    b = analyze(tmp_path).block_folders[0]
+    assert "CFC ELEMENTA" not in b.mixed_versions and b.mixed_versions["APL"] == ["V8.1 (1)", "V8.2 (1)"]

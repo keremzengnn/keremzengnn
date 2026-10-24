@@ -71,3 +71,26 @@ def test_system_pictures_and_utf16_mcp(tmp_path):
     (d / "OS1.mcp").write_bytes("xx V07.03.00.00 yy".encode("utf-16-le"))
     r = discover(tmp_path)
     assert r.os_projects[0].wincc_build == "V07.03.00.00"
+
+
+def test_pick_wincc_build_ignores_format_version():
+    """Gerçek projede görüldü: .mcp'de 'V08.00.00.00' (format) + 'V07.03.20.04' (build) birlikte -> 7.3 seçilmeli."""
+    from pcs7_analyzer.discovery import pick_wincc_build
+    raw = b"..V08.00.00.00..x\x00" + "V07.03.20.04".encode("utf-16-le")
+    assert pick_wincc_build(raw) == ("V07.03.20.04", ["V08.00.00.00", "V07.03.20.04"])
+    assert pick_wincc_build(b"V08.00.00.00")[0] == "V08.00.00.00"          # tek aday: kullanılır
+    assert pick_wincc_build(b"none") == ("", [])
+
+
+def test_os_inside_library_project_is_not_a_pc_copy(tmp_path):
+    from pcs7_analyzer.analyze import analyze
+    for proj, ext, os_name in (("AS_PRJ", ".s7p", "OS(1)"), ("Standard", ".s7l", "Standard")):
+        d = tmp_path / "MP" / proj
+        (d / "wincproj" / os_name / "GraCS").mkdir(parents=True)
+        (d / f"{proj}{ext}").write_bytes(b"x")
+        (d / "wincproj" / os_name / f"{os_name}.mcp").write_bytes(b"V07.03.20.04")
+        (d / "wincproj" / os_name / "GraCS" / "A.pdl").write_bytes(b"x")
+    an = analyze(tmp_path)
+    roles = {o.info.name: (o.role, o.in_es) for o in an.os_projects}
+    assert roles["Standard"] == ("library", True)
+    assert not any(d.kind == "copy" for d in an.os_diffs)

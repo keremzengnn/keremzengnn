@@ -103,9 +103,13 @@ def hw_f_export_missing(c, an):
             continue
         for s in sts:
             if s.f_modules == 0:
+                where = (f"{s.name} HW export'unda F-I/O yok. Export S7 F Configuration Pack kurulu PC'den tekrar alınmalı."
+                         if s.kind == "cfg" else
+                         f"{s.name} için HW Config export'u yok; backup içi .s7h taramasında F-I/O modülü görünmüyor "
+                         "(tarama F-I/O'yu kaçırabilir). HW Config export'u S7 F Configuration Pack kurulu PC'den alınmalı.")
                 out.append(_f(c, f"{b.as_label}: F-block/F-driver var ({b.f_driver_instances} F-channel driver instance) "
-                                 f"ama {s.name} HW export'unda F-I/O yok. Export S7 F Configuration Pack kurulu "
-                                 f"PC'den tekrar alınmalı.", [b.info.dbf, s.source], scope=b.as_label))
+                                 f"ama {where}", [b.info.dbf, s.source.split(", ")[0]], scope=b.as_label,
+                              confidence=Confidence.HIGH if s.kind == "cfg" else Confidence.LOW))
     return out
 
 

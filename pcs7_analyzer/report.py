@@ -354,7 +354,9 @@ def _version_bullets(an: Analysis) -> list[str]:
         h = [s for s in an.stations if any("-5H" in o.upper() or "5H" in n.upper() for o, _, n in s.cpus)]
         n_cpu = sum(len(s.cpus) for s in an.stations)
         if h and len(h) == len(an.stations):
-            items.append(f"**Tüm AS'ler S7-400H** (redundant). Toplam {len(h)} H-system, {n_cpu} CPU (HW Config export).")
+            src_txt = "HW Config export" if all(s.kind == "cfg" for s in an.stations) else \
+                "backup içi .s7h taraması" if all(s.kind == "s7h" for s in an.stations) else "HW export + .s7h"
+            items.append(f"**Tüm AS'ler S7-400H** (redundant). Toplam {len(h)} H-system, {n_cpu} CPU ({src_txt}).")
         else:
             items.append(f"**AS:** {len(an.stations)} station ({len(h)} H-system), {n_cpu} CPU.")
     return items

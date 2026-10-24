@@ -350,7 +350,8 @@ def mask_path(rel: str) -> str:
 def diagnostics(src: Source) -> str:
     """Müşteri verisi içermeyen yapı raporu: DBF şemaları (alan adı/tip/uzunluk) + kayıt sayıları, dosya türleri."""
     lines = [f"PCS 7 backup yapı tanısı — pcs7_analyzer {__version__} — {datetime.now():%Y-%m-%d %H:%M}",
-             "Bu dosya sadece yapı bilgisi içerir (dosya türleri, DBF alan adları, kayıt sayıları); kayıt içeriği YOKTUR.", ""]
+             "Bu dosya sadece yapı bilgisi içerir (dosya türleri, DBF alan adları, kayıt sayıları, kod dağılımları, "
+             "block author kodları); sembol / block / proje adı YOKTUR.", ""]
     schemas: dict[tuple, list] = defaultdict(list)
     bad: list[str] = []
     for e in src.entries:
@@ -393,7 +394,7 @@ def diagnostics(src: Source) -> str:
 
 # Kod alanları (müşteri verisi değil: tip / dil / işlem kodları). FC 64 KB (runtime group) ve block tipi analizleri için.
 _PROBE_FIELDS = {"CT": ("BLTYPEDAD", "BLTYPESON", "OPTYPE", "LANGDAD"), "BS": ("BLOCKTYPE", "LANGUAGE"),
-                 "BAUSTEIN": ("TYP",), "SUBBLK": ("SUBBLKTYP", "PASSWORD", "BLKLANG"), "XR": ("OPTYPE", "OPACCESS",
+                 "BAUSTEIN": ("TYP",), "SUBBLK": ("SUBBLKTYP", "PASSWORD", "BLKLANG", "USERNAME"), "XR": ("OPTYPE", "OPACCESS",
                  "BLOCKTYPE")}
 _VER_TOKEN = re.compile(rb"V?\d{1,2}\.\d{2}\.\d{2}\.\d{2}")
 
@@ -416,14 +417,16 @@ def _format_probe(src: Source, max_records: int = 200_000) -> list[str]:
             n = 0
             for rec in t:
                 for f in fields:
-                    hist[f][str(rec.get(f)).strip()[:6]] += 1
+                    if f == "USERNAME" and str(rec.get("SUBBLKTYP")).strip() not in ("00008", "00012", "00014"):
+                        continue                    # author: sadece OB/FC/FB ana kayıtları (library tanıma için)
+                    hist[f][str(rec.get(f)).strip()[:8] or "(boş)"] += 1
                 n += 1
                 if n >= max_records:
                     break
             done.add(kind)
             out.append(f"- {kind} ({n} kayıt, {mask_path(e.rel)}):")
             for f, c in hist.items():
-                out.append(f"    {f}: " + ", ".join(f"{k}×{v}" for k, v in c.most_common(30)))
+                out.append(f"    {f}: " + ", ".join(f"{k}×{v}" for k, v in c.most_common(40)))
         except Exception as ex:  # noqa: BLE001 - tanı bölümü; hata metni yazılır
             out.append(f"- {kind}: okunamadı ({type(ex).__name__})")
     toks = Counter()
