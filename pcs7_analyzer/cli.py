@@ -99,6 +99,24 @@ def _tee_log(log, path: Path):
     return tee
 
 
+def _index(out_dir: Path, source: Path, mode: str, log) -> Path | None:
+    """index.html (giriş sayfası) yazar; hata raporları engellemez."""
+    try:
+        from .index_page import write_index
+        return write_index(out_dir, source, mode)
+    except Exception as e:  # noqa: BLE001
+        import traceback as _tb
+        log(f"UYARI: index.html üretilemedi ({type(e).__name__}: {e})")
+        log(_tb.format_exc())
+        return None
+
+
+def index_path(result: Path) -> Path:
+    """run()'ın döndürdüğü dosyanın klasöründeki index.html (yoksa dosyanın kendisi)."""
+    p = Path(result).parent / "index.html"
+    return p if p.is_file() else Path(result)
+
+
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None, inventory: bool = False,
@@ -126,14 +144,18 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         do_collect(source, z, log)
         log("Paket müşteri verisi içerir (block / symbol adları, HW, script'ler): paylaşmadan önce veri kullanım "
             "kurallarını teyit edin.")
+        _index(out_dir, source, "collect", log)
         return z
 
     if inventory:
         from .inventory import build_inventory, write_outputs
+        from .index_page import write_inventory_summary
         inv = build_inventory(source, log)
         p = write_outputs(inv, out_dir)
+        write_inventory_summary(inv, out_dir)
         log(f"Envanter: {out_dir / 'envanter.xlsx'}")
         log(f"Yapı tanısı (müşteri verisi içermez): {out_dir / 'yapi_tanisi.txt'}")
+        _index(out_dir, source, "inventory", log)
         return p
 
     if discover_only:
@@ -141,6 +163,7 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         p = out_dir / "kesif.md"
         p.write_text(render_discovery(r), encoding="utf-8")
         log(f"Keşif raporu: {p}")
+        _index(out_dir, source, "discover", log)
         return p
 
     st = settings.load()
@@ -155,8 +178,11 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         if with_inventory:
             log("Envanter (mevcut durum)...")
             try:
+                from .index_page import write_inventory_summary
                 from .inventory import build_inventory_source, write_outputs
-                write_outputs(build_inventory_source(src, log), out_dir)
+                inv = build_inventory_source(src, log)
+                write_outputs(inv, out_dir)
+                write_inventory_summary(inv, out_dir)
                 log(f"Envanter: {out_dir / 'envanter.xlsx'}")
             except Exception as e:  # noqa: BLE001 - envanter hatası analiz raporunu engellemez
                 import traceback as _tb
@@ -229,6 +255,17 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         (out_dir / "report_ir.json").write_text(dumps(ir), encoding="utf-8")
     out("report_ir.json", ir_and_rev)
 
+    def roadmap():
+        try:
+            from .roadmap import write_roadmap
+        except ModuleNotFoundError as e:
+            if e.name and e.name.endswith("roadmap"):
+                return                   # yol haritası modülü bu sürümde yok
+            raise
+        p = write_roadmap(an, out_dir)
+        log(f"Yol haritası: {p or out_dir / 'yol_haritasi.html'}")
+    out("yol_haritasi.html", roadmap)
+
     def qa():
         from .qa import write_report
         p, n_err = write_report(out_dir)
@@ -246,6 +283,7 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     from .parsers.subblk import clear_cache
     clear_cache()
     log(f"Rapor: {html_p}")
+    _index(out_dir, source, "analysis", log)
     return html_p
 
 
@@ -304,6 +342,7 @@ def _sub_main(argv: list[str]) -> int:
         out = a.out_dir or default_out_dir(Path(f"{a.a.stem}_vs_{a.b.stem}"))
         res = compare(a.a, a.b, log)
         p = write_outputs(res, out)
+        _index(out, Path(f"{a.a} ↔ {a.b}"), "compare", log)
     else:
         if not a.source.exists():
             ap.error(f"bulunamadı: {a.source}")
@@ -388,7 +427,13 @@ def main(argv: list[str] | None = None) -> int:
                   compare_to=args.compare_to)
     except ValueError as e:
         parser.error(str(e))
+    idx = index_path(out)
     if args.open:
-        webbrowser.open(out.resolve().as_uri())
+        webbrowser.open(idx.resolve().as_uri())
     print(out)
+    if idx.name == "index.html":
+        from .index_page import summary_lines
+        for line in summary_lines(idx.parent):
+            print(f"  {line}")
+        print(f"Özet sayfası: {idx}")
     return 0

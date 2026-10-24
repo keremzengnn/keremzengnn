@@ -400,6 +400,7 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
     names = Counter(Path(i.project).name for i in d.block_folders)
     fb_sets: dict[str, set[int]] = {}
     n_empty = 0
+    spans = []                                       # [(info, bf, ilk satır, son satır)] -> çağıran sütunu
     for i, info in enumerate(d.block_folders, 1):
         if info.is_empty:
             n_empty += 1
@@ -424,6 +425,7 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
         n_custom = sum(1 for r in rows if r[2] in _CUSTOM_CATS)
         folders.rows.append([proj, as_lab, info.path, c.get("FB", 0), c.get("FC", 0), c.get("DB", 0), c.get("OB", 0),
                              _library_cell(bf), n_special, n_custom])
+        spans.append((info, bf, len(special.rows), len(special.rows) + len(rows)))
         special.rows += rows
         if not bf.memo_available:
             inv.warnings.append(f"{info.path}: SUBBLK.DBT yok -> instance sayıları boş")
@@ -436,9 +438,47 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
                     + "AS / S7 program: STEP 7 ID zinciri (S7RESOFF, linkhrs.lnk, HRELATI1), gerçek projede teyit "
                       "edilmedi (ÇIKARIM); '-' = zincir bulunamadı. Library'ler: block header author -> library + "
                       "versiyon (block sayısı). Özel block / Custom: 'Özel bloklar' sayfasındaki block sayısı.")
+    try:
+        _caller_column(src, d, bm, special, spans, log)
+    except Exception as e:  # noqa: BLE001 - çağıran sütunu opsiyonel; envanter devam eder
+        inv.warnings.append(f"XUTILS çağrı ağacı okunamadı ({type(e).__name__}: {e}) -> 'Çağıran' sütunu yok")
     inv.special_blocks = special.rows
     inv.sheets += [folders, special]
     return fb_sets
+
+
+def _caller_column(src: Source, d: DiscoveryResult, bm, special: "Sheet", spans: list, log) -> None:
+    """XUTILS call tree (parsers.xutils) -> 'Özel bloklar'a "Çağıran (ÇIKARIM)" sütunu; sadece çağıran bilgisi varsa.
+    Analizdeki eşlemenin aynısı (map_sets_to_folders: ID zinciri, yoksa FB seti benzerliği)."""
+    from types import SimpleNamespace
+    from .parsers import xutils
+    pdirs = sorted({p.rsplit("/", 1)[0] if "/" in p else "" for p in d.projects + d.libraries})
+    sets = xutils.read_all(src, pdirs, progress=log)
+    if not sets or not spans:
+        return
+    shims = [SimpleNamespace(info=info, counts=bf.counts, fb_numbers=sorted(b.number for b in bf.blocks if b.kind == "FB"),
+                             callers={}, fc_callers={}, callers_source="", callers_confidence="")
+             for info, bf, _a, _b in spans]
+    hit = xutils.map_sets_to_folders(sets, shims, bm)
+    for sh in shims:
+        xs = hit.get(sh.info.path.lower())
+        if xs is not None:
+            xutils.attach(sh, xs)
+    if not any(sh.callers or sh.fc_callers for sh in shims):
+        return
+    special.headers.append("Çağıran (ÇIKARIM)")
+    owner = {}
+    for sh, (_i, _bf, a, b) in zip(shims, spans):
+        for k in range(a, b):
+            owner[k] = sh
+    for k, r in enumerate(special.rows):
+        sh, kind, nr = owner.get(k), r[3], r[4]
+        txt = ""
+        if sh is not None and isinstance(nr, int):
+            txt = (xutils.callers_text(sh, nr) if kind == "FB" else xutils.fc_callers_text(sh, nr) if kind == "FC" else "")
+        r.append(txt)
+    special.note += (" Çağıran: XUTILS cross-reference (CT kaydı), block klasörüyle eşleme ve 'runtime group?' / "
+                     "'multi-instance?' yorumu ÇIKARIM.")
 
 
 def _programs(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
