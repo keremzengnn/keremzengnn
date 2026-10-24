@@ -188,6 +188,11 @@ aynı açık kaynaktan envanteri üretir (`--no-inventory` kapatır). İlk sayfa
 sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni dosya tarihi). Değerlendirme yok; backup'taki her şey Excel'e (`xlsx.py`, bağımlılıksız yazıcı). Symbol table backup içinden
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
+- **Kompakt envanter (kullanıcı isteği, 2026-10-24):** sayfalar `SHEET_ORDER`: Mevcut durum (≤ ~30 satır, station başına tek
+  HW satırı), Hardware (export + .s7h taraması tek tablo), Block klasörleri (dolu klasörler, library'ler tek hücre, AS sütunu),
+  Özel bloklar (`special_category`: Custom / Header'sız / Modbus / Haberleşme / Logic Matrix / F-System özeti / V7.1;
+  APL / Basis / ES_MAP / ELEMENTA listelenmez), OS projeleri (dosya listesi yok), Projeler, Uyarılar (varsa).
+  Boş sayfa yazılmaz. Semboller ayrı `semboller.xlsx`.
 
 ## Readiness / güven / diagnostics
 - `readiness.py`: `backup_coverage` (ne var / ne yok + analize etkisi; Var / Kısmen / Yok / VERİ YOK), `quote_inputs`
