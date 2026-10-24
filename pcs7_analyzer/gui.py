@@ -198,6 +198,21 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     ent.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
     adv_rows.append((lab, ent))
     r += 1
+    prev_var = tk.StringVar()
+
+    def pick_prev():
+        p = filedialog.askdirectory(title="Önceki rapor klasörü (findings.json): yeni / kapanan bulgular")
+        if p:
+            prev_var.set(p)
+
+    lab = ttk.Label(body, text="Önceki rapor (revizyon, ops.)")
+    lab.grid(row=r, column=0, sticky="w", pady=3)
+    ent = ttk.Entry(body, textvariable=prev_var)
+    ent.grid(row=r, column=1, sticky="ew", padx=8)
+    btn = ttk.Button(body, text="Seç…", command=pick_prev)
+    btn.grid(row=r, column=2, sticky="e")
+    adv_rows.append((lab, ent, btn))
+    r += 1
 
     def on_mode(*_):
         col = mode_var.get() == "collect"
