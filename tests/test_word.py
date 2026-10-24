@@ -79,7 +79,7 @@ def test_cover_and_header_footer(docx):
     assert "Upgrade Ön" in d and "V8.1 → " in d and '<w:rStyle w:val="Fett"/></w:rPr><w:t xml:space="preserve">V10.0 SP2' in d
     assert "Proje backup&apos;ı" in d or "Proje backup'ı" in d
     assert "cover" in d and "textbox" in d                       # kapak görseli / textbox korunur
-    assert "Ad Soyad | DEP | 2026-09-24" in docx["word/header1.xml"]
+    assert "Ad Soyad | DEP | 24.09.2026" in docx["word/header1.xml"]
     assert "Restricted | © Siemens 2026" in docx["word/footer1.xml"]
 
 

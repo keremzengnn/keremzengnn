@@ -20,6 +20,7 @@ from datetime import date
 from enum import Enum
 from pathlib import Path
 
+from .fmt import fmt_date, fmt_num
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Confidence, Finding, Severity
@@ -326,7 +327,7 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
         names = sorted({f"{d.a_label}/{d.b_label}" for d in pairs} | {f"{d.a}/{d.b}" for d in an.export_diffs})
         extra = []
         for d in an.export_diffs:
-            extra.append(f"tag farkı {d.n_tags_only_a:,}/{d.n_tags_only_b:,}, alarm farkı {d.n_alarms_only_a:,}/{d.n_alarms_only_b:,}")
+            extra.append(f"tag farkı {fmt_num(d.n_tags_only_a)}/{fmt_num(d.n_tags_only_b)}, alarm farkı {fmt_num(d.n_alarms_only_a)}/{fmt_num(d.n_alarms_only_b)}")
         rows.append([f"{', '.join(names)} OS projeleri", STATUS_ATTN,
                      "İki ayrı OS projesi (ENG, ES üzerinde çalışan tam OS; master/kopya değil) ayrışmış"
                      + (f" ({'; '.join(extra)})" if extra else "") + ". İkisinin de taşınıp taşınmayacağı teyit edilmeli."])
@@ -472,8 +473,8 @@ def _wincc_rows(an: Analysis) -> list[list[str]]:
         kinds = Counter(c.kind for c in w.connections)
         conn = ", ".join(f"{k} {v}" for k, v in sorted(kinds.items()))
         opc = [f"{c.name} ({c.opc_vendor})" if c.opc_vendor else c.name for c in w.connections if c.kind == "opc"]
-        rows.append([tr_upper(mp) if mp != "-" else "-", name, f"{w.total_tags:,}".replace(",", "."),
-                     f"{w.alarms:,}".replace(",", "."),
+        rows.append([tr_upper(mp) if mp != "-" else "-", name, fmt_num(w.total_tags),
+                     fmt_num(w.alarms),
                      f"{len(w.connections)} ({conn})" + (f"\nOPC: {_fmt_list(opc, 4)}" if opc else "")])
     return rows
 
@@ -862,7 +863,7 @@ def render_markdown(an: Analysis, doc: list | None = None, meta: ReportMeta | No
     fam = an.pcs7_family or "?"
     out = [f"# {meta.customer or tr_upper(an.project_name)} | SIMATIC PCS 7 — Upgrade Ön Değerlendirmesi "
            f"{fam} → {an.target.replace('SP', ' SP')}", "",
-           " | ".join(x for x in (meta.author, meta.department, meta.date) if x), ""]
+           " | ".join(x for x in (meta.author, meta.department, fmt_date(meta.date)) if x), ""]
     for b in doc:
         if isinstance(b, Topline):
             out += [f"**{b.text}**", ""]
@@ -1048,7 +1049,7 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
     if open_:
         body.append("</section>")
     fam = an.pcs7_family or "?"
-    who = " | ".join(x for x in (meta.author, meta.department, meta.date) if x)
+    who = " | ".join(x for x in (meta.author, meta.department, fmt_date(meta.date)) if x)
     customer = meta.customer or tr_upper(an.project_name)
     return f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="utf-8">

@@ -71,8 +71,11 @@ Master prompt'taki [DANIŞ] maddeleri ve diğer mimari kararlar. Her karar: tari
 ## 2026-10-24 — Sayı ve tarih biçimi
 - **Karar:** Rapor metninde (Word / HTML / MD) binlik ayırıcı Türkçe nokta (`1.234`); Excel `#,##0` (görünüm Excel'in yerel
   ayarına göre, Türkçe Excel'de nokta). Tarih `GG.AA.YYYY`; makine çıktıları (JSON, log, IR `generated_at`) ISO kalır.
-- **Durum:** Uygulama tutarlı DEĞİL (COVERAGE R4.3 KISMİ): Word Tablo 4 nokta kullanıyor, bulgu detay metinleri (`checks.py`
-  `{:,}`) virgül; Word header / kapak tarihi `meta.date` ISO (YYYY-AA-GG). Birleştirme: tek `fmt_num` / `fmt_date` yardımcısı.
+- **Uygulama:** `pcs7_analyzer/fmt.py` tek yer: `fmt_num` (tam sayı -> `1.234`; ondalıklı / metin olduğu gibi), `fmt_date`
+  (`GG.AA.YYYY`), `fmt_month` (`AA.YYYY`, chart / arşiv aralıkları). checks / report (MD / HTML header, Tablo 4) / readiness /
+  word (header) / excel_report metin hücreleri bunu kullanır. `ReportMeta.date` ISO veri olarak kalır, sadece görüntüde
+  biçimlenir (footer yılı ISO'dan). JSON / IR / findings.json / log / Excel sayısal hücreler değişmedi. Ondalıklı değerler
+  (`30.0 KB`, `V8.1`, oran `2.5`) binlik sayı değil, dokunulmaz. COVERAGE R4.3 YAPILDI; `tests/test_fmt.py`.
 - **Gerekçe:** Okuyucu Türk mühendis / müşteri; Siemens TR dokümanları Türkçe biçimi kullanır.
 
 ## 2026-10-24 — Word: highlight, tablo düzeni, Finding ID

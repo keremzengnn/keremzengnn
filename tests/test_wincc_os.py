@@ -129,7 +129,7 @@ def test_sfc_visualization(an):
     assert s["OS_SRV1"]["filled"] and s["OS_SRV1"]["charts"] == 6 and len(s["OS_SRV1"]["groups"]) == 4
     assert s["ENG"]["present"] and not s["ENG"]["filled"]                # boş şablon = kullanım kanıtı değil
     f = next(x for x in an.findings if x.check_id == "SFC_VISU")
-    assert "6 chart" in f.detail and "2016-12 → 2018-07" in f.detail
+    assert "6 chart" in f.detail and "12.2016 → 07.2018" in f.detail
 
 
 def test_logic_matrix_installed_not_used(an):

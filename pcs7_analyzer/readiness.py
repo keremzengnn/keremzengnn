@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from .fmt import fmt_num
 from .mlfb_info import describe
 from .model import Confidence
 
@@ -59,14 +60,14 @@ def backup_coverage(an) -> list[list[str]]:
         f"{len(d.symbol_tables)} SYMLIST, {len(d.symbol_exports)} export",
         "Block klasörü ↔ AS eşlemesi ve header'sız F-block isimleri teyit edilemez")
     src_n = mk.get("s7asrcom", 0) + mk.get("awl", 0) + mk.get("scl", 0)
-    row("Block source'ları (s7asrcom / AWL / SCL)", bool(src_n), f"{src_n} dosya",
+    row("Block source'ları (s7asrcom / AWL / SCL)", bool(src_n), f"{fmt_num(src_n)} dosya",
         "Custom block source'u görülemedi: recompile edilebilirlik teyit edilmeli (RİSK)")
-    row("CFC / SFC chart verisi (s7cfc)", bool(mk.get("s7cfc")), f"{mk.get('s7cfc', 0)} dosya",
+    row("CFC / SFC chart verisi (s7cfc)", bool(mk.get("s7cfc")), f"{fmt_num(mk.get('s7cfc', 0))} dosya",
         "Chart verisi yok", partial=bool(mk.get("s7cfc")),
         impact_partial="Var, ama chart / runtime group içeriği bu sürümde okunmuyor (FC 64 KB riski VERİ YOK)")
     row("OS projeleri (wincproj / .mcp)", bool(d.os_projects), f"{len(d.os_projects)}: {_ex(o.name for o in d.os_projects)}",
         "OS analizi yapılamaz (picture, script, OPC, SFC visualization)")
-    row("OS picture'ları (.pdl)", bool(mk.get("pdl")), f"{mk.get('pdl', 0)} dosya",
+    row("OS picture'ları (.pdl)", bool(mk.get("pdl")), f"{fmt_num(mk.get('pdl', 0))} dosya",
         "Picture analizi yapılamaz; tahmin edilmez")
     row("OS veritabanı (.mdf)", bool(mk.get("mdf")), f"{mk.get('mdf', 0)} .mdf, {mk.get('ldf', 0)} .ldf",
         "Arşiv / SQL boyutu değerlendirilemez")
@@ -78,7 +79,7 @@ def backup_coverage(an) -> list[list[str]]:
     row("Aynı projenin farklı tarihli backup'ı", bool(an.backups), f"{len(an.backups)}",
         "Tek backup: güncellik karşılaştırması yok (normal)")
     diag_n = mk.get("sql_errorlog", 0) + mk.get("evtx", 0) + mk.get("diagnose", 0)
-    row("DIAGNOSTICS (SQL ERRORLOG, evtx, WinCC diagnose)", bool(diag_n), f"{diag_n} dosya",
+    row("DIAGNOSTICS (SQL ERRORLOG, evtx, WinCC diagnose)", bool(diag_n), f"{fmt_num(diag_n)} dosya",
         "Server fail / redundancy analizi yapılamaz (gerekmiyorsa normal)")
     from pathlib import Path
     rows.append(["Released Modules listesi", VAR if an.released_list else YOK, Path(an.released_list).name if an.released_list else "-",
@@ -128,7 +129,7 @@ def quote_inputs(an) -> list[list[str]]:
     rows.append(["Logic Matrix (kullanılan)", ", ".join(lm) or "yok / kullanılmıyor", f"instance + WinCC ({CIKARIM})"])
     if an.wincc:
         for name, w in sorted(an.wincc.items()):
-            rows.append([f"WinCC {name}: tag / alarm / connection", f"{w.total_tags} / {w.alarms} / {len(w.connections)}",
+            rows.append([f"WinCC {name}: tag / alarm / connection", f"{fmt_num(w.total_tags)} / {fmt_num(w.alarms)} / {len(w.connections)}",
                          f"Configuration Studio export ({KANIT})"])
     else:
         rows.append(["Tag / alarm sayıları", VERI_YOK, "Configuration Studio export yok"])

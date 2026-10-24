@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from dataclasses import dataclass
 
+from .fmt import fmt_date, fmt_month, fmt_num
 from .model import Confidence, Finding, Severity
 from .parsers.subblk import lang_name
 
@@ -557,13 +558,13 @@ def wincc_diff(c, an):
             parts.append(f"connection sadece {d.a}'de: {_short(d.conn_only_a, 5) or '-'}; sadece {d.b}'de: "
                          f"{_short(d.conn_only_b, 5) or '-'}")
         if d.n_tags_only_a or d.n_tags_only_b:
-            parts.append(f"tag sadece {d.a}'de {d.n_tags_only_a:,} ({_short([f'{k} ×{v}' for k, v in d.tags_only_a.most_common(4)], 4)}), "
-                         f"sadece {d.b}'de {d.n_tags_only_b:,}")
+            parts.append(f"tag sadece {d.a}'de {fmt_num(d.n_tags_only_a)} ({_short([f'{k} ×{v}' for k, v in d.tags_only_a.most_common(4)], 4)}), "
+                         f"sadece {d.b}'de {fmt_num(d.n_tags_only_b)}")
         if d.tags_changed:
             parts.append(f"connection/adres farkı {len(d.tags_changed)} tag")
         if d.n_alarms_only_a or d.n_alarms_only_b:
-            parts.append(f"alarm sadece {d.a}'de {d.n_alarms_only_a:,} (en çok: "
-                         f"{_short([f'{k} ×{v}' for k, v in d.alarms_only_a.most_common(3)], 3)}), sadece {d.b}'de {d.n_alarms_only_b:,}")
+            parts.append(f"alarm sadece {d.a}'de {fmt_num(d.n_alarms_only_a)} (en çok: "
+                         f"{_short([f'{k} ×{v}' for k, v in d.alarms_only_a.most_common(3)], 3)}), sadece {d.b}'de {fmt_num(d.n_alarms_only_b)}")
         if d.alarm_text_diff:
             parts.append(f"ortak mesajlarda metin farkı {len(d.alarm_text_diff)}")
         if d.alarm_class_diff:
@@ -575,7 +576,7 @@ def wincc_diff(c, an):
         for side, cnt in ((d.a, d.diag_only_a), (d.b, d.diag_only_b)):
             if cnt:
                 out.append(_f(c, f"Sadece {side}'de olan area'sız modül/kanal diagnostic mesajları (@(n) chart'ları, #RawEvent): "
-                                 f"{sum(cnt.values()):,} — " + _short([f"{k} {v:,}" for k, v in cnt.most_common()], 6)
+                                 f"{fmt_num(sum(cnt.values()))} — " + _short([f"{k} {fmt_num(v)}" for k, v in cnt.most_common()], 6)
                                  + ". Hangi OS'e gittiğini compile sırasındaki AS-OS seçimi belirler; operatör client'larında "
                                    "modül arızası alarmı görünüyor mu teyit edilmeli.", confidence=Confidence.LOW, severity=L))
     return out
@@ -621,12 +622,11 @@ def sfc_visu(c, an):
             continue
         w = an.wincc.get(o.info.name)
         if s.get("filled"):
-            from datetime import datetime as _dt
-            rng = (f", chart tarihleri {_dt.fromtimestamp(s['first']):%Y-%m} → {_dt.fromtimestamp(s['last']):%Y-%m}"
+            rng = (f", chart tarihleri {fmt_month(s['first'])} → {fmt_month(s['last'])}"
                    if s.get("first") else "")
             dat = s["files"].get("objects.dat", s["files"].get("OBJECTS.DAT"))
             out.append(_f(c, f"{o.info.name}: SFC görselleştirme verisi var ({s['charts']} chart, {len(s['groups'])} grup{rng}"
-                             + (f"; objects.dat {human_size(dat[0])}, {_dt.fromtimestamp(dat[1]):%d.%m.%Y}" if dat else "")
+                             + (f"; objects.dat {human_size(dat[0])}, {fmt_date(dat[1])}" if dat else "")
                              + (f"; WinCC @SFC_RTS struct tag {w.sfc_struct_tags}" if w and w.sfc_struct_tags else "")
                              + (f"; AS'te FB300 instance {fb300}" if fb300 else "")
                              + "). OS compile'da 'SFC visualization' işaretlenmeli; SFC visualization lisansı teyit edilmeli.",
@@ -635,7 +635,6 @@ def sfc_visu(c, an):
 
 
 def archives(c, an):
-    from datetime import datetime as _dt
     out = []
     for o in an.os_projects:
         a = o.archives
@@ -647,7 +646,7 @@ def archives(c, an):
             n_alg = sum(1 for x in a["segments"] if "alg" in x[0].lower())
             n_tlg = sum(1 for x in a["segments"] if "tlg" in x[0].lower())
             out.append(_f(c, f"{o.info.name}: arşiv segmentleri ALG {n_alg} / TLG {n_tlg}, Alg/Tlg dosyaları "
-                             f"{len(a['alg_tlg'])}; en yeni {_dt.fromtimestamp(newest):%m.%Y}. Güncel runtime arşivi backup'ta "
+                             f"{len(a['alg_tlg'])}; en yeni {fmt_month(newest)}. Güncel runtime arşivi backup'ta "
                              "olmayabilir; arşivin taşınıp taşınmayacağı teyit edilmeli.", [o.info.path], severity=L))
         mdf, ldf = a.get("main_mdf"), a.get("main_ldf")
         if mdf and ldf and mdf[0] > 0 and ldf[0] / mdf[0] > 2:

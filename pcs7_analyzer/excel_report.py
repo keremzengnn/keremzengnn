@@ -14,9 +14,9 @@ Analiz Excel'i (rapor.xlsx) — 8 sayfa, Siemens renkleri (header #009999), Aria
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 
+from .fmt import fmt_month, fmt_num
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Severity
@@ -235,8 +235,8 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
                         + [Cell(None, "bold_num", f'SUMIF($A${first}:$A${lastr},"{mp}",{c}${first}:{c}${lastr})')
                            for c in "JKL"])
         for name, w in sorted(an.wincc.items()):
-            rows.append([Cell(f"{name}: DmTag {w.dm_tag:,} + DmStructtag {w.dm_structtag:,} = {w.total_tags:,} tag; "
-                              f"alarm {w.alarms:,}", "bold")])
+            rows.append([Cell(f"{name}: DmTag {fmt_num(w.dm_tag)} + DmStructtag {fmt_num(w.dm_structtag)} = {fmt_num(w.total_tags)} tag; "
+                              f"alarm {fmt_num(w.alarms)}", "bold")])
     else:
         rows.append(["WinCC Configuration Studio export'u yok (Tag Management / Alarm Logging → Export)."])
     rows.append([])
@@ -255,7 +255,7 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
         s = o.sfc or {}
         if s.get("present") and o.in_es:
             grp = ", ".join(f"{k} ×{v}" for k, v in s["groups"].most_common(10))
-            rng = (f"{datetime.fromtimestamp(s['first']):%Y-%m} → {datetime.fromtimestamp(s['last']):%Y-%m}"
+            rng = (f"{fmt_month(s['first'])} → {fmt_month(s['last'])}"
                    if s.get("first") else "")
             rows.append(["SFC görselleştirme", o.info.name, f"{s['charts']} chart, {len(s['groups'])} grup {rng}; {grp}"
                          if s.get("filled") else "boş şablon (görselleştirme verisi yok)"])

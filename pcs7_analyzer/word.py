@@ -17,6 +17,7 @@ from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from .fmt import fmt_date
 from .report import Bullets, Heading, Note, Para, ReportMeta, Table, Topline, badge_class, tr_upper
 
 W_NS_DOC = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
@@ -219,7 +220,7 @@ class DocxBuilder:
         self.files[name] = x.encode("utf-8")
 
     def header_footer(self, meta: ReportMeta) -> None:
-        who = " | ".join(x for x in (meta.author or "", meta.department or "", meta.date) if x)
+        who = " | ".join(x for x in (meta.author or "", meta.department or "", fmt_date(meta.date)) if x)
         year = (meta.date or date.today().isoformat())[:4]
         for n in [k for k in self.files if re.match(r"word/header\d+\.xml$", k)]:
             self._patch_part(n, [(r"Author \| Department \| YYYY-MM-DD", escape(who))])
