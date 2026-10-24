@@ -348,7 +348,7 @@ def attach(bfr, xs: XutilsSet) -> None:
     """BlockFolderResult'a çağıran listelerini yazar (callers: FB son'ları, fc_callers: FC son'ları)."""
     bfr.callers = call_tree(xs, "FB")
     bfr.fc_callers = call_tree(xs, "FC")
-    bfr.callers_source = f"{xs.ct} ({xs.mapping})"
+    bfr.callers_source = f"{xs.ct} · eşleme: {xs.mapping}"
     bfr.callers_confidence = CONFIDENCE
 
 

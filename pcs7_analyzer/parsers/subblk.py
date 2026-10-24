@@ -35,6 +35,10 @@ KNOWN_SUBRECORDS = {"00001", "00003", "00006", "00007", "00009", "00017", "00018
                     # Gerçek projede block sayılarıyla birebir örtüşen ek alt kayıtlar (anlamı bilinmiyor, sayılmaz):
                     # 24/67 OB, 25/64 FB, 26/65 FC, 70 SFC, 71 SFB
                     "00024", "00025", "00026", "00064", "00065", "00067", "00070", "00071"}
+# Bilerek EKLENMEYENLER: 00029, 00030, 00039, 00069 (gerçek projelerde 25/26/64/65 ile birlikte görülüyor).
+# Açık kaynak STEP 7 V5 okuyucusu (DotNetSiemensPLCToolBoxLibrary BlocksOfflineFolder.cs, 2026-10-24 kontrol) sadece
+# 1/3-10/12-15/17-19/21/22/27/38 kodlarını yorumluyor; 0x14 (20) ve 0x42 (66) için "Need to check" diyor; 29/30/39/69
+# hiç geçmiyor. Anlamları için güvenilir kaynak yok -> Unknown'da görünmeye devam eder (sayılmaz, kayıp yok).
 KNOW_HOW_PASSWORD = 3        # ana kayıtta PASSWORD = 3 -> know-how protection (açık kaynak okuyucu; ÇIKARIM)
 
 # SSBPART'tan okunan FB numarası bunun üstündeyse geçersiz kabul edilir.

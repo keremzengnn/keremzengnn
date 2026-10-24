@@ -3,7 +3,8 @@ Envanter modu: backup'taki her şeyi OKUR ve LİSTELER; değerlendirme / yorum y
 
 Çıktılar:
   envanter.xlsx     tüm tablolar (filtrelenebilir)
-  envanter.html     özet + tabloların ilk satırları (Siemens renkleri)
+  envanter.html     özet + tabloların ilk satırları (Siemens renkleri); boş sayfa yazılmaz
+  semboller.xlsx    symbol table'lar + sembol kontrolleri (sadece symbol varsa; envantere girmez)
   yapi_tanisi.txt   sadece yapı bilgisi (DBF alan adları, kayıt sayıları, dosya türleri) -> müşteri verisi İÇERMEZ;
                     formatı henüz çözülmemiş dosyalar (ör. hOmSave7 HW DBF'leri) için geliştiriciyle paylaşılabilir.
 """

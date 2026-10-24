@@ -77,8 +77,13 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
 - **Instance → FB eşlemesi:** DB kaydının `SSBPART` memo'su: byte0 `0x0A`=FB instance / `0x0B`=SFB instance,
   byte1-2 little-endian FB numarası. DBT gerektirir. Saçma numaralar (≥ 8192) filtrelenir ve `unresolved_instances`'ta sayılır.
   Önceki saçma numaraların muhtemel sebebi yukarıdaki encoding hatası. SSBPART artık özel FieldParser ile HAM byte
-  okunur (decode yok); MC5CODE/ADDINFO memo'ları hiç okunmaz (büyük DBT'de hız). **Açık:** DBT'nin DB3 mü DB4 mü olduğu teyit edilmedi;
-  DB3 memo 0x1A'da, dbfread'in DB4 okuyucusu 0x1F'de keser -> FB26 / FB31 instance'ları kaybolabilir.
+  okunur (decode yok); MC5CODE/ADDINFO memo'ları hiç okunmaz (büyük DBT'de hız). DBT `subblk.RawMemoFile` ile ham okunur
+  (dbfread memo okuyucusu kullanılmaz; akış, belleğe alma yok): memo bazında `FF FF` + int16 start + int32 uzunluk (header dahil)
+  = dBASE IV -> uzunlukla; yoksa dBASE III -> `1A 1A`'ya kadar (tek 0x1A / 0x1F'de kesilmez). Block boyutu header ofset 20
+  (DB4), header ofset 16 = 0x03 -> DB3/512. `SSBLEN` varsa memo ona kısaltılır. Açık kaynak STEP 7 V5 okuyucusu
+  (DotNetSiemensPLCToolBoxLibrary ParseDBF.ReadMemoBlock) DB4 tarzı okur; gerçek DBT ile **teyit edilmedi** (`BlockFolder.memo_format`).
+  SSBPART byte0 0x05 = global DB. Çözülemeyen nedenleri `unresolved_reasons` (boş memo / <3 byte / > 8191 / bilinmeyen byte0),
+  `subblk.record_instance_issues`. DB3'te payload içindeki `1A 1A` biçim gereği memo sonudur (ör. FB6682).
 - **Boş block klasörü:** DBF 834 byte, 0 kayıt. Normaldir (kullanılmayan program), hata değil.
 
 **HW Config export (.cfg)**: latin1, CRLF. `RACK/DPSUBSYSTEM/IOSUBSYSTEM` satırları: `"<MLFB veya GSD>" "<FW>", "<isim>"`.
