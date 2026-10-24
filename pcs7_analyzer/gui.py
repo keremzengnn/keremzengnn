@@ -250,6 +250,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     cmp_btn.pack(side="left")
     kb_btn = ttk.Button(obtn, text="Siemens doküman arşivi (KB) oluştur…")
     kb_btn.pack(side="left", padx=6)
+    dig_btn = ttk.Button(obtn, text="Doküman özeti çıkar (geliştiriciye)")
+    dig_btn.pack(side="left")
     adv_var = tk.BooleanVar(value=False)
     ttk.Checkbutton(obtn, text="Gelişmiş", variable=adv_var).pack(side="left", padx=(6, 0))
     info = ttk.Frame(other)
@@ -323,6 +325,17 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                 w.flush()
                 q.put(("kb_done", rc))
                 return
+            if job == "kb_digest":
+                from .kb import main as kb_main
+                out = default_out_dir(Path("dokuman_ozeti"), out_root())
+                out.mkdir(parents=True, exist_ok=True)
+                q.put(("out", out))
+                w = _QueueWriter(log)
+                with contextlib.redirect_stdout(w), contextlib.redirect_stderr(w):
+                    rc = kb_main(["digest", "-o", str(out / "kb_ozet.md")])
+                w.flush()
+                q.put(("digest_done", rc))
+                return
             if job == "compare":
                 from .cli import _index
                 from .compare import compare, write_outputs
@@ -392,6 +405,17 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                     set_busy(False)
                     stage_var.set("Tamamlandı.")
                     show_result(Path(val))
+                elif kind == "digest_done":
+                    set_busy(False)
+                    if val == 0 and result.get("out"):
+                        stage_var.set("Doküman özeti hazır.")
+                        messagebox.showinfo("Doküman özeti",
+                                            "Doküman özeti oluşturuldu (kb_ozet_*.md).\nBu dosyaları geliştiriciye "
+                                            "gönderin; kurallara çevrilip programa eklenecek.")
+                        _open_file(result["out"])
+                    else:
+                        messagebox.showerror("Doküman özeti", "Özet çıkarılamadı. Önce 'Siemens doküman arşivi (KB) "
+                                             "oluştur' çalıştırılmalı; ayrıntı pencere günlüğünde.")
                 elif kind == "kb_done":
                     set_busy(False)
                     kb_var.set(_kb_status())
@@ -458,6 +482,12 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     col_btn.configure(command=lambda: start("collect"))
     cmp_btn.configure(command=start_compare)
     kb_btn.configure(command=start_kb)
+    def start_digest():
+        if settings.find_kb() is None:
+            messagebox.showwarning("Doküman özeti", "Önce 'Siemens doküman arşivi (KB) oluştur…' ile arşivi oluşturun.")
+            return
+        start("kb_digest", src=str(Path.cwd()))      # kaynak gerekmez (KB ayarlardan bulunur)
+    dig_btn.configure(command=start_digest)
     index_btn.configure(command=lambda: result["path"] and webbrowser.open(result["path"].resolve().as_uri()))
     word_btn.configure(command=lambda: result["out"] and (result["out"] / "rapor.docx").exists()
                        and _open_file(result["out"] / "rapor.docx"))
