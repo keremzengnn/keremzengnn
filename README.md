@@ -48,6 +48,20 @@ python -m pcs7_analyzer --demo C:\Temp\demo               # sahte demo projesiyl
 python -m pcs7_analyzer --list-checks                     # tanımlı kontroller
 ```
 
+## Diğer komutlar
+```
+python -m pcs7_analyzer compare A.zip B.zip -o D:\Fark      # iki backup farkı (saha/ES, eski/yeni): fark.md/xlsx/json
+python -m pcs7_analyzer diag D:\DIAGNOSTICS.zip             # server fail: SQL ERRORLOG, WinCC diagnose, event log CSV
+python -m pcs7_analyzer kb build --root D:\Siemens_Dokumanlar --db kb\kb.sqlite   # offline doküman indeksi
+python -m pcs7_analyzer kb search "Logic Matrix update"
+```
+`kb\kb.sqlite` (çalışma klasöründe) veya `%APPDATA%\pcs7_analyzer\kb.sqlite` varsa her bulguya doküman referansı eklenir
+(PDF için `pdftotext` gerekir; Markdown dönüşümleri doğrudan indekslenir). Pencerede "Karşılaştır" modu da var.
+
+Her analizde ayrıca: `findings.json` (durum BLOCKER/RİSK/BİLGİ/VERİ YOK, güven KANIT/ÇIKARIM), `unknown.log`
+(analiz edilemeyenler), `blockmap_tanisi.txt` (block klasörü ↔ AS zinciri, isimler maskeli — geliştiriciyle paylaşılabilir).
+Kapsam ve kararlar: `docs/COVERAGE.md`, `docs/DECISIONS.md`, `docs/blockmap_findings.md`.
+
 ## Paketle (backup'ı göndermek için)
 5+ GB backup'ın çoğu (WinCC .mdf/.ldf, arşivler, picture'lar) analizde sadece adı/boyutu/tarihiyle kullanılır.
 Pencerede **Paketle** (veya `--collect`) sadece içeriği okunan dosyaları (block klasörleri, HW, DBF'ler, symbol table,

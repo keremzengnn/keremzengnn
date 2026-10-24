@@ -125,7 +125,32 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                         value="inventory", variable=mode_var).pack(anchor="w")
         ttk.Radiobutton(mf, text="Paketle: analiz için gereken dosyaları küçük bir zip'e topla (göndermek için)",
                         value="collect", variable=mode_var).pack(anchor="w")
+        ttk.Radiobutton(mf, text="Karşılaştır: bu backup (A) ile ikinci bir backup'ı (B) karşılaştır (saha / ES, eski / yeni)",
+                        value="compare", variable=mode_var).pack(anchor="w")
         r += 1
+        b_var = tk.StringVar()
+
+        def pick_b_zip():
+            q = filedialog.askopenfilename(title="Karşılaştırılacak backup (B)", filetypes=[("Zip", "*.zip"), ("Tümü", "*.*")])
+            if q:
+                b_var.set(q)
+
+        def pick_b_dir():
+            q = filedialog.askdirectory(title="Karşılaştırılacak backup klasörü (B)")
+            if q:
+                b_var.set(q)
+        b_lab = ttk.Label(body, text="Backup B")
+        b_lab.grid(row=r, column=0, sticky="w", pady=3)
+        b_ent = ttk.Entry(body, textvariable=b_var)
+        b_ent.grid(row=r, column=1, sticky="ew", padx=8)
+        b_btns = ttk.Frame(body)
+        b_btns.grid(row=r, column=2, sticky="e")
+        ttk.Button(b_btns, text="Zip…", command=pick_b_zip).pack(side="left")
+        ttk.Button(b_btns, text="Klasör…", command=pick_b_dir).pack(side="left", padx=(4, 0))
+        compare_rows = [(b_lab, b_ent, b_btns)]
+        r += 1
+    else:
+        b_var, compare_rows = tk.StringVar(), []
     for label, var in (("Hazırlayan", author_var), ("Departman", dept_var), ("Müşteri / proje (kapak)", cust_var)):
         lab = ttk.Label(body, text=label)
         lab.grid(row=r, column=0, sticky="w", pady=3)
@@ -183,9 +208,12 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         for widgets in adv_rows:
             for w in widgets:
                 w.grid() if analysis and adv_var.get() else w.grid_remove()
+        for widgets in compare_rows:
+            for w in widgets:
+                w.grid() if mode_var.get() == "compare" else w.grid_remove()
         inv = mode_var.get() == "inventory"
         word_btn.configure(text="Excel'i aç" if inv else "Word'ü aç")
-        run_btn.configure(text="3  Paketi oluştur" if col else "3  Envanteri çıkar" if inv else "3  Analizi başlat")
+        run_btn.configure(text="3  Karşılaştır" if mode_var.get() == "compare" else "3  Paketi oluştur" if col else "3  Envanteri çıkar" if inv else "3  Analizi başlat")
         hint.configure(text="Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
                             + ("Paket müşteri verisi içerir: paylaşmadan önce veri kullanım kurallarını teyit edin." if col
                                else "Envanter değerlendirme içermez; yapi_tanisi.txt müşteri verisi içermez." if inv
@@ -227,6 +255,13 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
 
     def worker(src, out, disc, author, dept, cust, mode, manual, exports):
         try:
+            if mode == "compare":
+                from .compare import compare, write_outputs
+                res = compare(Path(src), Path(b_var.get().strip()), log)
+                p = write_outputs(res, Path(out) if out else default_out_dir(Path(src)))
+                q.put(("log", f"{len(res.rows)} fark satırı; öneri: {res.recommendation}"))
+                q.put(("done", Path(p).with_suffix(".xlsx") if Path(p).with_suffix(".xlsx").exists() else p))
+                return
             p = run(Path(src), Path(out) if out else None, discover_only=disc and mode == "analysis", log=log,
                     author=author, department=dept, customer=cust or None, inventory=mode == "inventory",
                     manual=manual, exports=exports, collect=mode == "collect")
@@ -247,7 +282,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                     run_btn.configure(state="normal")
                     result["path"] = Path(val)
                     folder_btn.configure(state="normal")
-                    if Path(val).suffix.lower() == ".zip":          # paket: klasörü göster
+                    if Path(val).suffix.lower() in (".zip", ".xlsx", ".md"):   # paket / karşılaştırma: klasörü göster
                         logbox.insert("end", f"\nPaket hazır: {val}\n")
                         logbox.see("end")
                         _open_file(Path(val).parent)
@@ -273,6 +308,9 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         src = src_var.get().strip()
         if not src or not Path(src).exists():
             messagebox.showwarning("Backup", "Önce 'Backup klasörü seç' veya 'Backup .zip seç' ile backup'ı seçin.")
+            return
+        if mode_var.get() == "compare" and not (b_var.get().strip() and Path(b_var.get().strip()).exists()):
+            messagebox.showwarning("Backup B", "Karşılaştırma için ikinci backup'ı (B) seçin.")
             return
         logbox.delete("1.0", "end")
         for b in (run_btn, open_btn, word_btn, inv_btn, folder_btn):

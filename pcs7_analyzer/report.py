@@ -708,6 +708,15 @@ def _appendix(an: Analysis, doc: list) -> None:
         doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
                          [[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4), m.status] for m in
                           sorted(an.hw_matches, key=lambda m: ("bulunamadı" not in m.status, m.order))], badge_cols=[5]))
+    if an.blockmap is not None and an.blockmap.links:
+        doc.append(Heading(2, "S7 program ↔ CPU ↔ station (ID zinciri)"))
+        doc.append(Table(["S7 program", "Block klasörü", "CPU", "Station", "Symbol table", "Güven"],
+                         [[lk.program_name or str(lk.program_id), lk.block_folder or "-", lk.cpu_name or "-",
+                           f"{lk.station_name} ({lk.station_type})" if lk.station_name else "-", lk.symbol_table or "-",
+                           lk.confidence] for lk in an.blockmap.links], badge_cols=[5]))
+        doc.append(Note("Zincir: hrs/S7RESOFF.DBF → hrs/linkhrs.lnk → ombstx/offline/<ID>; hOmSave7/*/HRELATI1.DBF (CPU, "
+                        "station); YDBs/YLNKLIST.DBF. Gerçek projede teyit edilene kadar: KANIT sadece HW export / symbol "
+                        "table ile çapraz kontrol tutarsa."))
     doc.append(Heading(2, "Block klasörleri"))
     rows = []
     for b in an.block_folders:
@@ -766,8 +775,13 @@ def _appendix(an: Analysis, doc: list) -> None:
     from .readiness import findings_rows
     doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)"))
     doc.append(Para("KANIT = dosyada birebir görüldü; ÇIKARIM = heuristic / isimden yorum, teyit edilmeli (sarı)."))
-    doc.append(Table(["Konu", "Önem", "Güven", "Detay", "Kaynak"], findings_rows(an), badge_cols=[1, 2],
-                     widths=[14, 8, 9, 49, 20]))
+    doc.append(Table(["Konu", "Durum", "Önem", "Güven", "Detay", "Kaynak"], findings_rows(an), badge_cols=[1, 2, 3],
+                     widths=[13, 8, 7, 8, 46, 18]))
+    doc.append(Heading(1, f"Ek D: Analiz edilemeyenler ({len(an.unknown)})"))
+    if len(an.unknown):
+        doc.append(Table(["Modül", "Dosya", "Neden", "Alan", "Ham değer"], an.unknown.rows(), widths=[10, 34, 40, 8, 8]))
+    else:
+        doc.append(Para("Kayıt yok."))
     doc.append(Heading(1, "Ek B: Keşif ve uyarılar"))
     doc.append(Bullets([f"Kaynak: {an.source}", f"{d.n_files} dosya, {d.total_bytes / 1e9:.2f} GB",
                         f"Block klasörü: {len(d.block_folders)} ({sum(1 for b in d.block_folders if b.is_empty)} boş)",
@@ -848,6 +862,12 @@ def badge_class(v: str) -> str | None:
         return "medium"
     if v == "VERİ YOK":
         return "neutral"
+    if v == "BLOCKER":
+        return "high"
+    if v == "RİSK":
+        return "medium"
+    if v == "BİLGİ":
+        return "low"
     if v in (STATUS_OK, "listede"):
         return "ok"
     if v in (STATUS_NOT_CHECKED,):

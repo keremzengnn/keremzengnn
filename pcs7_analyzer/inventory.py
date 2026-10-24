@@ -20,6 +20,7 @@ from . import __version__
 from ._vendor import dbfread
 from .discovery import DiscoveryResult, discover_source, owner_project
 from .parsers import library_summary, parse_cfg, parse_subblk, read_symbol_asc_all, read_symlist_all, scan_s7h
+from .parsers.symbols import symbol_stats
 from .mlfb_info import describe, label as mlfb_label
 from .parsers.hwconfig import _MLFB
 from .parsers.wincc import picture_kind
@@ -52,6 +53,7 @@ class Inventory:
     warnings: list[str] = field(default_factory=list)
     diagnostics: str = ""
     block_data: list = field(default_factory=list)      # [(BlockFolderInfo, BlockFolder)] -> Mevcut durum
+    blockmap_diag: str = ""                              # blockmap_tanisi.txt (isimler maskeli)
 
     def sheet(self, name: str) -> Sheet:
         return next(s for s in self.sheets if s.name == name)
@@ -202,11 +204,31 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
     return fb_sets
 
 
+def _programs(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
+    """S7 program -> block klasörü -> CPU -> station (blockmap ID zinciri)."""
+    from .blockmap import diagnostics as bm_diag, resolve
+    bm = resolve(src, _proj_dirs(d))
+    inv.blockmap_diag = bm_diag(bm)
+    sh = Sheet("S7 program ↔ AS", ["Proje", "S7 program", "Block klasörü", "CPU", "Rack/slot", "Station", "Station tipi",
+                                    "Symbol table", "Güven", "Kanıt"],
+               note="STEP 7 proje ID zinciri (hrs/S7RESOFF, linkhrs.lnk, HRELATI1, YLNKLIST); gerçek projede teyit edilmedi "
+                    "-> güven ÇIKARIM (analiz modunda HW export ile çapraz kontrol KANIT'a yükseltebilir)")
+    for lk in bm.links:
+        sh.rows.append([Path(lk.project).name, lk.program_name, lk.block_folder or "-", lk.cpu_name or "-",
+                        f"{lk.rack}/{lk.slot}" if lk.rack is not None else "-", lk.station_name or "-",
+                        lk.station_type or "-", lk.symbol_table or "-", lk.confidence, "; ".join(lk.evidence)])
+    inv.sheets.append(sh)
+    inv.warnings += [f"S7 program ↔ AS: {u}" for u in bm.unknown]
+
+
 def _symbols(src: Source, d: DiscoveryResult, inv: Inventory, fb_sets: dict[str, set[int]]) -> None:
     sh = Sheet("Semboller", ["Kaynak", "Proje", "Eşlenen block klasörü", "Sembol", "Operand", "Veri tipi", "Yorum"],
                note="YDBs/SYMLIST.DBF (backup içi) ve .asc export'ları; block klasörü eşlemesi FB seti benzerliği (heuristic)")
     pdirs = _proj_dirs(d)
     folders = inv.sheet("Block klasörleri")
+    chk = Sheet("Sembol kontrolleri", ["Kaynak", "Proje", "Kontrol", "Değer", "Detay", "Güven"],
+                note="Çift operand / çift sembol adı / alan bazında adres aralığı. Bit-word çakışması (M10.0 - MW10) "
+                     "kontrol edilmez.")
     for rel in d.symbol_tables + d.symbol_exports:
         try:
             p = src.materialize(rel)
@@ -238,7 +260,18 @@ def _symbols(src: Source, d: DiscoveryResult, inv: Inventory, fb_sets: dict[str,
         proj = Path(owner_project(rel.rsplit("/", 1)[0], pdirs)).name
         for r in rows:
             sh.rows.append([rel, proj, match, r["symbol"], r["operand"], r["datatype"], r["comment"]])
+        st = symbol_stats(rows)
+        chk.rows.append([rel, proj, "toplam sembol", st["total"], "", ""])
+        for area, (n, lo, hi) in st["areas"].items():
+            chk.rows.append([rel, proj, "adres aralığı", f"{area}: {n}", f"{lo} … {hi}", ""])
+        for op, syms in st["dup_operand"].items():
+            chk.rows.append([rel, proj, "aynı operanda birden fazla sembol", op, ", ".join(syms[:5]), "KANIT"])
+        for sym, n in st["dup_symbol"].items():
+            chk.rows.append([rel, proj, "aynı sembol adı birden fazla satırda", sym, f"{n} satır", "KANIT"])
+        if st["unparsed"]:
+            chk.rows.append([rel, proj, "tanınmayan operand", st["unparsed"], "", "-"])
     inv.sheets.append(sh)
+    inv.sheets.append(chk)
 
 
 def _os(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
@@ -319,6 +352,7 @@ def diagnostics(src: Source) -> str:
     lines = [f"PCS 7 backup yapı tanısı — pcs7_analyzer {__version__} — {datetime.now():%Y-%m-%d %H:%M}",
              "Bu dosya sadece yapı bilgisi içerir (dosya türleri, DBF alan adları, kayıt sayıları); kayıt içeriği YOKTUR.", ""]
     schemas: dict[tuple, list] = defaultdict(list)
+    bad: list[str] = []
     for e in src.entries:
         if not e.name.lower().endswith(".dbf"):
             continue
@@ -337,9 +371,11 @@ def diagnostics(src: Source) -> str:
                 fields.append(f"{fname}:{chr(head[i + 11])}{head[i + 16]}")
             key_name = e.name.upper() if len(e.name) <= 16 else "<dosya>.DBF"
             schemas[(key_name, tuple(fields))].append((pattern, nrec, e.size))
-        except Exception:  # noqa: BLE001
-            continue
+        except Exception as ex:  # noqa: BLE001 - tanı dosyasında sayılır
+            bad.append(f"{pattern}: {type(ex).__name__}")
     lines.append(f"## DBF şemaları ({len(schemas)} farklı şema)")
+    if bad:
+        lines.append(f"Okunamayan DBF başlığı: {len(bad)} (" + ", ".join(sorted(set(bad))[:10]) + ")")
     for (name, fields), occ in sorted(schemas.items()):
         recs = [o[1] for o in occ]
         pats = sorted({o[0] for o in occ})
@@ -540,6 +576,8 @@ def build_inventory_source(src: Source, log=None) -> Inventory:
     stage("HW (backup içi)", _hw_internal, src, d, inv)
     log("Block klasörleri...")
     fb_sets = stage("Block klasörleri", _blocks, src, d, inv, log) or {}
+    log("S7 program ↔ AS zinciri...")
+    stage("S7 program ↔ AS", _programs, src, d, inv)
     log("Symbol table'lar...")
     stage("Symbol table", _symbols, src, d, inv, fb_sets)
     log("OS projeleri...")
@@ -619,6 +657,8 @@ def write_outputs(inv: Inventory, out_dir: Path) -> Path:
     p = out_dir / "envanter.html"
     p.write_text(render_html(inv), encoding="utf-8")
     (out_dir / "yapi_tanisi.txt").write_text(inv.diagnostics, encoding="utf-8")
+    if inv.blockmap_diag:
+        (out_dir / "blockmap_tanisi.txt").write_text(inv.blockmap_diag, encoding="utf-8")
     return p
 
 

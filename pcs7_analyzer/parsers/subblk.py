@@ -108,6 +108,7 @@ class BlockFolder:
     # SSBPART'ı instance gibi görünen ama FB numarası çözülemeyen / geçersiz DB sayısı.
     unresolved_instances: int = 0
     bad_records: int = 0          # BLKNUMBER okunamayan kayıt (atlandı)
+    other_types: collections.Counter = field(default_factory=collections.Counter)  # bilinen 6 tip dışı SUBBLKTYP
 
     @property
     def is_empty(self) -> bool:
@@ -174,6 +175,8 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
             continue
         if ty in _KIND:
             present.add((ty, nr))
+        elif ty not in (SUBBLK_SFC, SUBBLK_SFB):
+            bf.other_types[str(ty).strip() or "(boş)"] += 1
         if ty in (SUBBLK_FB, SUBBLK_FC):
             key = (ty, nr)
             if rec["BLOCKNAME"].strip() or key not in headers:

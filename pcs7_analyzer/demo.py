@@ -15,7 +15,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from ._dbfwriter import SUBBLK_FIELDS, block, fb_instance, sfb_instance, write_dbf
+from ._dbfwriter import SUBBLK_FIELDS, block, fb_instance, sfb_instance, write_dbf, write_project_links
 
 FB, FC, OB, DB = "00004", "00005", "00008", "00010"
 DAY = 86400.0
@@ -139,6 +139,10 @@ def _as02(root: Path, base: str) -> None:
             _sym("F_CH_DO", "FB   352"), _sym("F_PLK", "FB   353")]
     write_dbf(_file(root, f"{base}/AS02/YDBs/1/SYMLIST.DBF"), SYMLIST_FIELDS, syms, memo=None)
     _file(root, f"{base}/AS02/AS02.s7p", b"s7p")
+    # STEP 7 ID zinciri (S7RESOFF / linkhrs.lnk / HRELATI1 / YLNKLIST): block klasörü 0000000A -> CPU -> station AS02
+    write_project_links(root / base / "AS02", [{"id": 7, "name": "AS02_Prog", "folder_id": 0x0A, "cpu_id": 501,
+                                                "cpu_name": "CPU 414-5H", "station_id": 0x1F, "station_name": "AS02",
+                                                "station_type": 1315650, "sym_id": 1}])
 
 
 PICS = ["Tank_1.pdl", "Tank_2.pdl", "Tank_3.pdl", "Overview.pdl", "@PG_MotL.pdl", "@PG_Intlk16.pdl",

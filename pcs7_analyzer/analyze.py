@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .discovery import BlockFolderInfo, DiscoveryResult, OsProjectInfo, discover_source, owner_project
+from .unknown import UnknownRecorder
 from .model import Confidence, Finding
 from .parsers import (
     compare_os, hw_inventory, library_summary, parse_cfg, parse_subblk,
@@ -160,6 +161,7 @@ class BlockFolderResult:
     unresolved_instances: int = 0
     bad_records: int = 0
     sfb_instances: dict = field(default_factory=dict)     # {SFB no: instance DB sayısı}
+    other_types: dict = field(default_factory=dict)       # {SUBBLKTYP kodu: kayıt sayısı} (bilinen 6 tip dışı)
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
@@ -299,6 +301,9 @@ class Analysis:
     manual: ManualInputs = field(default_factory=ManualInputs)
     missing_os_projects: list[str] = field(default_factory=list)   # PC station'ı olup wincproj'u olmayan
     extra_os_projects: list[str] = field(default_factory=list)     # wincproj'u olup PC station listesinde olmayan
+    unknown: UnknownRecorder = field(default_factory=UnknownRecorder)   # analiz edilemeyenler
+    kb_refs: dict = field(default_factory=dict)                    # {check_id: [kb.KbRef]} (doküman KB varsa)
+    blockmap: object = None                                          # blockmap.BlockMap (ID zinciri)
     diag: object = None                                              # parsers.diag.DiagResult (DIAGNOSTICS arşivi varsa)
 
     @property
@@ -335,6 +340,12 @@ class Analysis:
 _CPU = re.compile(r"^6ES7 ?(41\d|31[2-9])-")   # S7-400 (PCS 7 AS) + S7-300 CPU (paket üniteler)
 _HSYNC = re.compile(r"^6ES7 ?960-1AA")
 _F_ORDER = re.compile(r"^6ES7 ?(13[68]-|326-|336-)")   # F-DI/F-DO/F-AI (ET 200S/iSP F, SM326/336)
+
+
+def _unk(an: "Analysis", module: str, path: str, reason: str, **kw) -> None:
+    """Analiz edilemeyen öğe: hem uyarı listesine hem UnknownRecorder'a."""
+    an.unknown.add(module, path, reason, **kw)
+    an.warnings.append(f"{path}: {reason}")
 
 
 def _norm(s: str) -> str:
@@ -375,7 +386,7 @@ def _analyze_stations(src: Source, d: DiscoveryResult, an: Analysis, log) -> Non
         try:
             cfg = parse_cfg(src.materialize(rel))
         except Exception as e:  # noqa: BLE001
-            an.warnings.append(f"{rel}: okunamadı ({e})")
+            _unk(an, "hwconfig", rel, f"okunamadı ({type(e).__name__}: {e})")
             continue
         m = re.match(r'STATION\s+\S+\s*,\s*"([^"]*)"', cfg["station"])
         st = Station(name=m.group(1) if m else Path(rel).stem, source=rel, kind="cfg",
@@ -420,7 +431,7 @@ def _analyze_stations(src: Source, d: DiscoveryResult, an: Analysis, log) -> Non
                 for (order, fw), n in scan_s7h(src.materialize(rel)).items():
                     st.inventory[(order, fw)] += n
             except Exception as e:  # noqa: BLE001
-                an.warnings.append(f"{rel}: okunamadı ({e})")
+                _unk(an, "hwconfig", rel, f".s7h okunamadı ({type(e).__name__}: {e})")
         if not st.inventory:
             continue
         for (order, fw), n in st.inventory.items():
@@ -490,7 +501,7 @@ def _symbol_tables(src: Source, d: DiscoveryResult, an: Analysis) -> list[tuple[
             p = src.materialize(rel)
             rows = parse_symlist_dbf(p) if rel.lower().endswith(".dbf") else parse_symbol_asc(p)
         except Exception as e:  # noqa: BLE001
-            an.warnings.append(f"Symbol table okunamadı: {rel} ({e})")
+            _unk(an, "symbols", rel, f"symbol table okunamadı ({type(e).__name__}: {e})")
             continue
         syms = {(t, n): name for t, n, name, _ in rows if t in ("FB", "FC", "SFB", "SFC", "DB")}
         if syms:
@@ -517,6 +528,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.memo_available = bf.memo_available
     res.unresolved_instances = bf.unresolved_instances
     res.bad_records = bf.bad_records
+    res.other_types = dict(bf.other_types)
     summary = library_summary(bf)
     res.libraries = {lib: dict(c) for lib, c in sorted(summary.items())}
     for lib, c in summary.items():
@@ -563,24 +575,43 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
 
 
 def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
-    # 1) symbol table <-> block klasörü: FB seti benzerliği (Jaccard). Doğrudan eşleme henüz bulunamadı.
+    # 0) ID zinciri (blockmap): S7 program -> block klasörü -> CPU -> station; symbol table doğrudan
+    # 1) yoksa symbol table <-> block klasörü: FB seti benzerliği (Jaccard, heuristic)
     used = set()
+    bm = an.blockmap
+    st_names = {s.name for s in an.stations if s.kind == "cfg"}
     for bfr in an.block_folders:
         if not bfr.counts:
             continue
         fbs = set(bfr.fb_numbers)
-        best, score = None, 0.0
-        for rel, syms in symtabs:
-            sfb = {n for (t, n) in syms if t == "FB"}
-            if not sfb or not fbs:
-                continue
-            j = len(fbs & sfb) / len(fbs | sfb)
-            if j > score:
-                best, score = (rel, syms), j
-        if best and score >= 0.5:
+        link = bm.for_folder(bfr.info.path) if bm else None
+        best, score, direct = None, 0.0, False
+        if link and link.symbol_table:
+            hit = next(((rel, syms) for rel, syms in symtabs if rel == link.symbol_table), None)
+            if hit:
+                sfb = {n for (t, n) in hit[1] if t == "FB"}
+                best, direct = hit, True
+                score = len(fbs & sfb) / len(fbs | sfb) if (fbs or sfb) else 1.0
+        if not direct:
+            for rel, syms in symtabs:
+                sfb = {n for (t, n) in syms if t == "FB"}
+                if not sfb or not fbs:
+                    continue
+                j = len(fbs & sfb) / len(fbs | sfb)
+                if j > score:
+                    best, score = (rel, syms), j
+        if link and link.station_id is not None:
+            from .blockmap import cross_check
+            cross_check(type(bm)(links=[link]), st_names, {link.symbol_table: score} if direct else None)
+            bfr.as_label = link.label
+            bfr.mapping = (f"ID zinciri: S7 program '{link.program_name}' → CPU '{link.cpu_name}' → station "
+                           f"'{link.station_name}' ({link.confidence})")
+            bfr.mapping_confidence = Confidence.HIGH.value if link.confidence == "KANIT" else Confidence.LOW.value
+        if best and (direct or score >= 0.5):
             rel, syms = best
             used.add(rel)
-            bfr.symbol_source = f"{rel} (FB seti benzerliği {score:.0%}, heuristic)"
+            bfr.symbol_source = (f"{rel} (ID zinciri YLNKLIST; FB seti uyumu {score:.0%})" if direct
+                                 else f"{rel} (FB seti benzerliği {score:.0%}, heuristic)")
             sfb = {n: nm for (t, n), nm in syms.items() if t == "FB"}
             bfr.symbol_only = [f"FB{n} {sfb[n]}" for n in sorted(set(sfb) - fbs)]
             bfr.block_only = [f"FB{n}" for n in sorted(fbs - set(sfb))]
@@ -597,7 +628,7 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
                 if c.headerless and (c.kind, c.number) in syms:
                     c.name = f"{syms[(c.kind, c.number)]} (symbol)"
             stem = Path(rel).stem
-            if rel.lower().endswith((".asc", ".sdf")) and re.search(r"AS\s*\d+", stem, re.I):
+            if bfr.mapping == "-" and rel.lower().endswith((".asc", ".sdf")) and re.search(r"AS\s*\d+", stem, re.I):
                 bfr.as_label = re.search(r"AS\s*\d+", stem, re.I).group().replace(" ", "").upper()
                 bfr.mapping = "symbol export dosya adı + FB seti"
         # 2) proje adı
@@ -783,6 +814,10 @@ def _analyze_diag(src: Source, an: Analysis, log) -> None:
     log("Diagnostics dosyaları taranıyor...")
     an.diag = scan_diagnostics(src.entries, src.read_bytes)
     an.warnings += [f"Diagnostics: {w}" for w in an.diag.warnings]
+    for w in an.diag.warnings:
+        an.unknown.add("diag", w.split(":", 1)[0] if ":" in w else "-", w)
+    for rel in an.diag.files.get("evtx", []):
+        an.unknown.add("diag", rel, ".evtx okunmadı (python-evtx / wevtutil yok): Event Viewer'dan CSV export alınmalı")
     if not any(an.diag.files.get(k) for k in ("sql_errorlog", "wincc_log", "evtx", "eventlog_csv")):
         an.diag = None
 
@@ -915,6 +950,7 @@ def _stage(an: Analysis, name: str, log, fn, *args) -> None:
     try:
         fn(*args)
     except Exception as e:  # noqa: BLE001 - gerçek backup'ta beklenmeyen format: diğer bölümler devam eder
+        an.unknown.add("analiz", "-", f"{name} bölümü tamamlanamadı: {type(e).__name__}: {e}")
         an.warnings.append(f"{name} bölümü tamamlanamadı: {type(e).__name__}: {e}")
         log(f"UYARI: {name} bölümü tamamlanamadı ({e})")
         log(traceback.format_exc())
@@ -946,15 +982,30 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
         except Exception as e:  # noqa: BLE001
             bfr = BlockFolderResult(info=info, as_label=info.label, mapping="-",
                                     mapping_confidence=Confidence.LOW.value, error=f"{e}")
-            an.warnings.append(f"{info.path}: okunamadı ({e})")
+            _unk(an, "blocks", info.dbf, f"block klasörü okunamadı ({type(e).__name__}: {e})")
             log(traceback.format_exc())
         if bfr.bad_records:
-            an.warnings.append(f"{info.path}: {bfr.bad_records} SUBBLK kaydı okunamadı (atlandı)")
+            _unk(an, "blocks", info.dbf, f"{bfr.bad_records} SUBBLK kaydı okunamadı (atlandı)", where="BLKNUMBER")
+        if bfr.unresolved_instances:
+            an.unknown.add("blocks", info.dbt or info.dbf, f"{bfr.unresolved_instances} instance DB'nin FB numarası "
+                           "çözülemedi (SSBPART geçersiz / ≥ 8192)", where="SSBPART")
+        for code, n in sorted(bfr.other_types.items()):
+            an.unknown.add("blocks", info.dbf, f"SUBBLKTYP {code}: {n} kayıt (FB/FC/OB/DB/SFC/SFB dışı; alt kayıt "
+                           "olduğu varsayıldı, sayılmadı)", where="SUBBLKTYP", raw=code)
         an.block_folders.append(bfr)
 
     log("Symbol table'lar...")
     symtabs: list = []
     _stage(an, "Symbol table", log, lambda: symtabs.extend(_symbol_tables(src, d, an)))
+    def _bm():
+        from .blockmap import resolve
+        pdirs = sorted({b.info.project for b in an.block_folders if b.info.project not in ("-", None)})
+        an.blockmap = resolve(src, pdirs)
+        for u in an.blockmap.unknown:
+            parts = [x.strip() for x in u.split("|", 2)]
+            an.unknown.add("blockmap", parts[1] if len(parts) > 2 else "-", parts[-1])
+        an.warnings += [f"Block↔AS zinciri: {u}" for u in an.blockmap.unknown]
+    _stage(an, "Block klasörü ↔ AS ID zinciri", log, _bm)
     _stage(an, "Block klasörü ↔ AS eşlemesi", log, _map_block_folders, an, symtabs)
 
     log("OS projeleri...")

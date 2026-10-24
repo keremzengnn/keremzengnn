@@ -24,7 +24,7 @@ def test_coverage_and_inputs(tmp_path):
     assert cov["DIAGNOSTICS (SQL ERRORLOG, evtx, WinCC diagnose)"][1] == "Yok"
     q = {r[0]: r[1] for r in quote_inputs(an)}
     assert q["AS (HW station)"].startswith("2 station") and "AS02" in q["F-System"]
-    assert {r[2] for r in findings_rows(an)} <= {"KANIT", "ÇIKARIM"}
+    assert {r[3] for r in findings_rows(an) if r[1] != "VERİ YOK"} <= {"KANIT", "ÇIKARIM"}
     md = render_html(an, build_document(an))
     assert "Backup içeriği ve yeterlilik" in md and "Teklif için girdiler" in md and "Ek C: Bulgular" in md
     assert "Diagnostics (server fail)" not in md
@@ -53,3 +53,19 @@ def test_diagnostics_integration(tmp_path):
     with zipfile.ZipFile(pkg) as z:
         assert "DIAGNOSTICS/MSSQL/Log/ERRORLOG" in z.namelist()
     assert analyze(pkg).diag.sql["bits"] == "32"
+
+
+def test_comm_std_and_min_version(tmp_path):
+    from pcs7_analyzer.checks import CHECKS, NotChecked
+    an = analyze(build_demo_project(tmp_path))
+    comm = [f for f in an.findings if f.check_id == "COMM_STD"]
+    assert comm and "SEND_R" in comm[0].detail and "VERİ YOK" in comm[0].detail
+    chk = next(c for c in CHECKS if c.id == "PROJ_MIN_VERSION")
+    an.pcs7_family = "V7.0"
+    assert chk.func(chk, an)[0].blocking
+    an.pcs7_family = None
+    try:
+        chk.func(chk, an)
+        raise AssertionError("NotChecked bekleniyordu")
+    except NotChecked:
+        pass

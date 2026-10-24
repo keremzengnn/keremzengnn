@@ -15,3 +15,10 @@ tests/regression/expected_local.json
 # Word template: sadece gömülü olan
 *.dotx
 !pcs7_analyzer/data/report_template.dotx
+*.rar
+*.evtx
+*.mdf
+*.ldf
+kb/
+fixtures_real/
+pcs7_rapor/

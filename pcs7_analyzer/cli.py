@@ -155,6 +155,14 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
                 import traceback as _tb
                 log(f"UYARI: envanter üretilemedi ({type(e).__name__}: {e})")
                 log(_tb.format_exc())
+    kb_db = settings.find_kb()
+    if kb_db:
+        try:
+            from .kb import refs_for_findings
+            an.kb_refs = refs_for_findings(kb_db, an.findings, an.target.replace("SP", " SP"))
+            log(f"Doküman referansları: {kb_db} ({sum(1 for v in an.kb_refs.values() if v)} bulgu)")
+        except Exception as e:  # noqa: BLE001
+            an.unknown.add("kb", str(kb_db), f"doküman referansı alınamadı ({type(e).__name__}: {e})")
     # Her çıktı ayrı üretilir: biri hata verirse diğerleri yine yazılır.
     import traceback
     failed = []
@@ -191,6 +199,21 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         out("rapor.docx", word)
     else:
         log("Word template (.dotx) seçilmedi: rapor.docx üretilmedi (HTML/MD/JSON üretildi).")
+    def bm_diag():
+        if an.blockmap is not None:
+            from .blockmap import diagnostics as bm_diagnostics
+            (out_dir / "blockmap_tanisi.txt").write_text(bm_diagnostics(an.blockmap), encoding="utf-8")
+    out("blockmap_tanisi.txt", bm_diag)
+
+    def extras():
+        import json as _json
+        from .readiness import findings_json
+        (out_dir / "findings.json").write_text(_json.dumps(findings_json(an), ensure_ascii=False, indent=1, default=str),
+                                               encoding="utf-8")
+        (out_dir / "unknown.log").write_text(an.unknown.to_log(), encoding="utf-8")
+    out("findings.json / unknown.log", extras)
+    if len(an.unknown):
+        log(f"Analiz edilemeyen: {len(an.unknown)} (unknown.log)")
     if an.warnings:
         log(f"{len(an.warnings)} uyarı var (raporun 'Keşif ve uyarılar' ekinde).")
     if "rapor.html" in failed:
@@ -202,12 +225,80 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     return html_p
 
 
+SUBCOMMANDS = ("compare", "kb", "diag")
+
+
+def _sub_main(argv: list[str]) -> int:
+    """Alt komutlar: compare A B / kb build|search / diag <arşiv>. Ana kullanım (analiz) değişmedi."""
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "kb":
+        from .kb import main as kb_main
+        return kb_main(rest)
+    ap = argparse.ArgumentParser(prog=f"pcs7_analyzer {cmd}")
+    if cmd == "compare":
+        ap.add_argument("a", type=Path, help="Backup A (klasör / zip)")
+        ap.add_argument("b", type=Path, help="Backup B (klasör / zip)")
+    else:
+        ap.add_argument("source", type=Path, help="DIAGNOSTICS arşivi / klasörü")
+    ap.add_argument("-o", "--out-dir", type=Path)
+    a = ap.parse_args(rest)
+
+    def log(msg):
+        print(msg, file=sys.stderr)
+    if cmd == "compare":
+        from .compare import compare, write_outputs
+        for p in (a.a, a.b):
+            if not p.exists():
+                ap.error(f"bulunamadı: {p}")
+        out = a.out_dir or default_out_dir(Path(f"{a.a.stem}_vs_{a.b.stem}"))
+        res = compare(a.a, a.b, log)
+        p = write_outputs(res, out)
+    else:
+        if not a.source.exists():
+            ap.error(f"bulunamadı: {a.source}")
+        from .parsers.diag import scan_diagnostics
+        from .source import open_source
+        out = a.out_dir or default_out_dir(a.source)
+        out.mkdir(parents=True, exist_ok=True)
+        with open_source(a.source, log) as src:
+            res = scan_diagnostics(src.entries, src.read_bytes)
+        p = _write_diag(res, out)
+    print(p)
+    return 0
+
+
+def _write_diag(res, out: Path) -> Path:
+    import json
+    from dataclasses import asdict
+    lines = ["# Diagnostics", "", "## Bulgular", "", "| Bulgu | Önem | Güven | Detay | Kaynak |", "|---|---|---|---|---|"]
+    lines += [f"| {f.title} | {f.severity} | {f.confidence} | {f.detail} | {f.source} |" for f in res.findings]
+    lines += ["", "## Zaman çizelgesi", "", "| Zaman | Kategori | Olay | Dosya |", "|---|---|---|---|"]
+    lines += [f"| {e.ts or '-'} | {e.category} | {e.text.replace('|', '/')} | {e.source} |" for e in res.events[:2000]]
+    if res.warnings:
+        lines += ["", "## Uyarılar", ""] + [f"- {w}" for w in res.warnings]
+    p = out / "diag.md"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    def clean(o):
+        if isinstance(o, dict):
+            return {(k if isinstance(k, (str, int, float, bool)) or k is None else " / ".join(map(str, k))
+                     if isinstance(k, tuple) else str(k)): clean(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple, set)):
+            return [clean(v) for v in o]
+        return o
+    (out / "diag.json").write_text(json.dumps(clean(asdict(res)), ensure_ascii=False, indent=1, default=str),
+                                   encoding="utf-8")
+    return p
+
+
 def main(argv: list[str] | None = None) -> int:
     import os
     if sys.stdout is None:        # windowed exe: konsol yok
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in SUBCOMMANDS:
+        return _sub_main(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
 

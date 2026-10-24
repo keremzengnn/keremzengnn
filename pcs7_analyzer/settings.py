@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-KEYS = ("author", "department", "template", "released", "out_root", "target")
+KEYS = ("author", "department", "template", "released", "out_root", "target", "kb_db")
 
 
 def settings_path() -> Path:
@@ -42,4 +42,12 @@ def find_template(explicit: str | None = None) -> Path | None:
         if d.is_dir():
             for p in sorted(d.glob("*.dotx")):
                 return p
+    return None
+
+
+def find_kb(explicit: str | None = None) -> Path | None:
+    """Doküman bilgi tabanı (python -m pcs7_analyzer kb build ...): açık yol > ayar > ./kb/kb.sqlite > ayar klasörü."""
+    for c in (explicit, load().get("kb_db"), Path.cwd() / "kb" / "kb.sqlite", settings_path().parent / "kb.sqlite"):
+        if c and Path(c).is_file():
+            return Path(c)
     return None

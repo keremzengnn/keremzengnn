@@ -190,6 +190,18 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 - Manual'dan teyitli ek kurallar: proje ≥ V7.1 SP4 (`PROJ_MIN_VERSION`, 4.3), F-library ≥ V1.3 + F-@ chart silinmez (9.5.17),
   desteklenen OS / SQL 2019 / Maintenance functions (4.3), sadece WinCC 3D design (9.6.1).
 
+## Master prompt (PROMPT_BACKUP_ANALYZER_TEK_PARCA) karşılıkları
+- Kapsam: `docs/COVERAGE.md` (her madde YAPILDI / KISMİ / YAPILAMADI + neden), kararlar `docs/DECISIONS.md`.
+- `blockmap.py`: ID zinciri hrs/S7RESOFF → linkhrs.lnk (01 60 11 00 + int16) → ombstx/offline/<ID:08X>; HRELATI1 RELID 16
+  (CPU→program), TOBJTYP 1314972/1315656 (CPU→station); YDBs/YLNKLIST → SYMLISTS. Gerçek projede teyit edilmedi:
+  KANIT sadece HW export station adı veya symbol table çapraz kontrolüyle. `blockmap_tanisi.txt` maskeli. Bkz. docs/blockmap_findings.md.
+- `unknown.py` UnknownRecorder: `an.unknown` -> unknown.log, Excel `Analiz_Edilemeyenler`, HTML Ek D. Yeni okuma hatası = `_unk()`.
+- `compare.py` (`cli compare A B`, pencerede "Karşılaştır"), `parsers/diag.py` (`cli diag`), `kb.py` (`cli kb build|search`,
+  `settings.find_kb`, bulgu Kaynak sütununa "Doküman: …").
+- `readiness.finding_status`: BLOCKER / RİSK / BİLGİ; kontrol edilemeyen = VERİ YOK; `findings.json`.
+- Kurallar YAML değil `checks.py` (DECISIONS). Yeni: PROJ_MIN_VERSION, COMM_STD; symbol kontrolleri envanterde (`symbol_stats`).
+- Gerçek müşteri backup'ı geliştirmede OKUNMAZ; sadece sentetik fixture (`_dbfwriter.write_project_links` vb.).
+
 ## Paketle (`collect.py`, `--collect`)
 `needed(rel, size)` içeriği okunan dosyaları seçer; diğerleri `_pcs7_manifest.csv` (rel, size, mtime .3f, included).
 Zip'te manifest varsa `open_source` -> `source.PackageSource` (entries manifest'ten) -> analiz/envanter orijinalle aynı

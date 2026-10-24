@@ -139,11 +139,45 @@ def quote_inputs(an) -> list[list[str]]:
     return rows
 
 
+def finding_status(f) -> str:
+    """BLOCKER (upgrade'i engeller) / RİSK (Yüksek-Orta) / BİLGİ (Düşük)."""
+    if f.blocking:
+        return "BLOCKER"
+    return "BİLGİ" if f.severity.value == "Düşük" else "RİSK"
+
+
+def _kb(an, check_id: str) -> list[str]:
+    """Doküman KB referansları (KB kurulmamışsa boş; kurulu ama eşleşme yoksa 'kaynak bulunamadı')."""
+    refs = getattr(an, "kb_refs", None)
+    if not refs:
+        return []
+    from .kb import ref_text
+    got = refs.get(check_id) or []
+    return [f"Doküman: {ref_text(r)}" for r in got] or ["Doküman: kaynak bulunamadı"]
+
+
 def findings_rows(an) -> list[list[str]]:
-    """[konu, önem, güven, detay, kaynak]."""
-    return [[f.title, f.severity.value, conf_label(f.confidence), f.detail, "; ".join(f.sources) or "-"]
-            for f in an.findings]
+    """[konu, durum, önem, güven, detay, kaynak] + kontrol edilemeyenler (VERİ YOK)."""
+    rows = [[f.title, finding_status(f), f.severity.value, conf_label(f.confidence), f.detail,
+             "; ".join(f.sources + _kb(an, f.check_id)) or "-"] for f in an.findings]
+    from .checks import CHECKS
+    titles = {c.id: c.title for c in CHECKS}
+    rows += [[titles.get(i, i), VERI_YOK, "-", "-", f"Kontrol edilemedi: {why}", "-"] for i, why in an.not_checked]
+    return rows
 
 
-__all__ = ["backup_coverage", "quote_inputs", "findings_rows", "conf_label", "VAR", "KISMEN", "YOK", "VERI_YOK",
+def findings_json(an) -> list[dict]:
+    """findings.json: her bulgu durum + güven + assumption (ÇIKARIM -> True, raporda sarı)."""
+    out = []
+    for f in an.findings:
+        d = f.to_dict()
+        d["status"] = finding_status(f)
+        d["guven"] = conf_label(f.confidence)
+        d["assumption"] = d["guven"] != KANIT
+        out.append(d)
+    out += [{"check_id": i, "status": VERI_YOK, "detail": why} for i, why in an.not_checked]
+    return out
+
+
+__all__ = ["backup_coverage", "quote_inputs", "findings_rows", "findings_json", "finding_status", "conf_label", "VAR", "KISMEN", "YOK", "VERI_YOK",
            "KANIT", "CIKARIM", "VARSAYIM"]

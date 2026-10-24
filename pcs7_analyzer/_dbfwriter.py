@@ -79,3 +79,52 @@ def block(typ: str, nr: int, family: str = "", name: str = "", version: int | No
           author: str = "", lang: str = "00004", ssb: bytes | None = None) -> dict:
     return {"SUBBLKTYP": typ, "BLKNUMBER": f"{nr:05d}", "BLOCKFNAME": family, "BLOCKNAME": name,
             "VERSION": version, "USERNAME": author, "BLKLANG": lang, "SSBPART": ssb}
+
+
+def write_project_links(proj: Path, programs: list[dict]) -> None:
+    """
+    Test / demo: STEP 7 V5 proje ID zinciri dosyaları (bkz. blockmap.py).
+    programs: [{"id", "name", "folder_id", "cpu_id", "cpu_name", "station_id", "station_name", "station_type"(OBJTYP),
+                "sym_id"(ops.), "cpu_dir"(ops., varsayılan s7hk41ax)}]
+    """
+    proj = Path(proj)
+    (proj / "hrs").mkdir(parents=True, exist_ok=True)
+    lnk = b""
+    res = []
+    for p in programs:
+        off = len(lnk)
+        rec = b"\x00" * 16 + b"\x04\x20\x11\x00\x00" + b"\x00" * 7 + b"\x01\x60\x11\x00" + struct.pack("<H", p["folder_id"])
+        lnk += rec.ljust(0x200, b"\x00")
+        res.append({"ID": p["id"], "NAME": p["name"], "RSRVD4_L": off})
+    write_dbf(proj / "hrs" / "S7RESOFF.DBF", [("ID", "N", 10), ("NAME", "C", 24), ("RSRVD4_L", "N", 10)], res)
+    (proj / "hrs" / "linkhrs.lnk").write_bytes(lnk)
+    st = proj / "hOmSave7" / "s7hstatx"
+    st.mkdir(parents=True, exist_ok=True)
+    stations = {p["station_id"]: (p["station_name"], p.get("station_type", 1315650)) for p in programs}
+    write_dbf(st / "HOBJECT1.DBF", [("ID", "N", 10), ("NAME", "C", 24), ("OBJTYP", "N", 10), ("UNITID", "N", 10)],
+              [{"ID": k, "NAME": n, "OBJTYP": t, "UNITID": k} for k, (n, t) in stations.items()])
+    by_dir: dict = {}
+    for p in programs:
+        by_dir.setdefault(p.get("cpu_dir", "s7hk41ax"), []).append(p)
+    for d, ps in by_dir.items():
+        cd = proj / "hOmSave7" / d
+        cd.mkdir(parents=True, exist_ok=True)
+        write_dbf(cd / "HOBJECT1.DBF", [("ID", "N", 10), ("NAME", "C", 24), ("SUBSTATN", "N", 5), ("MODULN", "N", 5)],
+                  [{"ID": p["cpu_id"], "NAME": p["cpu_name"], "SUBSTATN": 0, "MODULN": 3} for p in ps])
+        rel_fields = [("SOBJID", "N", 10), ("SOBJTYP", "N", 10), ("RELID", "N", 10), ("TOBJID", "N", 10),
+                      ("TOBJTYP", "N", 10), ("TUNITID", "N", 10), ("TUNITTYP", "N", 10)]
+        rows = []
+        for p in ps:
+            rows.append({"SOBJID": p["cpu_id"], "SOBJTYP": 1, "RELID": 16, "TOBJID": p["id"], "TOBJTYP": 2,
+                         "TUNITID": 0, "TUNITTYP": 0})
+            rows.append({"SOBJID": p["cpu_id"], "SOBJTYP": 1, "RELID": 1, "TOBJID": 0, "TOBJTYP": 1314972,
+                         "TUNITID": p["station_id"], "TUNITTYP": 0})
+        write_dbf(cd / "HRELATI1.DBF", rel_fields, rows)
+    syms = [p for p in programs if p.get("sym_id")]
+    if syms:
+        yd = proj / "YDBs"
+        yd.mkdir(parents=True, exist_ok=True)
+        write_dbf(yd / "YLNKLIST.DBF", [("TOI", "N", 10), ("SOI", "N", 10)],
+                  [{"TOI": p["id"], "SOI": p["sym_id"]} for p in syms])
+        write_dbf(yd / "SYMLISTS.DBF", [("_ID", "N", 10), ("_UNAME", "C", 24), ("_DBPATH", "C", 24)],
+                  [{"_ID": p["sym_id"], "_UNAME": "Symbols", "_DBPATH": str(p["sym_id"])} for p in syms])

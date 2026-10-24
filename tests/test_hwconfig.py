@@ -72,7 +72,7 @@ def test_parse_cfg_pdm_and_non_f(tmp_path):
 
 def test_parse_cfg_bad_used_versions_does_not_crash(tmp_path):
     cfg = parse_cfg(_write(tmp_path, CFG.replace(USED_HEX, "ZZ ZZ")))
-    assert cfg["used_s7_versions"] == ""
+    assert cfg["used_s7_versions"] == "(hex çözülemedi) ZZ ZZ"      # çökmez, ham değer görünür kalır
 
 
 def test_parse_cfg_latin1_names(tmp_path):

@@ -38,7 +38,7 @@ def needed(rel: str, size: int) -> bool:
     in_wincc = "/wincproj/" in f"/{low}"
     if name.endswith(_ALWAYS_EXT):
         return True
-    if name in ("subblk.dbf", "subblk.dbt", "baustein.dbf", "symlist.dbf"):
+    if name in ("subblk.dbf", "subblk.dbt", "baustein.dbf", "symlist.dbf", "linkhrs.lnk"):
         return True
     if name.endswith(".dbf"):
         return size <= _MAX_DBF

@@ -48,8 +48,8 @@ def parse_cfg(cfg_path: Path) -> dict:
     if used:
         try:
             used_versions = bytes.fromhex(used.group(1).replace(" ", "")).decode("latin1").strip("\x00|")
-        except ValueError:
-            pass
+        except ValueError:          # hex değil: ham değer görünür kalsın (sessizce boş bırakma)
+            used_versions = f"(hex çözülemedi) {used.group(1)[:40]}"
     step7 = re.search(r"#STEP7_VERSION (.*)", txt)
     return {
         "station": station,

@@ -27,7 +27,8 @@ from .xlsx import Cell, Workbook
 
 PETROL = "009999"
 SHEETS = ["Ozet", "AS_Envanter", "HW_Moduller", "Custom_Blocklar", "Instance_Sayilari", "OS_WinCC",
-          "ENG_SRV1_Farklar", "Acik_Konular_Kaynak", "Backup_Yeterlilik", "Teklif_Girdileri", "Bulgular"]
+          "ENG_SRV1_Farklar", "Acik_Konular_Kaynak", "Backup_Yeterlilik", "Teklif_Girdileri", "Bulgular",
+          "Analiz_Edilemeyenler"]
 # DIAGNOSTICS arşivi varsa ayrıca "Diagnostics" sayfası eklenir.
 DIFF_CATEGORIES = ["Picture / script", "Connection", "Tag", "Tag adres", "Alarm", "Alarm metni", "Alarm class"]
 
@@ -267,11 +268,13 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     rows = [["Girdi", "Değer", "Kaynak / güven"]]
     rows += [[Cell(r[0]), Cell(r[1], "red" if r[1] == "VERİ YOK" else ""), Cell(r[2])] for r in quote_inputs(an)]
     wb.add_sheet("Teklif_Girdileri", rows, header_rows={0}, freeze=1, widths=[36, 70, 40])
-    rows = [["Konu", "Önem", "Güven", "Detay", "Kaynak"]]
+    rows = [["Konu", "Durum", "Önem", "Güven", "Detay", "Kaynak"]]
     for r in findings_rows(an):
-        st = "yellow" if r[2] != "KANIT" else ""
+        st = "red" if r[1] == "BLOCKER" else "yellow" if r[3] != "KANIT" else ""
         rows.append([Cell(v, st) for v in r])
-    wb.add_sheet("Bulgular", rows, header_rows={0}, filter_row=0, freeze=1, widths=[28, 10, 12, 100, 50])
+    wb.add_sheet("Bulgular", rows, header_rows={0}, filter_row=0, freeze=1, widths=[28, 10, 10, 12, 100, 50])
+    rows = [["Modül", "Dosya (backup içi tam yol)", "Neden", "Alan / ofset", "Ham değer"]] + an.unknown.rows()
+    wb.add_sheet("Analiz_Edilemeyenler", rows, header_rows={0}, filter_row=0, freeze=1, widths=[14, 70, 90, 14, 20])
     if an.diag is not None:
         dg = an.diag
         rows = [["Tür", "Zaman / önem", "Kategori / güven", "Metin", "Kaynak"]]
