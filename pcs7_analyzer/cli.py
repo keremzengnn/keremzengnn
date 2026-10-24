@@ -79,7 +79,11 @@ def default_out_dir(source: Path, root: Path | None = None) -> Path:
     if root is None:
         docs = Path.home() / "Documents"
         root = (docs if docs.is_dir() else Path.cwd()) / "PCS7_Raporlar"
-    return Path(root) / f"{name}_{datetime.now():%Y%m%d_%H%M}"
+    base = Path(root) / f"{name}_{datetime.now():%Y%m%d_%H%M}"
+    p, i = base, 2
+    while p.exists():                      # aynı dakikada ikinci çalıştırma önceki raporun üstüne yazmasın
+        p, i = base.with_name(f"{base.name}_{i}"), i + 1
+    return p
 
 
 def _tee_log(log, path: Path):

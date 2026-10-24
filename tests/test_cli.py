@@ -68,3 +68,35 @@ def test_run_writes_findings_and_unknown(tmp_path):
     assert all({"status", "guven", "assumption"} <= set(x) for x in fj if "severity" in x)
     assert (out / "unknown.log").read_text(encoding="utf-8").startswith("Analiz edilemeyenler:")
     assert (out / "blockmap_tanisi.txt").exists() and (out / "envanter.xlsx").exists()
+
+
+def test_cli_prints_index_and_summary(tmp_path, capsys):
+    from pcs7_analyzer.demo import build_demo_project
+    out = tmp_path / "o"
+    assert main([str(build_demo_project(tmp_path / "d")), "-o", str(out), "--no-inventory"]) == 0
+    text = capsys.readouterr().out
+    assert f"Özet sayfası: {out / 'index.html'}" in text
+    assert "PCS 7 versiyonu:" in text and "Bulgular: BLOCKER" in text
+
+
+def test_default_out_dir_unique(tmp_path):
+    from pcs7_analyzer.cli import default_out_dir
+    a = default_out_dir(tmp_path / "B.zip", tmp_path / "r")
+    a.mkdir(parents=True)
+    assert default_out_dir(tmp_path / "B.zip", tmp_path / "r") != a
+
+
+def test_team_settings_read_first(tmp_path, monkeypatch):
+    import json
+    from pcs7_analyzer import settings
+    team = tmp_path / "team" / "pcs7_analyzer_ayarlar.json"
+    team.parent.mkdir()
+    team.write_text(json.dumps({"department": "DI PA", "author": "Ekip", "template": "sablon.dotx"}), encoding="utf-8")
+    monkeypatch.setenv("PCS7_ANALYZER_TEAM_SETTINGS", str(team))
+    assert settings.load()["department"] == "DI PA"
+    assert settings.load()["template"] == str((team.parent / "sablon.dotx").resolve())
+    settings.save({"author": "Ali", "department": ""})     # boş kullanıcı değeri ekip değerini ezmez
+    st = settings.load()
+    assert st["author"] == "Ali" and st["department"] == "DI PA"
+    assert json.loads(team.read_text(encoding="utf-8"))["author"] == "Ekip"   # ekip dosyasına yazılmaz
+    assert "department" not in settings.load_user() or settings.load_user()["department"] == ""
