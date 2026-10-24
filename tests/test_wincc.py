@@ -94,3 +94,18 @@ def test_os_inside_library_project_is_not_a_pc_copy(tmp_path):
     roles = {o.info.name: (o.role, o.in_es) for o in an.os_projects}
     assert roles["Standard"] == ("library", True)
     assert not any(d.kind == "copy" for d in an.os_diffs)
+
+
+def test_zero_build_not_used_for_family():
+    """Sadece 'V08.00.00.00' (format dizisi olabilir) -> PCS 7 V10.x denmez; APL author'u belirler."""
+    from types import SimpleNamespace as NS
+    from pcs7_analyzer.analyze import Analysis, _versions
+    an = Analysis.__new__(Analysis)
+    an.versions, an.open_items, an.stations = [], [], []
+    info = NS(wincc_build="V08.00.00.00", build_candidates=["V08.00.00.00"], path="OS1/wincproj/OS1", mcp="OS1.mcp")
+    an.os_projects = [NS(info=info, role="server")]
+    an.block_folders = [NS(libraries={"APL": {"AdvLib91": 50}}, as_label="AS1")]
+    _versions(an)
+    assert an.pcs7_family == "V9.1"
+    w = [v for v in an.versions if v.item == "WinCC"]
+    assert w and "tespit edilemedi" in w[0].value and "V10" not in w[0].value

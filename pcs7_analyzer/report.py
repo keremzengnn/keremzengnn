@@ -177,13 +177,13 @@ def group_findings(an: Analysis) -> list[tuple[str, list[Finding]]]:
     return sorted(groups.items(), key=lambda kv: (-_SEV_ORDER.index(_worst(kv[1])), order[kv[0]]))
 
 
-def _actions_text(fs: list[Finding]) -> str:
+def _actions_text(fs: list[Finding], limit: int | None = None) -> str:
     """Gruplanmış bulguların aksiyonları (tekrarsız) + sorumlu + Finding ID'leri (Excel 'Bulgular' ile bağ)."""
     from .checks import action_for
     seen, out = set(), []
     for f in fs:
         act, who = action_for(f.check_id)
-        if act and act not in seen:
+        if act and act not in seen and (limit is None or len(out) < limit):
             seen.add(act)
             out.append(f"{act} ({who})")
     ids = [f.fid for f in fs if f.fid]
@@ -192,6 +192,7 @@ def _actions_text(fs: list[Finding]) -> str:
     return "\n".join(out)
 
 
+WORD_MAX_FINDINGS = 3  # müşteri raporu: konu başına gösterilen bulgu / aksiyon; kalanı Excel 'Bulgular' (ID'ler satırda)
 WORD_CELL_WORDS = 30   # müşteri raporu (Word) bulgu cümlesi limiti; tam metin HTML + Excel 'Bulgular'
 
 
@@ -666,10 +667,12 @@ def build_document(an: Analysis, full: bool = True) -> list:
         rows, row_ids = [], []
         for label, fs in by_group:
             row_ids.append([f.fid for f in fs])
-            texts = [_finding_text(f, label, short=not full) for f in fs]
+            texts = [_finding_text(f, label, short=not full) for f in (fs if full else fs[:WORD_MAX_FINDINGS])]
+            if not full and len(fs) > WORD_MAX_FINDINGS:
+                texts.append(f"+{len(fs) - WORD_MAX_FINDINGS} bulgu daha (Excel 'Bulgular')")
             if label == "Custom block'lar":
                 texts.insert(0, "Recompile ve fonksiyon testi gerekli. **Bu block'ların kullanıldığı CFC'ler** kontrol edilmeli.")
-            rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs)])
+            rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs, None if full else WORD_MAX_FINDINGS)])
         doc.append(Table(["Konu", "Etki", "Açıklama", "Aksiyon (sorumlu)"], rows, cap("Zorluklar ve etkileri"),
                          badge_cols=[1], widths=[16, 10, 50, 24], row_ids=row_ids))
     else:

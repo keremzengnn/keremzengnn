@@ -956,6 +956,13 @@ def _versions(an: Analysis) -> None:
         key = f"{int(mm.group(1)):02d}.{mm.group(2)}" if mm else ""
         wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
         others = [x for x in op.info.build_candidates if x != b]
+        if b.endswith(".00.00"):
+            # 'Vxx.00.00.00' .mcp format sürümü de olabilir (AKSA: V08.00.00.00 + gerçek build V07.03.20.04;
+            # Etibakır: sadece V08.00.00.00 ama block'lar APL V9.1) -> PCS 7 ailesi için kullanılmaz.
+            an.versions.append(VersionInfo("WinCC", f"build tespit edilemedi: .mcp'de sadece '{b}' (format dizisi "
+                                           f"olabilir; {wn} kesin değil)", f"{op.info.path}/{op.info.mcp}",
+                                           Confidence.LOW.value))
+            continue
         an.versions.append(VersionInfo("WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" if fam else "")
                                        + (f"; .mcp'deki diğer diziler: {', '.join(others)}" if others else ""),
                                        f"{op.info.path}/{op.info.mcp}", Confidence.HIGH.value if ok else Confidence.LOW.value))

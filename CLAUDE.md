@@ -207,6 +207,9 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
   sıfır build'li diziyi ancak tek adaysa kullanır (yoksa PCS 7 V10.x diye yanlış tespit). `.s7l` içindeki OS = role
   "library" (OS PC kopyası değil). Karışık versiyon sadece gerçek sürümlerle (ELEMENTA/ELEM_400 değil). OS-only projede
   S7RESOFF yok uyarısı verilmez. yapi_tanisi'nde block author dağılımı (eski PCS 7 Library author'larını eşlemek için).
+- Üçüncü proje turu (2026-10-24): 15 .mcp'nin hepsinde sadece 'V08.00.00.00' (block'lar APL V9.1) -> 'xx.00.00' build
+  PCS 7 ailesi için hiç kullanılmaz ("build tespit edilemedi"), analiz + envanter. Word risk tablosu konu başına
+  `report.WORD_MAX_FINDINGS` bulgu, kalanı "+N bulgu daha (Excel 'Bulgular')".
 - Kapsam: `docs/COVERAGE.md` (her madde YAPILDI / KISMİ / YAPILAMADI + neden), kararlar `docs/DECISIONS.md`.
 - `blockmap.py`: ID zinciri hrs/S7RESOFF → linkhrs.lnk (01 60 11 00 + int16) → ombstx/offline/<ID:08X>; HRELATI1 RELID 16
   (CPU→program), TOBJTYP 1314972/1315656 (CPU→station); YDBs/YLNKLIST → SYMLISTS. Gerçek projede teyit edilmedi:

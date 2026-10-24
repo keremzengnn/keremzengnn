@@ -509,9 +509,13 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
         mm = re.match(r"V0?(\d+)\.(\d\d)", b)
         key = f"{int(mm.group(1)):02d}.{mm.group(2)}" if mm else ""
         wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
+        names_ = ", ".join(sorted({o.name for o in os_list}))
+        if b.endswith(".00.00"):     # format dizisi olabilir (bkz. analyze._versions): aile için kullanılmaz
+            rows.append(["Yazılım", "WinCC", f"build tespit edilemedi: .mcp'de sadece '{b}' (format dizisi olabilir, "
+                         f"{wn} kesin değil) — {len(os_list)} OS projesi: {names_}", f"{os_list[0].path}/{os_list[0].mcp}"])
+            continue
         if fam:
             fams.append((fam, ok))
-        names_ = ", ".join(sorted({o.name for o in os_list}))
         rows.append(["Yazılım", "WinCC", f"{wn} (build {b})" + (f" -> PCS 7 {fam}" + ("" if ok else ", aday") if fam else "")
                      + f" — {len(os_list)} OS projesi: {names_}", f"{os_list[0].path}/{os_list[0].mcp}"])
     if fams:
