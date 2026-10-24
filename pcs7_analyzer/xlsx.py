@@ -4,7 +4,7 @@ Minimal .xlsx yazıcı (sadece standart kütüphane).
 - `Workbook.add(ad, başlıklar, satırlar)`: tek tablolu sayfa (başlık, filtre, dondurulmuş ilk satır).
 - `Workbook.add_sheet(ad, satırlar, header_rows=…, filter_row=…)`: aynı sayfada birden fazla tablo bloğu.
 - Hücre: düz değer veya `Cell(v, style, f)`; `f` = formül (Excel açılışta hesaplar, `v` önbellek değeri).
-- Stiller: header, num (#,##0), red, yellow, green, bold, section, wrap. Font Arial; header zemini `header_color`.
+- Stiller: header, num (#,##0), red, yellow, green, bold, section, wrap, orange (RİSK), gray (VERİ YOK). Font Arial; header zemini `header_color`.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _SHEET_BAD = re.compile(r"[\[\]:*?/\\]")
 
 # stil adı -> cellXfs indeksi (styles.xml ile birlikte güncel tutulmalı)
 STYLES = {"": 0, "header": 1, "num": 2, "red": 3, "yellow": 4, "green": 5, "bold": 6, "section": 7, "wrap": 8,
-          "red_num": 9, "yellow_num": 10, "bold_num": 11}
+          "red_num": 9, "yellow_num": 10, "bold_num": 11, "orange": 12, "gray": 13}
 
 
 @dataclass
@@ -120,14 +120,16 @@ class Workbook:
     def _styles_xml(self) -> str:
         hc = self.header_color
         fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>']
-        for color in (hc, "FFC7CE", "FFEB9C", "C6EFCE", "F3F3F0"):
+        for color in (hc, "FFC7CE", "FFEB9C", "C6EFCE", "F3F3F0", "FCE4D6"):
             fills.append(f'<fill><patternFill patternType="solid"><fgColor rgb="FF{color}"/><bgColor indexed="64"/></patternFill></fill>')
-        # fillId: 2 header, 3 red, 4 yellow, 5 green, 6 sand
+        # fillId: 2 header, 3 red, 4 yellow, 5 green, 6 sand, 7 light orange
+        # fontId: 0 normal, 1 header (beyaz bold), 2 bold, 3 koyu turuncu bold, 4 gri
         xfs = [(0, 0, 0, ""), (1, 2, 0, ' applyFont="1" applyFill="1"'), (0, 0, 3, ' applyNumberFormat="1"'),
                (0, 3, 0, ' applyFill="1"'), (0, 4, 0, ' applyFill="1"'), (0, 5, 0, ' applyFill="1"'),
                (2, 0, 0, ' applyFont="1"'), (2, 6, 0, ' applyFont="1" applyFill="1"'), (0, 0, 0, ""),
                (0, 3, 3, ' applyFill="1" applyNumberFormat="1"'), (0, 4, 3, ' applyFill="1" applyNumberFormat="1"'),
-               (2, 0, 3, ' applyFont="1" applyNumberFormat="1"')]
+               (2, 0, 3, ' applyFont="1" applyNumberFormat="1"'),
+               (3, 7, 0, ' applyFont="1" applyFill="1"'), (4, 0, 0, ' applyFont="1"')]
         cellxfs = "".join(
             f'<xf numFmtId="{num}" fontId="{font}" fillId="{fill}" borderId="0" xfId="0"{extra}'
             + ('><alignment wrapText="1" vertical="top"/></xf>' if i == STYLES["wrap"] else
@@ -135,9 +137,11 @@ class Workbook:
             for i, (font, fill, num, extra) in enumerate(xfs))
         return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-                '<fonts count="3"><font><sz val="10"/><name val="Arial"/></font>'
+                '<fonts count="5"><font><sz val="10"/><name val="Arial"/></font>'
                 '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>'
-                '<font><b/><sz val="10"/><name val="Arial"/></font></fonts>'
+                '<font><b/><sz val="10"/><name val="Arial"/></font>'
+                '<font><b/><sz val="10"/><color rgb="FFC65911"/><name val="Arial"/></font>'
+                '<font><sz val="10"/><color rgb="FF808080"/><name val="Arial"/></font></fonts>'
                 f'<fills count="{len(fills)}">{"".join(fills)}</fills>'
                 '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
                 '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'

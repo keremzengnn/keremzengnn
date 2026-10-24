@@ -125,3 +125,13 @@ def test_embedded_template_is_found_and_valid(tmp_path):
     b = DocxBuilder(p)
     assert b.sid("title topline") and b.sid("table head") and b.sid("heading 1") and b.sid("list paragraph")
     assert "docProps/thumbnail.emf" not in b.files
+
+
+def test_assumption_runs_highlighted():
+    from pcs7_analyzer.word import _runs, is_assumption
+    assert is_assumption("Model (ÇIKARIM)") and is_assumption("teyit edilmeli")
+    assert not is_assumption("CPU 410-5H")
+    xml = _runs("**Not:** eşleşme heuristic, teyit edilmeli\nCPU 410-5H")
+    assert xml.count('<w:highlight w:val="yellow"/>') == 1
+    assert "<w:b/>" in xml and "<w:br/>" in xml
+    assert "highlight" not in _runs("teyit edilmeli", highlight=False)

@@ -48,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "paket bu programla orijinal backup gibi analiz edilir")
     p.add_argument("--no-inventory", action="store_true",
                    help="Analizle birlikte envanter (envanter.xlsx) üretme (büyük backup'ta süreyi kısaltır)")
+    p.add_argument("--profile", choices=["teklif", "musteri", "muhendis"], default="teklif",
+                   help="report_ir.json okuyucu profili (teklif / musteri = Word raporu, muhendis = tam rapor)")
+    p.add_argument("--compare-to", type=Path, metavar="ÖNCEKİ_KLASÖR",
+                   help="Önceki rapor klasörü: yeni / kapanan / değişen bulgular -> revizyon.md")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
     p.add_argument("--open", action="store_true", help="Bitince HTML raporu tarayıcıda aç")
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
@@ -98,7 +102,8 @@ def _tee_log(log, path: Path):
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None, inventory: bool = False,
-        manual=None, exports: list[Path] | None = None, with_inventory: bool = True, collect: bool = False) -> Path:
+        manual=None, exports: list[Path] | None = None, with_inventory: bool = True, collect: bool = False,
+        profile: str = "teklif", compare_to: Path | None = None) -> Path:
     """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür.
     with_inventory: analizle birlikte envanter (envanter.xlsx, Mevcut durum sayfası) de üretilir; kaynak bir kez açılır."""
     from . import settings
@@ -145,6 +150,8 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     from .analyze import ManualInputs
     with open_source(source, log) as src:
         an = analyze_source(src, target, released, log, manual if manual is not None else ManualInputs(), exports)
+        from .report_ir import input_hash
+        src_hash = input_hash(src.entries)
         if with_inventory:
             log("Envanter (mevcut durum)...")
             try:
@@ -212,6 +219,21 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
                                                encoding="utf-8")
         (out_dir / "unknown.log").write_text(an.unknown.to_log(), encoding="utf-8")
     out("findings.json / unknown.log", extras)
+
+    def ir_and_rev():
+        from .report_ir import PROFILES, build_ir, dumps
+        ir = build_ir(an, build_document(an, full=PROFILES.get(profile, False)), profile, src_hash,
+                      {"source": Path(source).name, "author": meta.author, "department": meta.department})
+        if compare_to:
+            out("revizyon.md", lambda: _revision(ir, compare_to, out_dir, log))
+        (out_dir / "report_ir.json").write_text(dumps(ir), encoding="utf-8")
+    out("report_ir.json", ir_and_rev)
+
+    def qa():
+        from .qa import write_report
+        p, n_err = write_report(out_dir)
+        log(f"QA: {'GEÇMEDİ, ' + str(n_err) + ' hata' if n_err else 'geçti'} ({p.name})")
+    out("qa_report.md", qa)
     if len(an.unknown):
         log(f"Analiz edilemeyen: {len(an.unknown)} (unknown.log)")
     if an.warnings:
@@ -227,7 +249,18 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     return html_p
 
 
-SUBCOMMANDS = ("compare", "kb", "diag")
+def _revision(ir: dict, compare_to: Path, out_dir: Path, log) -> None:
+    import json
+    from .revision import diff, load_findings, previous_revision, render
+    d = diff(load_findings(compare_to), json.loads((out_dir / "findings.json").read_text(encoding="utf-8")))
+    rev = previous_revision(compare_to) + 1
+    ir["revision"] = rev
+    ir["revision_diff"] = {k: len(v) for k, v in d.items()}
+    (out_dir / "revizyon.md").write_text(render(d, compare_to, rev), encoding="utf-8")
+    log(f"Revizyon r{rev}: {len(d['new'])} yeni, {len(d['closed'])} kapanan, {len(d['changed'])} değişen (revizyon.md)")
+
+
+SUBCOMMANDS = ("compare", "kb", "diag", "qa", "learn", "extract-style")
 
 
 def _sub_main(argv: list[str]) -> int:
@@ -236,6 +269,22 @@ def _sub_main(argv: list[str]) -> int:
     if cmd == "kb":
         from .kb import main as kb_main
         return kb_main(rest)
+    if cmd == "learn":
+        from .learn import main as learn_main
+        return learn_main(rest)
+    if cmd == "extract-style":
+        from .docx_style import main as style_main
+        return style_main(rest)
+    if cmd == "qa":
+        qp = argparse.ArgumentParser(prog="pcs7_analyzer qa", description="Rapor klasöründe QA (qa_report.md)")
+        qp.add_argument("folder", type=Path)
+        qa_args = qp.parse_args(rest)
+        if not qa_args.folder.is_dir():
+            qp.error(f"klasör bulunamadı: {qa_args.folder}")
+        from .qa import write_report
+        p, n_err = write_report(qa_args.folder)
+        print(p)
+        return 1 if n_err else 0
     ap = argparse.ArgumentParser(prog=f"pcs7_analyzer {cmd}")
     if cmd == "compare":
         ap.add_argument("a", type=Path, help="Backup A (klasör / zip)")
@@ -335,7 +384,8 @@ def main(argv: list[str] | None = None) -> int:
         manual = ManualInputs.load(args.manual) if args.manual else None
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
                   args.author, args.department, args.customer, args.inventory, manual, args.exports,
-                  with_inventory=not args.no_inventory, collect=args.collect)
+                  with_inventory=not args.no_inventory, collect=args.collect, profile=args.profile,
+                  compare_to=args.compare_to)
     except ValueError as e:
         parser.error(str(e))
     if args.open:

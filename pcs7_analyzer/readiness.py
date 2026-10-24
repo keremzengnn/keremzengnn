@@ -156,13 +156,20 @@ def _kb(an, check_id: str) -> list[str]:
     return [f"Doküman: {ref_text(r)}" for r in got] or ["Doküman: kaynak bulunamadı"]
 
 
+FINDINGS_COLUMNS = ["ID", "Konu", "Durum", "Önem", "Güven", "Detay", "Aksiyon (sorumlu)", "Kaynak"]
+
+
 def findings_rows(an) -> list[list[str]]:
-    """[konu, durum, önem, güven, detay, kaynak] + kontrol edilemeyenler (VERİ YOK)."""
-    rows = [[f.title, finding_status(f), f.severity.value, conf_label(f.confidence), f.detail,
+    """FINDINGS_COLUMNS sırasıyla satırlar + kontrol edilemeyenler (VERİ YOK)."""
+    from .checks import action_for
+    rows = [[f.fid, f.title, finding_status(f), f.severity.value, conf_label(f.confidence), f.detail,
+             " ".join(x for x in (action_for(f.check_id)[0], f"({action_for(f.check_id)[1]})"
+                                  if action_for(f.check_id)[1] else "") if x) or "-",
              "; ".join(f.sources + _kb(an, f.check_id)) or "-"] for f in an.findings]
     from .checks import CHECKS
     titles = {c.id: c.title for c in CHECKS}
-    rows += [[titles.get(i, i), VERI_YOK, "-", "-", f"Kontrol edilemedi: {why}", "-"] for i, why in an.not_checked]
+    rows += [["-", titles.get(i, i), VERI_YOK, "-", "-", f"Kontrol edilemedi: {why}", "Eksik veriyi sağla", "-"]
+             for i, why in an.not_checked]
     return rows
 
 
@@ -174,6 +181,8 @@ def findings_json(an) -> list[dict]:
         d["status"] = finding_status(f)
         d["guven"] = conf_label(f.confidence)
         d["assumption"] = d["guven"] != KANIT
+        from .checks import action_for
+        d["action"], d["owner"] = action_for(f.check_id)
         out.append(d)
     out += [{"check_id": i, "status": VERI_YOK, "detail": why} for i, why in an.not_checked]
     return out

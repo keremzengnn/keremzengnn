@@ -64,6 +64,7 @@ class Table:
     caption: str = ""
     badge_cols: list[int] = field(default_factory=list)   # durum/etki sütunları (HTML rozet, Word kalın)
     widths: list[int] = field(default_factory=list)       # yüzde; boşsa eşit
+    row_ids: list[list[str]] = field(default_factory=list)  # satır başına Finding ID'leri (report_ir / QA)
 
 
 @dataclass
@@ -175,11 +176,39 @@ def group_findings(an: Analysis) -> list[tuple[str, list[Finding]]]:
     return sorted(groups.items(), key=lambda kv: (-_SEV_ORDER.index(_worst(kv[1])), order[kv[0]]))
 
 
-def _finding_text(f: Finding, group: str) -> str:
+def _actions_text(fs: list[Finding]) -> str:
+    """Gruplanmış bulguların aksiyonları (tekrarsız) + sorumlu + Finding ID'leri (Excel 'Bulgular' ile bağ)."""
+    from .checks import action_for
+    seen, out = set(), []
+    for f in fs:
+        act, who = action_for(f.check_id)
+        if act and act not in seen:
+            seen.add(act)
+            out.append(f"{act} ({who})")
+    ids = [f.fid for f in fs if f.fid]
+    if ids:
+        out.append("[" + ", ".join(ids[:6]) + (f" +{len(ids) - 6}" if len(ids) > 6 else "") + "]")
+    return "\n".join(out)
+
+
+WORD_CELL_WORDS = 30   # müşteri raporu (Word) bulgu cümlesi limiti; tam metin HTML + Excel 'Bulgular'
+
+
+def _first_sentence(d: str, limit: int = WORD_CELL_WORDS) -> str:
+    """İlk cümle (ondalık / versiyon noktalarında bölmez), en fazla `limit` kelime."""
+    m = re.search(r"(?<=[^\d\s][.!?])\s+(?=[A-ZÇĞİÖŞÜ0-9])", d)
+    s = d[:m.start()] if m else d
+    words = s.split()
+    return " ".join(words[:limit]) + " …" if len(words) > limit else s
+
+
+def _finding_text(f: Finding, group: str, short: bool = False) -> str:
     d = f.detail
     if f.scope and group.startswith(f.scope + " ") and d.startswith(f.scope + ": "):
         d = d[len(f.scope) + 2:]
         d = d[:1].upper() + d[1:]
+    if short:
+        d = _first_sentence(d)
     if f.check_id in _CONS_PREFIX:
         d = f"**{_CONS_PREFIX[f.check_id]}:** {d}"
     if f.confidence is Confidence.LOW and "teyit" not in d.lower():
@@ -633,14 +662,15 @@ def build_document(an: Analysis, full: bool = True) -> list:
     doc.append(Topline("RİSKLER"))
     doc.append(Heading(1, "Zorluklar"))
     if by_group:
-        rows = []
+        rows, row_ids = [], []
         for label, fs in by_group:
-            texts = [_finding_text(f, label) for f in fs]
+            row_ids.append([f.fid for f in fs])
+            texts = [_finding_text(f, label, short=not full) for f in fs]
             if label == "Custom block'lar":
                 texts.insert(0, "Recompile ve fonksiyon testi gerekli. **Bu block'ların kullanıldığı CFC'ler** kontrol edilmeli.")
-            rows.append([label, _sev_range(fs), "\n".join(texts)])
-        doc.append(Table(["Konu", "Etki", "Açıklama"], rows, cap("Zorluklar ve etkileri"), badge_cols=[1],
-                         widths=[22, 12, 66]))
+            rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs)])
+        doc.append(Table(["Konu", "Etki", "Açıklama", "Aksiyon (sorumlu)"], rows, cap("Zorluklar ve etkileri"),
+                         badge_cols=[1], widths=[16, 10, 50, 24], row_ids=row_ids))
     else:
         doc.append(Para("Bulgu yok."))
 
@@ -802,8 +832,8 @@ def _appendix(an: Analysis, doc: list) -> None:
     from .readiness import findings_rows
     doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)"))
     doc.append(Para("KANIT = dosyada birebir görüldü; ÇIKARIM = heuristic / isimden yorum, teyit edilmeli (sarı)."))
-    doc.append(Table(["Konu", "Durum", "Önem", "Güven", "Detay", "Kaynak"], findings_rows(an), badge_cols=[1, 2, 3],
-                     widths=[13, 8, 7, 8, 46, 18]))
+    from .readiness import FINDINGS_COLUMNS
+    doc.append(Table(FINDINGS_COLUMNS, findings_rows(an), badge_cols=[2, 3, 4], widths=[5, 11, 7, 6, 7, 34, 16, 14]))
     doc.append(Heading(1, f"Ek D: Analiz edilemeyenler ({len(an.unknown)})"))
     if len(an.unknown):
         doc.append(Table(["Modül", "Dosya", "Neden", "Alan", "Ham değer"], an.unknown.rows(), widths=[10, 34, 40, 8, 8]))

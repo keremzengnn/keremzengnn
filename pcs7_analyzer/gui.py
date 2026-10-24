@@ -264,7 +264,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                 return
             p = run(Path(src), Path(out) if out else None, discover_only=disc and mode == "analysis", log=log,
                     author=author, department=dept, customer=cust or None, inventory=mode == "inventory",
-                    manual=manual, exports=exports, collect=mode == "collect")
+                    manual=manual, exports=exports, collect=mode == "collect",
+                    compare_to=Path(prev_var.get().strip()) if prev_var.get().strip() else None)
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))

@@ -244,3 +244,16 @@ OS proje adıyla. Manuel girişler `--manual <json>` (şablon `data/manuel_giris
 Acik_Konular_Kaynak); Word'e Tablo 4 WinCC yapısı; HTML'e upgrade hazırlık listesi + manuel girişler.
 **Müşteriye özel regression değerleri** (tag/alarm sayıları, chart sayıları…) repoya girmez: `tests/regression/expected_local.json`.
 **Açık:** .mdf doğrudan okuma (şema bilinmiyor), compile OS wizard ayarlarının (area→OS) proje dosyasındaki yeri, PO tahmini.
+
+## Rapor kalitesi (PROMPT_EK_RAPOR_KALITESI)
+- IR = `report.build_document` doküman modeli; `report_ir.py` -> `report_ir.json` (schema_version, profile, input_hash
+  (rel+boyut), sections, finding_ids, stats, omitted). `Table.row_ids` = satırın Finding ID'leri. Profil: `--profile`
+  teklif / musteri (Word, full=False) / muhendis (full=True), `report_ir.PROFILES`.
+- Her bulgu `fid` (F-001…, checks sıralaması deterministik), aksiyon + sorumlu `checks.ACTIONS` / `action_for`;
+  aksiyonsuz BLOCKER/RİSK = QA HATA. Word risk tablosu: ilk cümle, ≤ `report.WORD_CELL_WORDS` kelime; tam metin HTML + Excel.
+- Word: varsayım / ÇIKARIM / "teyit edilmeli" run'ları sarı highlight (`word.is_assumption`), hücre gölgesi değil.
+- `qa.py` -> `qa_report.md` (`QA_CHECKS`, yeni kontrol = fonksiyon + listeye bir satır); `cli qa <klasör>` HATA'da çıkış 1.
+  Yasak çeviriler `data/glossary.json` (JSON: bağımlılık yok).
+- `--compare-to <önceki klasör>` -> `revision.py` -> `revizyon.md` (anahtar check_id + scope + title).
+- `cli extract-style <ref.docx>` (`docx_style.py`, sadece yapı, maskeli), `cli learn --generated --edited`
+  (`learn.py`, öneri JSON; config'e kullanıcı onayı olmadan yazılmaz). Anlatı (LLM) katmanı yok.

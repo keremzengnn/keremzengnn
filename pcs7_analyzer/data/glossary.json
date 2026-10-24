@@ -1,0 +1,20 @@
+{
+ "_note": "Terim sözlüğü (PROMPT_EK_RAPOR_KALITESI R4.2). keep_english çevrilmez; forbidden_translations metinde geçerse QA HATA verir (anahtar = yasak Türkçe ifade, değer = kullanılacak terim). Yeni terim = bir satır.",
+ "keep_english": ["firewall", "download", "compile", "chart", "runtime group", "firmware", "faceplate", "block", "library",
+                  "server", "client", "standby", "switchover", "redundancy", "archive", "segment", "tag", "alarm class",
+                  "picture", "script", "license key", "dry-run", "instance", "symbol table", "typical"],
+ "forbidden_translations": {
+  "güvenlik duvarı": "firewall",
+  "derleme": "compile",
+  "derlenmeli": "compile edilmeli",
+  "kütüphane": "library",
+  "ürün yazılımı": "firmware",
+  "yedeklilik": "redundancy",
+  "ön yüz": "faceplate",
+  "lisans anahtarı": "license key",
+  "sembol tablosu": "symbol table",
+  "çalışma zamanı grubu": "runtime group"
+ },
+ "abbreviations": {"PO": "Process Object", "APL": "Advanced Process Library", "ES": "Engineering Station",
+                   "OS": "Operator Station", "AS": "Automation System"}
+}

@@ -40,9 +40,37 @@ Durum: **YAPILDI** / **KISMİ** / **YAPILAMADI** (neden). Test sütunu: ilgili t
 | 34 | Finding: durum / güven / kaynak / assumption | readiness.findings_json | test_cli | YAPILDI (doc_refs: KB kuruluysa) |
 | 35 | UnknownRecorder + Analiz_Edilemeyenler | unknown.py | test_cli, test_source | YAPILDI |
 | 36 | Excel sekmeleri (Özet, Backup_Yeterlilik, AS_HW, Bloklar, …, Bulgular, Eksik_Veri, Analiz_Edilemeyenler) | excel_report.py + inventory | test_excel_report | KISMİ (isimler farklı: AS_Envanter, HW_Moduller, Custom_Blocklar, Instance_Sayilari, OS_WinCC, Acik_Konular_Kaynak = Eksik_Veri; Library_Map/Lisans/Comm ayrı sekme yok, envanter.xlsx'te) |
-| 37 | Word: Siemens şablonu, tek sayfa özet başta, "Upgrade yaklaşımı" yok | word.py | test_word | YAPILDI (VARSAYIM sarı highlight Word'de YOK; HTML/Excel'de var) |
+| 37 | Word: Siemens şablonu, tek sayfa özet başta, "Upgrade yaklaşımı" yok | word.py | test_word | YAPILDI (VARSAYIM / ÇIKARIM run seviyesinde sarı highlight, bkz. R5) |
 | 38 | --mask (IP / kullanıcı adı maskeleme) | inventory.mask_path (tanı dosyaları) | test_inventory | KISMİ (raporlarda --mask seçeneği yok) |
 | 39 | Golden test `expected.yaml` | tests/test_regression.py (expected_local.json) | test_regression | KISMİ (JSON; kullanıcı doldurur) |
 | 40 | Performans testi (bellek tavanı) | - | - | YAPILAMADI |
+
+
+## Rapor kalitesi (EK_RAPOR_KALITESI)
+
+Ek prompt `PROMPT_EK_RAPOR_KALITESI.md` (master prompt bölüm 11'in yerine). Kararlar: `docs/DECISIONS.md` "Rapor kalitesi".
+
+| # | Madde | Modül | Test | Durum |
+|---|---|---|---|---|
+| R0 | İlkeler: önce karar, izlenebilirlik, kısa, deterministik, KANIT/ÇIKARIM/VARSAYIM, Türkçe + İngilizce terim | report.py, readiness.py | test_readiness, test_word | KISMİ (ilk sayfa ÖZET + Finding ID; R3/R4 eksikleri aşağıda) |
+| R1 | Report IR (`report_ir.json`: schema_version, profile, input_hash, sections, finding_ids, stats, omitted) | report_ir.py, cli.py | - | YAPILDI (ayrı select/compose katmanı yok: `build_document` doküman modeli = IR, bkz. DECISIONS) |
+| R2 | Okuyucu profilleri (`--profile`) | report_ir.PROFILES | - | KISMİ (teklif / musteri -> Word müşteri raporu `full=False`, muhendis -> HTML tam rapor; devreye_alma / troubleshoot YAPILAMADI: içerik tanımı yok; profil bölüm sırası / satır limiti / sütun seçimi belirlemiyor; musteri'de maskeleme uygulanmıyor, sadece QA `MASK` yakalar; YAML değil Python dict) |
+| R3.1 | Önem sıralaması BLOCKER > RİSK > VERİ YOK > BİLGİ | report.group_findings, readiness.finding_status | test_readiness | KISMİ (severity sırası; etki alanı / güven ikincil sıralaması yok) |
+| R3.2 | Gruplama: sayı + en fazla N örnek + "(+N)", tam liste Excel'de ID ile | report.group_findings, `_short` | test_readiness | KISMİ (grup = konu etiketi; kural başına `group_by` anahtarı yok) |
+| R3.3 | Limitler (özet satır, hücre ~25 kelime, giriş ≤ 2 cümle, boş bölüm yok) | qa.py (CELL_WORDS, EMPTY_SECTION) | - | KISMİ (QA ile ölçülüyor; özet BLOCKER 5 / RİSK 10 kesmesi ve "ve N bulgu daha" yok; giriş cümle sayısı kontrol edilmiyor) |
+| R3.4 | Her BLOCKER/RİSK'in aksiyonu + sorumlusu | checks.ACTIONS, action_for; Word risk tablosu "Aksiyon (sorumlu)" | test_readiness | YAPILDI (aksiyonsuz BLOCKER/RİSK = QA HATA `NO_ACTION`) |
+| R3.5 | "Upgrade yaklaşımı" yok, kesinti / PC tek satır not, kademeli yol yan yana, süre/fiyat yok | report.py, readiness.quote_inputs | test_word, test_readiness | YAPILDI |
+| R4.1 | Cümle kalıpları (`phrases.yaml`) | checks.ACTIONS (aksiyon, sorumlu) | - | KISMİ (sadece aksiyon kalıbı; title/effect kalıbı ve kalıpsız bulgu uyarısı yok; YAML değil Python dict) |
+| R4.2 | Terim sözlüğü: keep_english, forbidden_translations, abbreviations | data/glossary.json, qa.qa_glossary | - | YAPILDI (JSON; yasak çeviri = QA HATA; abbreviations ilk geçiş açılımı uygulanmıyor) |
+| R4.3 | Sayı binlik ayırıcı, tarih GG.AA.YYYY, Siemens versiyon yazımı | report.py, checks.py, excel `#,##0` | - | KISMİ (karar: Türkçe nokta "1.234"; şu an sadece Word Tablo 4 nokta, bulgu metinleri `{:,}` virgül; tarih header/meta ISO YYYY-AA-GG, tek yerde GG.AA.YYYY — birleştirilmedi, bkz. DECISIONS) |
+| R5 | Word: şablon stilleri, sarı highlight (run), başlık tekrar + cantSplit, Finding ID + Aksiyon sütunu, sayfa sırası | word.py | test_word | KISMİ (highlight `word.is_assumption` ile run seviyesinde; tablolar tblHeader + cantSplit; revizyon tablosu Word'de yok, `revizyon.md`; sütun genişliği / sayı sağa hizası içerik tipine göre değil) |
+| R6 | Excel: Arial, #009999, freeze, filtre, `#,##0`, Finding ID, Güven, renkler, formül özet, boş sekme yok | excel_report.py, xlsx.py, readiness.FINDINGS_COLUMNS | test_excel_report | KISMİ (Bulgular'da ID + Aksiyon (sorumlu); BLOCKER kırmızı, RİSK turuncu, VERİ YOK gri, ÇIKARIM sarı = stil, Excel koşullu biçimi değil; Özet'te COUNTIFS sadece ENG↔SRV fark özetinde; LibreOffice recalc YAPILAMADI: kurulu değil, QA önbellek değerlerine bakar; koşullu sekmeler (Diagnostics) veri yoksa oluşturulmaz) |
+| R7 | Revizyon farkı `--compare-to` + `learn` | revision.py -> revizyon.md; learn.py -> style_suggestions.json | - | KISMİ (anahtar check_id + scope + title; Yeni / Kapanan / Değişen; `out/<proje>_<tarih>_r<N>/` klasör adı yok, rev no IR'da; learn öneri üretir, hiçbir zaman otomatik uygulamaz) |
+| R8 | QA kapısı (`qa <klasör>` -> qa_report.md, HATA -> çıkış 1) | qa.py QA_CHECKS | - | KISMİ (placeholder, aksiyon, glossary, IR/findings/Excel sayıları, highlight, doğrudan biçim, Excel hata, boş bölüm, omitted BLOCKER, mask (musteri), hücre kelime, tablo düzeni, tekrar YAPILDI; "Finding ID'siz rakam cümlesi" YAPILAMADI: başlık / açıklama cümlelerinde çok yanlış pozitif; Excel formül hatası sadece önbellek değeri) |
+| R9 | Görsel kontrol (docx -> PDF -> sayfa görüntüsü) | - | - | YAPILAMADI (pipeline'da Word / LibreOffice yok; kullanıcı Word'de kontrol eder) |
+| R10 | Referans rapordan sadece yapı (`extract-style --reference`) | docx_style.py -> reference_style.json | test_docx_style | KISMİ (başlık ağacı, tablo sütun/satır, stil, highlight, kelime sayıları; metin maskeli; profil/stil dosyası otomatik üretilmiyor; sayfa sayısı yok — render yok) |
+| R11 | Opsiyonel LLM anlatı katmanı (`--narrative`) | - | - | YAPILAMADI (bilinçli: araç offline, veri dışarı çıkmaz; kalıp metin tek yol, bkz. DECISIONS) |
+| R12 | Testler: golden IR, MD snapshot, QA bozuk fixture, gruplama, profil, Türkçe liste, determinizm | tests/test_docx_style, test_word | - | KISMİ (IR golden / determinizm / QA fixture testleri henüz yok) |
+| R13 | Uygulama sırası | - | - | KISMİ (1–4, 6 kısmen; 5 ve 7 yapılmadı, yukarıda) |
 
 Sayılar `python tools/coverage_stats.py` ile üretilir (tahmin değil).

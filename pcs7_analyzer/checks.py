@@ -793,4 +793,59 @@ def run_checks(an) -> None:
         except Exception as e:  # noqa: BLE001  - bir kontrol hatası raporu durdurmaz
             an.not_checked.append((c.id, f"hata: {e}"))
     order = {Severity.HIGH: 0, Severity.MEDIUM: 1, Severity.LOW: 2}
-    an.findings.sort(key=lambda f: order[f.severity])
+    # BLOCKER > Yüksek > Orta > Düşük; aynı önemde KANIT önce (stabil sıralama: CHECKS sırası korunur -> deterministik)
+    an.findings.sort(key=lambda f: (not f.blocking, order[f.severity], f.confidence != Confidence.HIGH))
+    for i, f in enumerate(an.findings, 1):
+        f.fid = f"F-{i:03d}"
+
+
+# ---------------------------------------------------------------------------
+# Aksiyon + sorumlu (rapor kalitesi R3.4: her BLOCKER / RİSK'in aksiyonu olmalı). Kısa, etken cümle.
+# Sorumlu: Siemens (bizim iş kalemi) / Müşteri (bilgi / karar / şifre) / Siemens + Müşteri
+# ---------------------------------------------------------------------------
+ACTIONS: dict[str, tuple[str, str]] = {
+    "HW_RELEASED": ("Listede olmayan MLFB/FW için Released Modules / Compatibility Tool'dan teyit al; gerekiyorsa değişim planla.", "Siemens"),
+    "HW_F_EXPORT_MISSING": ("HW Config export'unu S7 F Configuration Pack kurulu PC'den al, F-I/O listesini doğrula.", "Siemens + Müşteri"),
+    "HW_GSD_3RD_PARTY": ("GSD dosyalarını projeden V10 ES'e kur; üreticiden V10 uyumunu teyit et.", "Siemens"),
+    "AS_STOP_NO_TCIR": ("Library update için AS STOP penceresini müşteriyle planla.", "Müşteri"),
+    "LIB_APL_V8": ("Dry-run'da APL update + Update Block Types + entire program compile yap.", "Siemens"),
+    "LIB_MIXED_VERSIONS": ("Library update'te tüm block'ları tek versiyona getir; farklı versiyonlu tipleri listele.", "Siemens"),
+    "LIB_PCS7_V71": ("V7.1 block'ları için Library V7.1 SP3 Upd4 + Faceplates V7.1 SP3 Upd1 kur veya APL'e geçiş kararı al.", "Siemens + Müşteri"),
+    "LIB_LOGIC_MATRIX": ("Kullanılıyorsa library update planla; kullanılmıyorsa kaldırma kararını müşteriyle al.", "Siemens + Müşteri"),
+    "LIB_SFC": ("Güncel SFC system block'larını kopyala, complete compile yap.", "Siemens"),
+    "LIB_F_SYSTEM": ("F program şifresini ve safety acceptance planını müşteriden al; S7 F Systems sürümünü teyit et.", "Müşteri"),
+    "LIB_MODBUS_TCP": ("Modbus TCP add-on'un V10 sürümünü ve lisansını teyit et.", "Siemens"),
+    "LIB_MASTERDATA_DELETE": ("Library update öncesi master data'dan OB_DIAG / OR_M_16 / OR_M_32'yi sil.", "Siemens"),
+    "LIB_INTERFACE": ("Interface'i değişen tipler için pin bağlantılarını dry-run'da kontrol et.", "Siemens"),
+    "IM_DRV": ("IM_DRV block'larını update öncesi system chart'tan taşı.", "Siemens"),
+    "HW_BOX_RTX": ("BOX RTX için yeni donanım / çözüm teklif et.", "Siemens + Müşteri"),
+    "LIB_STD_LIB": ("Eski Standard Library block'ları için V7.1 paketleri veya APL'e geçiş kararı al.", "Siemens + Müşteri"),
+    "AS_SIZE": ("Büyük AS için compile / test süresini iş planında ayrı kalem yap.", "Siemens"),
+    "LICENSES": ("PCS 7 License Information ve ALM key listesini müşteriden al; upgrade paketlerini belirle.", "Müşteri"),
+    "CAS_PH": ("CAS yerine Process Historian geçişini planla; .PCK dosyalarını sil.", "Siemens + Müşteri"),
+    "BLK_CUSTOM": ("Custom block source'larını iste; dry-run'da compile ve fonksiyon testi yap.", "Siemens + Müşteri"),
+    "BLK_UNUSED": ("Instance'sız block'ların gerçekten kullanılmadığını teyit et (multi-instance olabilir).", "Siemens"),
+    "BLK_SYMBOL_MISMATCH": ("Symbol table ile block klasörünü SIMATIC Manager'da karşılaştır.", "Siemens"),
+    "PROJ_MIN_VERSION": ("Projeyi önce V7.1 SP4+ ara versiyona taşı.", "Siemens"),
+    "BLK_FC_SIZE": ("Büyük runtime group'ları dry-run öncesi böl; compile sonucunu kontrol et.", "Siemens"),
+    "BLK_KNOW_HOW": ("Korumalı block'ların şifresini veya üreticinin V10 sürümünü müşteriden iste.", "Müşteri"),
+    "COMM_STD": ("Bağlantı parametrelerini (ID, R_ID, IP, port) ve NetPro'yu kontrol et; karşı tarafı teyit et.", "Siemens + Müşteri"),
+    "COMM_AS_AS": ("Karşı taraf AS / sistemleri ve haberleşme şeklini müşteriyle teyit et.", "Müşteri"),
+    "OS_CUSTOM_TYPICALS": ("Custom typicals'ı picture object update öncesi ayrı ele al.", "Siemens"),
+    "OS_OPC": ("Harici OPC client'ları ve bağlantı ayarlarını müşteriden al.", "Müşteri"),
+    "OS_PO_INCREASE": ("Mevcut OS RT PO kullanımını ve lisansını teyit et.", "Müşteri"),
+    "OS_MIGRATION_VOLUME": ("CCMigrator süresini iş planına ayrı kalem olarak koy.", "Siemens"),
+    "CONS_ES_SERVER": ("Hangi OS projesinin baz alınacağını müşteriyle kararlaştır; farkları birleştir.", "Siemens + Müşteri"),
+    "WINCC_DIFF": ("ENG ↔ SRV1 farklarını müşteriyle gözden geçir; taşınacak projeyi seç.", "Siemens + Müşteri"),
+    "OPC_3RD_PARTY": ("3rd party OPC server'ların V10 / Windows uyumunu üreticiden teyit et.", "Müşteri"),
+    "OS_CONN_REDUNDANCY": ("TCP/IP bağlantısını named connection'a çevirmeyi planla.", "Siemens"),
+    "SFC_VISU": ("OS compile'da SFC visualization işaretle; lisansı teyit et.", "Siemens"),
+    "ARCHIVES": ("Arşivin taşınıp taşınmayacağını müşteriyle kararlaştır.", "Müşteri"),
+    "CONS_CLIENTS": ("Farklı client gruplarının amacını müşteriyle teyit et.", "Müşteri"),
+    "CONS_BACKUP_DATES": ("Referans alınacak backup'ı müşteriyle kararlaştır.", "Müşteri"),
+}
+
+
+def action_for(check_id: str) -> tuple[str, str]:
+    """(aksiyon, sorumlu); tanımsızsa ('', '') -> QA hatası."""
+    return ACTIONS.get(check_id, ("", ""))

@@ -48,3 +48,53 @@ Master prompt'taki [DANIŞ] maddeleri ve diğer mimari kararlar. Her karar: tari
 ## 2026-10-24 — Geliştirmede gerçek müşteri backup'ı okunmaz
 - **Karar:** Sadece sentetik fixture (`demo.py`, `_dbfwriter.py`). Gerçek backup'ı kullanıcı çalıştırır; geliştiriciye yalnızca
   maskeli tanı dosyaları (`yapi_tanisi.txt`, `blockmap_tanisi.txt`) ve özet gelir.
+
+## 2026-10-24 — Rapor kalitesi: Report IR = mevcut doküman modeli (ayrı select/compose katmanı yok)
+- **Karar:** İçerik kararları `report.build_document` içinde kalır (bölümler, tablolar, gruplama, Finding ID bağları
+  `Table.row_ids`). Renderer'lar (HTML / MD / Word, Excel `findings_rows`) sadece biçimler. `report_ir.py` bu modeli
+  `report_ir.json`'a serileştirir: `schema_version`, `profile`, `input_hash` (kaynak indeksinin rel + boyut sha256'sı, içerik
+  okunmaz), `sections`, `finding_ids`, `stats`, `omitted` (rapora girmeyen her bulgu + neden). `generated_at` dışında
+  deterministik (anahtarlar sıralı).
+- **Gerekçe:** Doküman modeli zaten IR (renderer'dan bağımsız blok listesi); ayrı compose katmanı yeniden yazımı test edilmiş
+  rapor yapısını (Word Tablo 1-6) bozar, fayda getirmez. İçerik / biçim hatası ayrımı IR ↔ çıktı karşılaştırmasıyla yapılır (QA).
+- **Alternatif:** Prompt'taki select/compose → IR → render zinciri; IR'dan geri okuyan renderer'lar. Profil sayısı artarsa.
+
+## 2026-10-24 — Profiller, kalıplar, sözlük: YAML yok (Python dict / JSON)
+- **Karar:** Profiller `report_ir.PROFILES` (teklif / musteri -> Word müşteri raporu `full=False`, muhendis -> HTML tam rapor
+  `full=True`). Aksiyon kalıpları `checks.ACTIONS` (check_id -> (aksiyon, sorumlu)) + `action_for`; `phrases.yaml` yok.
+  Terim sözlüğü `data/glossary.json` (keep_english, forbidden_translations, abbreviations).
+- **Gerekçe:** Kurallarla aynı (bkz. "Kural tabanı YAML yerine Python"): standart kütüphane, PyYAML yok. Aksiyon check'in
+  yanında tanımlı -> aksiyonsuz BLOCKER/RİSK QA'da yakalanır.
+- **Açık:** devreye_alma / troubleshoot profilleri tanımlanmadı (içerik kullanıcıyla netleşmeli). Profil şu an sadece doküman
+  modunu seçer; bölüm sırası / limit / sütun seçimi profil verisi değil.
+
+## 2026-10-24 — Sayı ve tarih biçimi
+- **Karar:** Rapor metninde (Word / HTML / MD) binlik ayırıcı Türkçe nokta (`1.234`); Excel `#,##0` (görünüm Excel'in yerel
+  ayarına göre, Türkçe Excel'de nokta). Tarih `GG.AA.YYYY`; makine çıktıları (JSON, log, IR `generated_at`) ISO kalır.
+- **Durum:** Uygulama tutarlı DEĞİL (COVERAGE R4.3 KISMİ): Word Tablo 4 nokta kullanıyor, bulgu detay metinleri (`checks.py`
+  `{:,}`) virgül; Word header / kapak tarihi `meta.date` ISO (YYYY-AA-GG). Birleştirme: tek `fmt_num` / `fmt_date` yardımcısı.
+- **Gerekçe:** Okuyucu Türk mühendis / müşteri; Siemens TR dokümanları Türkçe biçimi kullanır.
+
+## 2026-10-24 — Word: highlight, tablo düzeni, Finding ID
+- **Karar:** VARSAYIM / ÇIKARIM metni run seviyesinde sarı highlight (`word.is_assumption` işaretleri), hücre gölgesi değil.
+  Risk tablosunda Finding ID + "Aksiyon (sorumlu)" sütunu. Tablolarda başlık satırı tekrar (`tblHeader`), satır bölünmez
+  (`cantSplit`). Excel `Bulgular` aynı ID'yi taşır (`readiness.FINDINGS_COLUMNS`): Word satırından Excel ayrıntısına ID ile gidilir.
+
+## 2026-10-24 — QA kapısı ve sınırları
+- **Karar:** `qa.py` `QA_CHECKS` (yeni kontrol = fonksiyon + satır), `python -m pcs7_analyzer qa <klasör>` -> `qa_report.md`,
+  HATA varsa çıkış kodu 1. Sayılar tek kaynaktan: IR `stats` = `findings.json` = Excel `Bulgular` durum sayıları.
+- **Yapılmayanlar:** "Finding ID'si olmayan rakam cümlesi" kontrolü yok (başlık, açıklama, envanter cümlelerinde gürültü);
+  Excel formülleri yeniden hesaplanmaz (LibreOffice yok, xlsx yazıcı önbellek değeri yazar; QA önbelleğe bakar); görsel kontrol
+  (R9, docx -> PDF) yok: pipeline'da Word / LibreOffice yok, sayfa düzenini kullanıcı Word'de kontrol eder.
+
+## 2026-10-24 — Revizyon, learn, referans stil
+- **Karar:** `--compare-to <önceki klasör>` -> `revision.py` önceki `findings.json` ile fark -> `revizyon.md` + IR `revision`.
+  Anahtar `check_id + scope + title` (Finding ID sıralamaya bağlı, anahtar olamaz). `learn` (`learn.py`) elle düzeltilmiş
+  Word ile üretileni yapısal karşılaştırır -> `style_suggestions.json`; hiçbir öneri otomatik uygulanmaz.
+  Referans rapor: `extract-style` (`docx_style.py`) sadece yapı çıkarır (başlık ağacı, tablo sütunları, stiller, highlight,
+  kelime sayıları), metin maskeli; müşteri içeriği geliştiriciye gelmez.
+
+## 2026-10-24 — LLM anlatı katmanı (R11) yapılmadı
+- **Karar:** `--narrative` yok; tüm metin kalıplardan üretilir.
+- **Gerekçe:** Araç offline çalışır, backup verisi bilgisayardan çıkmaz; katman prompt'ta da varsayılan kapalı ve sadece "cila".
+  Rapor bu katman olmadan eksiksiz. Gerekirse IT kararı ve maskelenmiş IR özetiyle ayrı modül olarak eklenir.

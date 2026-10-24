@@ -24,7 +24,9 @@ def test_coverage_and_inputs(tmp_path):
     assert cov["DIAGNOSTICS (SQL ERRORLOG, evtx, WinCC diagnose)"][1] == "Yok"
     q = {r[0]: r[1] for r in quote_inputs(an)}
     assert q["AS (HW station)"].startswith("2 station") and "AS02" in q["F-System"]
-    assert {r[3] for r in findings_rows(an) if r[1] != "VERİ YOK"} <= {"KANIT", "ÇIKARIM"}
+    rows = findings_rows(an)
+    assert {r[4] for r in rows if r[2] != "VERİ YOK"} <= {"KANIT", "ÇIKARIM"}
+    assert all(r[0].startswith("F-") and r[6] != "-" for r in rows if r[2] in ("BLOCKER", "RİSK"))
     md = render_html(an, build_document(an))
     assert "Backup içeriği ve yeterlilik" in md and "Teklif için girdiler" in md and "Ek C: Bulgular" in md
     assert "Diagnostics (server fail)" not in md

@@ -70,19 +70,34 @@ def _t(text: str) -> str:
     return f'<w:t xml:space="preserve">{escape(text)}</w:t>'
 
 
-def _runs(text: str, bold_all: bool = False, bold_style: str | None = None) -> str:
-    """'**kalın**' işaretlemesini run'lara çevirir."""
+# Varsayım / teyit gerektiren metin Word'de sarı highlight (run seviyesinde) alır.
+ASSUMPTION_MARKERS = ("teyit edilmeli", "teyit gerek", "çıkarım", "varsayım", "heuristic")
+
+
+def is_assumption(text: str) -> bool:
+    low = text.lower().replace("I", "ı")
+    return any(m in low for m in ASSUMPTION_MARKERS) or "ÇIKARIM" in text or "VARSAYIM" in text
+
+
+def _runs(text: str, bold_all: bool = False, bold_style: str | None = None,
+          highlight: bool | None = None) -> str:
+    """'**kalın**' işaretlemesini run'lara çevirir; varsayım satırları sarı highlight."""
     out = []
     for i, part in enumerate(re.split(r"\*\*(.+?)\*\*", text)):
         if not part:
             continue
         bold = bold_all or i % 2 == 1
-        rpr = ""
+        props = ""
         if bold:
-            rpr = f'<w:rPr><w:rStyle w:val="{bold_style}"/></w:rPr>' if bold_style else "<w:rPr><w:b/><w:bCs/></w:rPr>"
-        segs = part.split("\n")
-        body = "<w:br/>".join(_t(s) for s in segs)
-        out.append(f"<w:r>{rpr}{body}</w:r>")
+            props += f'<w:rStyle w:val="{bold_style}"/>' if bold_style else "<w:b/><w:bCs/>"
+        for j, seg in enumerate(part.split("\n")):
+            if j:
+                out.append("<w:r><w:br/></w:r>")
+            if not seg:
+                continue
+            hl = is_assumption(seg) if highlight is None else highlight
+            rp = props + ('<w:highlight w:val="yellow"/>' if hl else "")
+            out.append(f"<w:r>{'<w:rPr>' + rp + '</w:rPr>' if rp else ''}{_t(seg)}</w:r>")
     return "".join(out)
 
 
@@ -177,14 +192,14 @@ class DocxBuilder:
         out = []
         for c in self.children[:idx_sub + 1]:
             if ids["title topline"] and f'w:pStyle w:val="{ids["title topline"]}"' in c:
-                c = self._replace_para(c, _runs(topline))
+                c = self._replace_para(c, _runs(topline, highlight=False))
             elif ids["title"] and re.search(rf'w:pStyle w:val="{re.escape(ids["title"])}"', c):
                 fett = self.sid("strong")
                 title = "<w:r>" + "<w:br/>".join(_t(x) for x in title_lines) + "</w:r>"
                 title += _runs(f"**{bold_tail}**", bold_style=fett) if bold_tail else ""
                 c = self._replace_para(c, title)
             elif f'w:val="{ids["title subline"]}"' in c:
-                c = self._replace_para(c, _runs(subline))
+                c = self._replace_para(c, _runs(subline, highlight=False))
             out.append(c)
         return out
 

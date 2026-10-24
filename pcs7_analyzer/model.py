@@ -26,6 +26,7 @@ class Finding:
     confidence: Confidence = Confidence.HIGH
     scope: str = ""          # AS etiketi (AS bazlı bulgu) veya "" (genel)
     blocking: bool = False   # upgrade'i engelleyen bulgu
+    fid: str = ""            # deterministik Finding ID (F-001 …): rapordaki her satır buna bağlanır
 
     def to_dict(self) -> dict:
         d = asdict(self)
