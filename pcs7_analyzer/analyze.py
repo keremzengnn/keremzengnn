@@ -553,7 +553,10 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     if info.is_empty:
         return res
     if info.dbt:
-        src.materialize(info.dbt)
+        try:
+            src.materialize(info.dbt)
+        except OSError as e:          # DBT okunamazsa block sayımı yine yapılır, sadece instance eşlemesi olmaz
+            res.error = f"DBT okunamadı ({e}) -> instance eşlemesi yok"
 
     def prog(n, total):
         log(f"  {info.path}: {n}/{total} kayıt")
@@ -1083,7 +1086,8 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
             bfr = BlockFolderResult(info=info, as_label=info.label, mapping="-",
                                     mapping_confidence=Confidence.LOW.value, error=f"{e}")
             _unk(an, "blocks", info.dbf, f"block klasörü okunamadı ({type(e).__name__}: {e})")
-            log(traceback.format_exc())
+            if not isinstance(e, (OSError, ValueError)):     # beklenen okuma hatalarında traceback gürültü
+                log(traceback.format_exc())
         if bfr.bad_records:
             _unk(an, "blocks", info.dbf, f"{bfr.bad_records} SUBBLK kaydı okunamadı (atlandı)", where="BLKNUMBER")
         record_instance_issues(bfr, an.unknown, info.dbt or info.dbf)   # neden başına bir satır (+ DBT anomalileri)

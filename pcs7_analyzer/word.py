@@ -67,8 +67,12 @@ def style_ids(styles_xml: str) -> dict[str, str]:
     return out
 
 
+_BAD_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
 def _t(text: str) -> str:
-    return f'<w:t xml:space="preserve">{escape(text)}</w:t>'
+    # bozuk backup'tan gelen kontrol karakterleri Word'ün dosyayı açmasını engeller
+    return f'<w:t xml:space="preserve">{escape(_BAD_XML.sub("", text))}</w:t>'
 
 
 # Varsayım / teyit gerektiren metin Word'de sarı highlight (run seviyesinde) alır.

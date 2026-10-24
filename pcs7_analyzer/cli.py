@@ -121,6 +121,10 @@ def index_path(result: Path) -> Path:
     return p if p.is_file() else Path(result)
 
 
+class UsageError(ValueError):
+    """Kullanıcı girdisi hatası (komut satırında kullanım mesajı olarak gösterilir)."""
+
+
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None, inventory: bool = False,
@@ -137,7 +141,7 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
     source = Path(source)
     out_dir = Path(out_dir) if out_dir else default_out_dir(source)
     if source.is_dir() and _inside(out_dir, source):
-        raise ValueError(f"Çıktı kaynak klasörün içine yazılamaz (salt okuma kuralı): {out_dir}")
+        raise UsageError(f"Çıktı kaynak klasörün içine yazılamaz (salt okuma kuralı): {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     log = _tee_log(log, out_dir / "log.txt")
 
@@ -424,12 +428,15 @@ def main(argv: list[str] | None = None) -> int:
                                        ("template", str(args.template) if args.template else None)) if v})
     try:
         from .analyze import ManualInputs
-        manual = ManualInputs.load(args.manual) if args.manual else None
+        try:
+            manual = ManualInputs.load(args.manual) if args.manual else None
+        except (OSError, ValueError) as e:
+            raise UsageError(f"--manual okunamadı: {args.manual} ({e})") from e
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
                   args.author, args.department, args.customer, args.inventory, manual, args.exports,
                   with_inventory=not args.no_inventory, collect=args.collect, profile=args.profile,
                   compare_to=args.compare_to)
-    except ValueError as e:
+    except UsageError as e:
         parser.error(str(e))
     idx = index_path(out)
     if args.open:

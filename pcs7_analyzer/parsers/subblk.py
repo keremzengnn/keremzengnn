@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 import os
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -301,6 +302,18 @@ class _SubblkFieldParser(FieldParser):
     Dönüş: None = memo referansı yok; b'' = referans var ama DBT'de veri yok.
     """
 
+    def parseN(self, field, data):          # bozuk sayısal alan tek kaydı etkilesin, klasörü değil
+        try:
+            return super().parseN(field, data)
+        except ValueError:
+            return None
+
+    def parseF(self, field, data):
+        try:
+            return super().parseF(field, data)
+        except ValueError:
+            return None
+
     def parseM(self, field, data):
         if field.name != "SSBPART":
             return None
@@ -337,6 +350,9 @@ def parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> 
     return bf
 
 
+_REC_DEFAULTS = {"BLOCKNAME": "", "BLOCKFNAME": "", "USERNAME": "", "BLKLANG": "", "VERSION": 0}
+
+
 def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) -> BlockFolder:
     """
     SUBBLK.DBF okur.
@@ -348,13 +364,21 @@ def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) ->
     dbf_path = Path(dbf_path)
     dbt = dbf_path.with_suffix(".DBT")
     memo = dbt.exists() and with_instances
-    table = _SubblkDBF(
-        str(dbf_path),
-        encoding=DBF_ENCODING,
-        ignore_missing_memofile=not memo,
-        char_decode_errors="ignore",
-        parserclass=_SubblkFieldParser,
-    )
+    if dbf_path.stat().st_size < 32:
+        raise ValueError(f"SUBBLK.DBF bozuk / kesik: {dbf_path.stat().st_size} byte")
+    try:
+        table = _SubblkDBF(
+            str(dbf_path),
+            encoding=DBF_ENCODING,
+            ignore_missing_memofile=not memo,
+            char_decode_errors="ignore",
+            parserclass=_SubblkFieldParser,
+        )
+    except (struct.error, ValueError, KeyError) as e:
+        raise ValueError(f"SUBBLK.DBF bozuk / kesik: {type(e).__name__}: {e}") from e
+    missing = {"SUBBLKTYP", "BLKNUMBER"} - set(table.field_names)
+    if missing:
+        raise ValueError(f"SUBBLK.DBF bozuk / kesik: alan yok ({', '.join(sorted(missing))})")
     total = dbf_record_count(dbf_path)
     bf = BlockFolder(path=dbf_path.parent, memo_available=memo)
     present = set()
@@ -364,6 +388,9 @@ def _parse_subblk(dbf_path: Path, with_instances: bool = True, progress=None) ->
         bf.n_records += 1
         if progress and bf.n_records % 20000 == 0:
             progress(bf.n_records, total)
+        for k, v in _REC_DEFAULTS.items():     # bozuk header'da eksik alan: kayıt yine okunur
+            if rec.get(k) is None:
+                rec[k] = v
         ty = rec["SUBBLKTYP"]
         try:
             nr = int(rec["BLKNUMBER"])

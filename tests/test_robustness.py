@@ -144,3 +144,43 @@ def test_symbol_control_chars_stripped(tmp_path):
     asc = tmp_path / "s.asc"
     asc.write_bytes(b"126," + b"MOT\x07OR".ljust(24) + b"FB  1827    FB  1827    comment\r\n")
     assert parse_symbol_asc(asc)[0][:3] == ("FB", 1827, "MOT OR")
+
+
+def test_word_strips_xml_illegal_chars():
+    from pcs7_analyzer.word import _t
+    assert "\x01" not in _t("NAME\x01X") and "NAMEX" in _t("NAME\x01X")
+
+
+def test_subblk_bad_numeric_field_keeps_folder(tmp_path):
+    """Tek kayıttaki bozuk sayısal alan (VERSION='1x') klasörün tamamını düşürmemeli."""
+    from pcs7_analyzer._dbfwriter import write_dbf, SUBBLK_FIELDS
+    from pcs7_analyzer.parsers.subblk import parse_subblk, clear_cache
+    recs = [dict(SUBBLKTYP="00014", BLKNUMBER="01990", BLOCKNAME="A", USERNAME="BM"),
+            dict(SUBBLKTYP="00014", BLKNUMBER="01991", BLOCKNAME="B", USERNAME="BM"),
+            dict(SUBBLKTYP="00014", BLKNUMBER="01992", BLOCKNAME="C", USERNAME="BM")]
+    p = tmp_path / "SUBBLK.DBF"
+    write_dbf(p, SUBBLK_FIELDS, recs)
+    raw = bytearray(p.read_bytes())
+    # 2. kaydın VERSION alanını bozuk değerle doldur
+    import pcs7_analyzer._vendor.dbfread as dbfread
+    t = dbfread.DBF(str(p), encoding="latin1", load=False)
+    off = t.header.headerlen + t.header.recordlen + 1
+    for f in t.fields:
+        if f.name == "VERSION":
+            raw[off:off + f.length] = b"1x".ljust(f.length)
+            break
+        off += f.length
+    p.write_bytes(bytes(raw))
+    clear_cache()
+    bf = parse_subblk(p, with_instances=False)
+    assert bf.n_records == 3
+
+
+def test_subblk_truncated_header_clear_error(tmp_path):
+    import pytest
+    from pcs7_analyzer.parsers.subblk import parse_subblk, clear_cache
+    p = tmp_path / "SUBBLK.DBF"
+    p.write_bytes(b"\x03abc")
+    clear_cache()
+    with pytest.raises(ValueError, match="bozuk"):
+        parse_subblk(p, with_instances=False)

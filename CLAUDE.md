@@ -270,3 +270,17 @@ Acik_Konular_Kaynak); Word'e Tablo 4 WinCC yapısı; HTML'e upgrade hazırlık l
 - `--compare-to <önceki klasör>` -> `revision.py` -> `revizyon.md` (anahtar check_id + scope + title).
 - `cli extract-style <ref.docx>` (`docx_style.py`, sadece yapı, maskeli), `cli learn --generated --edited`
   (`learn.py`, öneri JSON; config'e kullanıcı onayı olmadan yazılmaz). Anlatı (LLM) katmanı yok.
+
+## Ekip aracı (final, 2026-10-24)
+- Akış: pencerede backup seç → "Analiz et" (analiz + envanter) → `index.html` özet sayfası (`index_page.py`, sadece çıktı
+  klasöründeki dosyalardan: rapor.json, findings.json, report_ir.json, envanter_ozet.json) açılır; tüm çıktılara link.
+- `roadmap.py` -> `yol_haritasi.html/.md`: P0 teklif öncesi … P5 test; her adım Finding ID + sorumlu + kaynak
+  (`genel prosedür (iç)` = ÇIKARIM). Yeni adım = `_phaseN` içinde bir `_from_checks` / `_generic` satırı.
+- Ekip ayarları: `pcs7_analyzer_ayarlar.json` (exe yanında / repo kökü / `PCS7_ANALYZER_TEAM_SETTINGS`), kullanıcı
+  ayarları `%APPDATA%` üstüne yazar; `save()` sadece kullanıcı dosyasına.
+- Doküman arşivi: `kb build --root <zip|klasör>` (zip akışla, poppler yoksa yerleşik PDF okuyucu "metin kalitesi düşük",
+  devam eden build, `kb_rapor.txt`), varsayılan db `%APPDATA%/pcs7_analyzer/kb.sqlite`; `kb digest` -> `kb_ozet_NN.md`
+  parçaları + `kb_ozet_index.csv` (geliştiriciye: kurallara çevrilip `checks.py`'ye eklenir). Pencerede iki buton.
+- XUTILS çağrı ağacı (`parsers/xutils.py`, ÇIKARIM): custom FB'yi çağıran FC/OB raporda, Excel ve envanterde.
+- Sağlamlık: `scratchpad/fuzz/stress.py` benzeri 92 bozuk varyant; `cli.UsageError` sadece kullanıcı girdisi hatası,
+  diğer hatalar log.txt'ye. Word metninde XML'e uygun olmayan karakterler `word._t`'de temizlenir.
