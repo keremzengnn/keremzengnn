@@ -60,9 +60,9 @@ def test_symbols_full_list_from_backup(inv_out):
 def test_hw_from_backup_and_export(inv_out):
     inv, _ = inv_out
     internal = inv.sheet("HW (backup içi)").rows
-    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[4] == "V6.0" for r in internal)
+    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[4] == "CPU 414-5H PN/DP" and r[6] == "V6.0" for r in internal)
     exp = inv.sheet("HW modüller (export)").rows
-    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[6] == "CPU" for r in exp)
+    assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[7] == "CPU" for r in exp)
 
 
 def test_os_files_keep_case(inv_out):

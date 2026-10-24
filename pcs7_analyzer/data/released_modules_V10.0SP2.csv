@@ -555,10 +555,10 @@ mlfb,fw,status,note
 6ES7 650-1BB51-0XX0,,discontinued 10/16,20.12 SM MTA | 5.6 V Zener diode board
 6ES7 650-1BC51-0XX0,,discontinued 10/16,20.12 SM MTA | 6.2 V Zener diode board
 6ES7 650-1BD51-0XX0,,discontinued 01/11,20.12 SM MTA | FET switch adapter
-6ES7 410-5HX08-0AB0,V8.3,listed,21.1 CPU as of 03/25 (as of PCS 7 V10.0.1) | CPU 410-5H Process auto mation
+6ES7 410-5HX08-0AB0,V8.3,listed,21.1 CPU as of 03/25 (as of PCS 7 V10.0.1) | CPU 410-5H Process automation
 6ES7 410-5HN08-0AB0,V8.3,listed,21.1 CPU as of 03/25 (as of PCS 7 V10.0.1) | CPU 410 SMART process automation
 6ES7 410-5HM08-0AB0,V8.3,listed,21.1 CPU as of 03/25 (as of PCS 7 V10.0.1) | CPU 410E Process automa tion
-6ES7 410-5HX08-0AB0,V8.2.x,listed,21.2 CPU as of 05/17 (as of PCS 7 V9.0) | CPU 410-5H Process auto mation
+6ES7 410-5HX08-0AB0,V8.2.x,listed,21.2 CPU as of 05/17 (as of PCS 7 V9.0) | CPU 410-5H Process automation
 6ES7 410-5HN08-0AB0,V8.2.x,listed,21.2 CPU as of 05/17 (as of PCS 7 V9.0) | CPU 410 SMART process automation
 6ES7 410-5HM08-0AB0,V8.2.x,listed,21.2 CPU as of 05/17 (as of PCS 7 V9.0) | CPU 410E Process automa tion
 6ES7 414-3XM07-0AB0,V7.0,listed,21.3 CPU as of 02/16 (as of PCS 7 V8.2) | CPU 414-3 DP

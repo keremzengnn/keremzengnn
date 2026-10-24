@@ -57,3 +57,12 @@ def test_run_writes_log_and_survives_output_failure(tmp_path, monkeypatch):
     log = (out / "log.txt").read_text(encoding="utf-8")
     assert "rapor.xlsx üretilemedi" in log
     assert not (out / "rapor.xlsx").exists()
+
+
+def test_mlfb_describe():
+    from pcs7_analyzer.mlfb_info import SRC_FAMILY, SRC_LIST, describe, label
+    assert describe("6ES7 321-1BL00-0AA0") == ("SM321 DI 32xDC24V", SRC_LIST)
+    assert describe("6ES7321-1BL00-0AA0")[0] == "SM321 DI 32xDC24V"       # boşluksuz yazım
+    assert describe("6ES7 960-1AA06-0XA0")[1] == SRC_FAMILY                 # listede yok -> aile
+    assert describe("6ES7 999-9XX99-0AA0") == ("", "")                      # bilinmiyor: tahmin yok
+    assert label("6ES7 153-2BA10-0XB0") == "6ES7 153-2BA10-0XB0 (ET 200M- IM 153-2)"

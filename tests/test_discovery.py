@@ -106,3 +106,25 @@ def test_dbt_date_mismatch_warning(tmp_path):
     write_dbf(d / "SUBBLK.DBF", SUBBLK_FIELDS, [block("00010", 1, ssb=b"\x0a\x01\x00")], memo="db4")
     os.utime(d / "SUBBLK.DBT", (0, 0))
     assert any("tarihleri" in w for w in discover(tmp_path).warnings)
+
+
+def test_labels_library_and_programs(tmp_path):
+    from pcs7_analyzer.analyze import analyze
+    root = tmp_path / "bk"
+    _mk(root, "P/P.s7p")
+    for hx, nr in (("00000001", 10), ("00000002", 20)):
+        write_dbf(_mk(root, f"P/ombstx/offline/{hx}/SUBBLK.DBF"), SUBBLK_FIELDS,
+                  [block("00004", nr, "F", "X", author="AdvLib81")], memo="db4")
+    _mk(root, "Lib/Lib.s7l")
+    write_dbf(_mk(root, "Lib/ombstx/offline/00000001/SUBBLK.DBF"), SUBBLK_FIELDS,
+              [block("00004", 1, "", "OB_DIAG", author="DRIVER81"), block("00004", 2, "", "OB_DIAG1", author="DRIVER81"),
+               block("00004", 1800, "", "MonAnL", author="AdvLib81")], memo="db4")
+    write_dbf(_mk(root, "Loose/ombstx/offline/00000003/SUBBLK.DBF"), SUBBLK_FIELDS,
+              [block("00004", 30, "F", "Y", author="AdvLib81")], memo="db4")
+    an = analyze(root)
+    labels = sorted(b.as_label for b in an.block_folders)
+    assert labels == ["Lib (library)", "Loose", "P · S7 program 1/2", "P · S7 program 2/2"]
+    assert all("/0000" not in lb for lb in labels)
+    assert [b.as_label for b in an.as_folders if b.info.is_library] == []
+    md = [f for f in an.findings if f.check_id == "LIB_MASTERDATA_DELETE"]
+    assert md and "OB_DIAG (Lib (library))" in md[0].detail and "OB_DIAG1 (" not in md[0].detail

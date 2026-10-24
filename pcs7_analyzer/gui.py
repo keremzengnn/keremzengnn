@@ -134,8 +134,16 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         info_rows.append((lab, ent))
         r += 1
 
-    # Opsiyonel (sadece analiz): backup dışındaki WinCC export'ları ve manuel girişler (boş = raporda "eksik")
+    # Opsiyonel (sadece analiz): backup dışındaki WinCC export'ları ve manuel girişler (boş = raporda "eksik").
+    # Varsayılan gizli: "Gelişmiş" işaretlenince görünür.
     exp_var, po_as, po_os, po_arc, pcs_var = (tk.StringVar() for _ in range(5))
+    adv_var = tk.BooleanVar(value=False)
+    adv_chk = ttk.Checkbutton(body, text="Gelişmiş (opsiyonel): backup dışındaki WinCC export'u, PO sayıları, PC station listesi",
+                              variable=adv_var)
+    adv_chk.grid(row=r, column=0, columnspan=3, sticky="w", pady=(6, 2))
+    info_rows.append((adv_chk,))
+    r += 1
+    adv_rows = []
 
     def pick_exports():
         p = filedialog.askdirectory(title="WinCC Configuration Studio export klasörü (Tag / Alarm .txt)")
@@ -148,39 +156,36 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     ent.grid(row=r, column=1, sticky="ew", padx=8)
     btn = ttk.Button(body, text="Seç…", command=pick_exports)
     btn.grid(row=r, column=2, sticky="e")
-    info_rows.append((lab, ent, btn))
+    adv_rows.append((lab, ent, btn))
     r += 1
-    lab = ttk.Label(body, text="PO (ops.): AS RT / OS / archive")
+    lab = ttk.Label(body, text="PO: AS RT / OS / archive")
     lab.grid(row=r, column=0, sticky="w", pady=3)
     pof = ttk.Frame(body)
     pof.grid(row=r, column=1, columnspan=2, sticky="w", padx=8)
     for v in (po_as, po_os, po_arc):
         ttk.Entry(pof, textvariable=v, width=12).pack(side="left", padx=(0, 6))
     ttk.Label(pof, text="(PCS 7 License Information)", style="Hint.TLabel").pack(side="left")
-    info_rows.append((lab, pof))
+    adv_rows.append((lab, pof))
     r += 1
-    lab = ttk.Label(body, text="PC station listesi (ops.)")
+    lab = ttk.Label(body, text="PC station listesi (virgülle)")
     lab.grid(row=r, column=0, sticky="w", pady=3)
     ent = ttk.Entry(body, textvariable=pcs_var)
     ent.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(8, 0))
-    info_rows.append((lab, ent))
+    adv_rows.append((lab, ent))
     r += 1
 
     def on_mode(*_):
         col = mode_var.get() == "collect"
+        analysis = mode_var.get() == "analysis"
         for widgets in info_rows:
             for w in widgets:
-                if mode_var.get() in ("inventory", "collect"):
-                    w.grid_remove()
-                else:
-                    w.grid()
+                w.grid() if analysis else w.grid_remove()
+        for widgets in adv_rows:
+            for w in widgets:
+                w.grid() if analysis and adv_var.get() else w.grid_remove()
         inv = mode_var.get() == "inventory"
         word_btn.configure(text="Excel'i aç" if inv else "Word'ü aç")
         run_btn.configure(text="3  Paketi oluştur" if col else "3  Envanteri çıkar" if inv else "3  Analizi başlat")
-        if inv or col:
-            disc_chk.grid_remove()
-        else:
-            disc_chk.grid()
         hint.configure(text="Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
                             + ("Paket müşteri verisi içerir: paylaşmadan önce veri kullanım kurallarını teyit edin." if col
                                else "Envanter değerlendirme içermez; yapi_tanisi.txt müşteri verisi içermez." if inv
@@ -188,9 +193,6 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     ttk.Label(body, text="Rapor klasörü").grid(row=r, column=0, sticky="w", pady=3)
     ttk.Entry(body, textvariable=out_var).grid(row=r, column=1, sticky="ew", padx=8)
     ttk.Button(body, text="Değiştir…", command=pick_out).grid(row=r, column=2, sticky="e")
-    r += 1
-    disc_chk = ttk.Checkbutton(body, text="Sadece keşif (klasör yapısını raporla, analiz yapma)", variable=disc_var)
-    disc_chk.grid(row=r, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
     r += 1
 
     # 3) Çalıştır
@@ -302,6 +304,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     inv_btn.configure(command=lambda: result["path"] and (result["path"].parent / "envanter.xlsx").exists()
                       and _open_file(result["path"].parent / "envanter.xlsx"))
     mode_var.trace_add("write", on_mode)
+    adv_var.trace_add("write", on_mode)
     on_mode()
     folder_btn.configure(command=lambda: result["path"] and _open_file(result["path"].parent))
     root.after(150, poll)

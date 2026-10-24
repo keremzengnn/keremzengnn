@@ -20,13 +20,15 @@ from pathlib import Path
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Severity
+from .mlfb_info import describe
 from .parsers.subblk import lang_name
 from .report import GENERIC_OPEN_ITEMS, REFERENCES, _natkey, decision, manual_items, prep_list, tr_upper
 from .xlsx import Cell, Workbook
 
 PETROL = "009999"
 SHEETS = ["Ozet", "AS_Envanter", "HW_Moduller", "Custom_Blocklar", "Instance_Sayilari", "OS_WinCC",
-          "ENG_SRV1_Farklar", "Acik_Konular_Kaynak"]
+          "ENG_SRV1_Farklar", "Acik_Konular_Kaynak", "Backup_Yeterlilik", "Teklif_Girdileri", "Bulgular"]
+# DIAGNOSTICS arşivi varsa ayrıca "Diagnostics" sayfası eklenir.
 DIFF_CATEGORIES = ["Picture / script", "Connection", "Tag", "Tag adres", "Alarm", "Alarm metni", "Alarm class"]
 
 
@@ -147,11 +149,11 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     wb.add_sheet("AS_Envanter", rows, header_rows={0}, filter_row=0, filter_last=n - 1, freeze=1)
 
     # ---------------- 3 HW_Moduller ----------------
-    rows = [["MLFB / GSD", "FW (proje)", "Listedeki FW", "FW uyumu", "Released Modules durumu", "Discontinued", "Adet",
+    rows = [["MLFB / GSD", "Model / açıklama", "FW (proje)", "Listedeki FW", "FW uyumu", "Released Modules durumu", "Discontinued", "Adet",
              "AS", "Tür", "Bölüm / not"]]
     for mm in sorted(an.hw_matches, key=lambda x: (x.kind != "modül", "bulunamadı" not in x.status, x.order)):
         style = "yellow" if mm.kind != "modül" else "red" if "bulunamadı" in mm.status or mm.fw_status == "uyumsuz" else ""
-        rows.append([Cell(v, style) for v in (mm.order, mm.fw, mm.listed_fw, mm.fw_status, mm.status, mm.discontinued)]
+        rows.append([Cell(v, style) for v in (mm.order, describe(mm.order)[0], mm.fw, mm.listed_fw, mm.fw_status, mm.status, mm.discontinued)]
                     + [Cell(mm.count, style), Cell(", ".join(mm.stations), style), Cell(mm.kind, style), Cell(mm.note, style)])
     wb.add_sheet("HW_Moduller", rows, header_rows={0}, filter_row=0, freeze=1)
 
@@ -255,6 +257,27 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     rows += [["Uyarı", w, ""] for w in an.warnings]
     rows += [["Kaynak", f"{r[0]} {r[1]}", f"{r[2]} ({r[3]})"] for r in REFERENCES]
     wb.add_sheet("Acik_Konular_Kaynak", rows, header_rows={0}, filter_row=0, freeze=1)
+
+    # ---------------- 9-11 Readiness ----------------
+    from .readiness import backup_coverage, findings_rows, quote_inputs
+    sty = {"Var": "green", "Kısmen": "yellow", "Yok": "yellow", "VERİ YOK": "red"}
+    rows = [["Kontrol", "Durum", "Kanıt", "Analize etkisi"]]
+    rows += [[Cell(r[0]), Cell(r[1], sty.get(r[1], "")), Cell(r[2]), Cell(r[3])] for r in backup_coverage(an)]
+    wb.add_sheet("Backup_Yeterlilik", rows, header_rows={0}, freeze=1, widths=[40, 12, 50, 80])
+    rows = [["Girdi", "Değer", "Kaynak / güven"]]
+    rows += [[Cell(r[0]), Cell(r[1], "red" if r[1] == "VERİ YOK" else ""), Cell(r[2])] for r in quote_inputs(an)]
+    wb.add_sheet("Teklif_Girdileri", rows, header_rows={0}, freeze=1, widths=[36, 70, 40])
+    rows = [["Konu", "Önem", "Güven", "Detay", "Kaynak"]]
+    for r in findings_rows(an):
+        st = "yellow" if r[2] != "KANIT" else ""
+        rows.append([Cell(v, st) for v in r])
+    wb.add_sheet("Bulgular", rows, header_rows={0}, filter_row=0, freeze=1, widths=[28, 10, 12, 100, 50])
+    if an.diag is not None:
+        dg = an.diag
+        rows = [["Tür", "Zaman / önem", "Kategori / güven", "Metin", "Kaynak"]]
+        rows += [["Bulgu", f.severity, f.confidence, f"{f.title}: {f.detail}", f.source] for f in dg.findings]
+        rows += [["Olay", ev.ts, ev.category, ev.text, ev.source] for ev in dg.events]
+        wb.add_sheet("Diagnostics", rows, header_rows={0}, filter_row=0, freeze=1, widths=[10, 20, 14, 100, 50])
     return wb
 
 

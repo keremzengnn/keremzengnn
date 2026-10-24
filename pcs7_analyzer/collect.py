@@ -50,6 +50,10 @@ def needed(rel: str, size: int) -> bool:
         return size <= _MAX_TEXT                      # Configuration Studio export olabilir
     if name == "chartlst" and "/sfcrtbase/" in f"/{low}":
         return True
+    from .parsers.diag import is_diag_file
+    kind = is_diag_file(rel.replace(NESTED_SEP, "/"))
+    if kind in ("sql_errorlog", "wincc_log") or (kind == "eventlog_csv" and not in_wincc):
+        return size <= _MAX_TEXT                      # DIAGNOSTICS: SQL ERRORLOG, WinCC diagnose, event log CSV
     if in_wincc and name.endswith(_SCRIPT_EXT):
         return size <= 5_000_000                      # VBS / C script'ler (OPC, 3rd party referansları için)
     return False

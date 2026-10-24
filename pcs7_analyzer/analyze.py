@@ -159,6 +159,7 @@ class BlockFolderResult:
     f_driver_instances: int = 0
     unresolved_instances: int = 0
     bad_records: int = 0
+    sfb_instances: dict = field(default_factory=dict)     # {SFB no: instance DB sayısı}
     memo_available: bool = False
     fb_numbers: list[int] = field(default_factory=list)
     fb_instances: dict = field(default_factory=dict)       # {fb_nr: instance sayısı}
@@ -298,6 +299,12 @@ class Analysis:
     manual: ManualInputs = field(default_factory=ManualInputs)
     missing_os_projects: list[str] = field(default_factory=list)   # PC station'ı olup wincproj'u olmayan
     extra_os_projects: list[str] = field(default_factory=list)     # wincproj'u olup PC station listesinde olmayan
+    diag: object = None                                              # parsers.diag.DiagResult (DIAGNOSTICS arşivi varsa)
+
+    @property
+    def as_folders(self) -> list:
+        """AS'e ait block klasörleri (library projeleri hariç)."""
+        return [b for b in self.block_folders if not b.info.is_library]
 
     def mp_of(self, rel_dir: str) -> str:
         """Bir proje klasörünün multiproject adı (s7f klasörü ata ise; tek MP varsa o)."""
@@ -521,6 +528,7 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
                                        for v in versions]
     inst = Counter(bf.instances_per_fb)
     res.fb_instances = {nr: n for (kind, nr), n in inst.items() if kind == "FB"}
+    res.sfb_instances = {nr: n for (kind, nr), n in inst.items() if kind == "SFB"}
     fb_names = {b.number: b for b in bf.blocks if b.kind == "FB"}
     for b in bf.blocks:
         if b.kind != "FB":
@@ -594,14 +602,16 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
                 bfr.mapping = "symbol export dosya adı + FB seti"
         # 2) proje adı
         if bfr.mapping == "-":
-            siblings = [b for b in an.block_folders if b.info.project == bfr.info.project and b.counts]
-            pname = Path(bfr.info.project).name
-            if pname and pname != "-" and len(siblings) == 1:
-                bfr.as_label = pname
+            bfr.as_label = bfr.info.label
+            if bfr.info.is_library:
+                bfr.mapping = "library projesi (.s7l): AS değil, master data / proje library'si"
+            elif bfr.info.project == "-":
+                bfr.mapping = "proje dosyası (.s7p) bulunamadı: klasör adı kullanıldı, AS teyit edilmeli"
+            elif bfr.info.n_programs == 1:
                 bfr.mapping = "proje adı (projede tek dolu block klasörü)"
-            elif pname and pname != "-":
-                bfr.as_label = f"{pname}/{bfr.info.path.rsplit('/', 1)[-1]}"
-                bfr.mapping = "projede birden fazla block klasörü: AS teyit edilmeli"
+            else:
+                bfr.mapping = (f"projede {bfr.info.n_programs} S7 program: hangi CPU'ya ait olduğu teyit edilmeli "
+                               f"(klasör {bfr.info.path.rsplit('/', 1)[-1]})")
 
 
 def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
@@ -762,6 +772,19 @@ def _analyze_wincc_exports(src: Source, d: DiscoveryResult, an: Analysis, extra:
 
 
 LM_BLOCKS = ("LM_MATRIX", "LM_CAUSE", "LM_EFFECT", "LM_NODE")
+
+
+def _analyze_diag(src: Source, an: Analysis, log) -> None:
+    """Server fail / DIAGNOSTICS arşivi: sadece ilgili dosya varsa çalışır."""
+    from .parsers.diag import is_diag_file, scan_diagnostics
+    kinds = {k for k in (is_diag_file(e.rel) for e in src.entries) if k}
+    if not kinds & {"sql_errorlog", "wincc_log", "evtx"}:      # sadece .csv varsa tarama yok (her projede CSV olabilir)
+        return
+    log("Diagnostics dosyaları taranıyor...")
+    an.diag = scan_diagnostics(src.entries, src.read_bytes)
+    an.warnings += [f"Diagnostics: {w}" for w in an.diag.warnings]
+    if not any(an.diag.files.get(k) for k in ("sql_errorlog", "wincc_log", "evtx", "eventlog_csv")):
+        an.diag = None
 
 
 def _lm_status(an: Analysis) -> None:
@@ -939,6 +962,7 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
     log("WinCC export'ları...")
     _stage(an, "WinCC export", log, _analyze_wincc_exports, src, d, an, list(extra_exports or []), log)
     _stage(an, "Logic Matrix kullanımı", log, _lm_status, an)
+    _stage(an, "Diagnostics (SQL / WinCC / event log)", log, _analyze_diag, src, an, log)
     _stage(an, "Versiyon tespiti", log, _versions, an)
 
     log("Kontroller...")

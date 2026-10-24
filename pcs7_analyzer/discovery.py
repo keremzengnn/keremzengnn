@@ -52,14 +52,34 @@ class BlockFolderInfo:
     dbt_size: int | None
     dbt_mtime: str | None
     has_baustein: bool
+    is_library: bool = False      # .s7l library projesi (ör. master data library) -> AS değil
+    program_no: int = 1           # projedeki kaçıncı dolu block klasörü (S7 program)
+    n_programs: int = 1           # projedeki dolu block klasörü sayısı
 
     @property
     def is_empty(self) -> bool:
         return self.n_records == 0
 
     @property
+    def owner_name(self) -> str:
+        """Proje / library adı; proje dosyası yoksa ombstx'in üstündeki klasör adı."""
+        if self.project and self.project != "-":
+            return Path(self.project).name or self.project
+        parts = self.path.split("/")
+        i = next((k for k, x in enumerate(parts) if x.lower() == "ombstx"), 0)
+        return parts[i - 1] if i > 0 else "-"
+
+    @property
     def label(self) -> str:
-        return f"{Path(self.project).name or '-'}/{self.path.rsplit('/', 1)[-1]}"
+        """Okunur etiket: 'Proje', 'Proje · S7 program 2/3', 'Lib (library)'. Klasör hex'i path'te kalır."""
+        name = self.owner_name
+        if self.is_empty:
+            return f"{name} (boş block klasörü {self.path.rsplit('/', 1)[-1]})"
+        if self.is_library:
+            return f"{name} (library)"
+        if self.n_programs > 1:
+            return f"{name} · S7 program {self.program_no}/{self.n_programs}"
+        return name
 
 
 @dataclass
@@ -86,6 +106,7 @@ class DiscoveryResult:
     root: str
     multiprojects: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
+    libraries: list[str] = field(default_factory=list)          # *.s7l (library projeleri, master data library)
     block_folders: list[BlockFolderInfo] = field(default_factory=list)
     s7h_files: list[str] = field(default_factory=list)
     cfg_exports: list[str] = field(default_factory=list)
@@ -95,11 +116,33 @@ class DiscoveryResult:
     archives: list[str] = field(default_factory=list)
     wincc_exports: list[str] = field(default_factory=list)     # Configuration Studio tag/alarm export'ları (.txt)
     warnings: list[str] = field(default_factory=list)
+    markers: dict = field(default_factory=dict)     # "ne var / ne yok": {işaret: dosya sayısı}, ör. pdl, mdf, s7asrcom
     n_files: int = 0
     total_bytes: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# Backup yeterlilik tablosu için sayılan işaretler (path küçük harf, '/' ile)
+_MARKER_DIRS = {"s7asrcom": "/s7asrcom/", "s7cfc": "/s7cfc/", "homsave7": "/homsave7/", "ydbs": "/ydbs/",
+                "gracs": "/gracs/", "s7netze": "/s7netze/"}
+_MARKER_EXT = {".pdl": "pdl", ".mdf": "mdf", ".ldf": "ldf", ".evtx": "evtx", ".awl": "awl", ".scl": "scl",
+               ".gsd": "gsd", ".gse": "gsd", ".gsg": "gsd", ".pck": "pck", ".fct": "fct"}
+
+
+def _markers(rel: str) -> list[str]:
+    low = "/" + rel.lower()
+    out = [k for k, d in _MARKER_DIRS.items() if d in low]
+    name = low.rsplit("/", 1)[-1]
+    dot = name.rfind(".")
+    if dot >= 0 and name[dot:] in _MARKER_EXT:
+        out.append(_MARKER_EXT[name[dot:]])
+    if name.startswith("errorlog"):
+        out.append("sql_errorlog")
+    if "/diagnose/" in low or "/diagnostics/" in low:
+        out.append("diagnose")
+    return out
 
 
 def owner_project(rel_dir: str, project_dirs: list[str]) -> str:
@@ -149,8 +192,11 @@ def discover_source(src: Source) -> DiscoveryResult:
             res.warnings.append(f"Okunamadı: {rel} ({type(ex).__name__}: {ex})")
             return b""
     by_dir: dict[str, list[Entry]] = defaultdict(list)
+    markers: Counter = Counter()
     for e in src.entries:
         by_dir[e.parent].append(e)
+        for m in _markers(e.rel):
+            markers[m] += 1
         res.n_files += 1
         res.total_bytes += e.size
         low = e.name.lower()
@@ -158,6 +204,8 @@ def discover_source(src: Source) -> DiscoveryResult:
             res.multiprojects.append(e.rel)
         elif low.endswith(".s7p"):
             res.projects.append(e.rel)
+        elif low.endswith(".s7l"):
+            res.libraries.append(e.rel)
         elif low.endswith(".s7h"):
             res.s7h_files.append(e.rel)
         elif low.endswith(".cfg") and "/wincproj/" not in f"/{e.rel.lower()}":
@@ -172,7 +220,9 @@ def discover_source(src: Source) -> DiscoveryResult:
         elif low.endswith(".txt") and e.size > 64 and "/wincproj/" not in f"/{e.rel.lower()}":
             if looks_like_export(head(e.rel, 16384)):
                 res.wincc_exports.append(e.rel)
+    res.markers = dict(markers)
     project_dirs = [p.rsplit("/", 1)[0] if "/" in p else "" for p in res.projects]
+    library_dirs = [p.rsplit("/", 1)[0] if "/" in p else "" for p in res.libraries]
 
     # Block klasörleri
     for d, files in sorted(by_dir.items()):
@@ -184,8 +234,10 @@ def discover_source(src: Source) -> DiscoveryResult:
         if not dbf:
             continue
         dbt = names.get("subblk.dbt")
+        owner = owner_project(d, project_dirs + library_dirs)
         res.block_folders.append(BlockFolderInfo(
-            path=d, project=owner_project(d, project_dirs), dbf=dbf.rel, dbt=dbt.rel if dbt else None,
+            path=d, project=owner, is_library=owner != "-" and owner in library_dirs and owner not in project_dirs,
+            dbf=dbf.rel, dbt=dbt.rel if dbt else None,
             dbf_size=dbf.size, dbf_mtime=_iso(dbf.mtime),
             n_records=dbf_record_count_from_head(head(dbf.rel, 8)),
             dbt_size=dbt.size if dbt else None, dbt_mtime=_iso(dbt.mtime) if dbt else None,
@@ -195,6 +247,15 @@ def discover_source(src: Source) -> DiscoveryResult:
             res.warnings.append(f"{d}: SUBBLK.DBT yok -> instance eşlemesi yapılamaz")
         elif abs(dbt.mtime - dbf.mtime) > 24 * 3600:
             res.warnings.append(f"{d}: SUBBLK.DBF ve .DBT tarihleri >1 gün farklı -> eşleşme teyit edilmeli")
+
+    # Projedeki S7 program sırası (dolu block klasörleri, path sırasıyla)
+    by_owner: dict = defaultdict(list)
+    for b in res.block_folders:
+        if not b.is_empty:
+            by_owner[(b.project, b.owner_name)].append(b)
+    for bs in by_owner.values():
+        for i, b in enumerate(sorted(bs, key=lambda x: x.path.lower()), 1):
+            b.program_no, b.n_programs = i, len(bs)
 
     # OS projeleri: kök seviyesinde .mcp olan klasör
     os_dirs = sorted(d for d, files in by_dir.items() if any(f.name.lower().endswith(".mcp") for f in files))
@@ -245,6 +306,7 @@ def render_markdown(r: DiscoveryResult) -> str:
 
     lst("Multiproject (*.s7f)", r.multiprojects)
     lst("Proje (*.s7p)", r.projects)
+    lst("Library projesi (*.s7l)", r.libraries)
     out.append(f"## Block klasörleri ({len(r.block_folders)})")
     if r.block_folders:
         out += ["| Klasör | Proje | Kayıt | DBF MB | DBT MB | DBF tarih | DBT tarih |", "|---|---|---|---|---|---|---|"]

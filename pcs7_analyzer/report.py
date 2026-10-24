@@ -23,6 +23,7 @@ from pathlib import Path
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
 from .model import Confidence, Finding, Severity
+from .mlfb_info import describe
 from .parsers.subblk import lang_name
 
 # ---------------------------------------------------------------------------
@@ -473,6 +474,19 @@ def prep_list(an: Analysis) -> list[str]:
         items.append("Picture object update: custom typicals ve @PCS7TypicalsAPC.pdl ayrıca ele alınmalı [1, Bölüm 9.6.4].")
     if any(o.sfc.get("filled") for o in an.os_projects):
         items.append("OS compile'da 'SFC visualization' işaretlenmeli (SFC görselleştirme verisi var).")
+    m = re.match(r"V(\d+)\.(\d+)", fam or "")
+    if not m or (int(m.group(1)), int(m.group(2))) < (9, 1):
+        items.append("PC'ler: V9.1'den eski PCS 7 software'i update edilemez -> temiz kurulum. Desteklenen OS: Windows 10 "
+                     "Enterprise LTSC 2019/2021, Windows 11 Enterprise LTSC 2024, Windows Server 2019/2022/2025; SQL Server "
+                     "2019 [1, Bölüm 4.3]. OS server, BATCH, Route Control, Web server, PH ve central ES için server OS.")
+    items.append("License key'ler update öncesi yedeklenmeli; upgrade key'leri kademeli (V8.x → V9.x, V9.x → V10.0.x) "
+                 "[1, Bölüm 4.3]. Software update konfigürasyon değişikliğinden önce tamamlanmalı.")
+    if an.os_projects:
+        items.append("OS design 'WinCC 3D' olmalı (diğer design'lar PCS 7'de onaylı değil) [1, Bölüm 9.6.1]; picture object "
+                     "update için @TemplateAPLVer10.PDL / @PCS7TypicalsAPLVer10.PDL + TemplateControl.cfg.")
+    if "F-System" in feats:
+        items.append("F program şifresi müşteriden alınmalı (Update Block Types / compile sorar); F-@ chart'lar silinmemeli "
+                     "[1, Bölüm 9.5.17].")
     if "IM_DRV" in ids:
         items.append("IM_DRV block'ları update öncesi system chart'lardan geçici chart'lara taşınmalı [1, Bölüm 6.1].")
     if "LIB_LOGIC_MATRIX" in ids:
@@ -504,7 +518,10 @@ def manual_items(an: Analysis) -> list[list[str]]:
              c.kind == "opc" for w in an.wincc.values() for c in w.connections) else "",
          "TCP/IP OS bağlantısı hangi AS'e gidiyor (redundans)?" if any(
              c.kind == "tcpip" for w in an.wincc.values() for c in w.connections) else "",
-         "AS bazında izin verilen duruş süreleri"]
+         "AS bazında izin verilen duruş süreleri",
+         "Maintenance Station kullanılıyor mu? (kullanılıyorsa OS'lara 'Options/Maintenance functions for OS' paketi) [1, 4.3]",
+         "BATCH / Route Control / Process Historian / Information Server var mı? (kendi update bölümleri)",
+         "Redundant IO library kullanılıyor mu, sürümü?"]
     rows += [["Müşteri sorusu", x] for x in q if x]
     return rows
 
@@ -581,6 +598,13 @@ def build_document(an: Analysis, full: bool = True) -> list:
     doc.append(Note("Planlı duruş (AS STOP) ve PC / Windows yenilemesi her upgrade'de zaten kapsamdadır; "
                     "zorluk olarak listelenmemiştir."))
 
+    if full:
+        from .readiness import backup_coverage
+        doc.append(Heading(1, "Backup içeriği ve yeterlilik"))
+        doc.append(Para("Backup'ta ne var / ne yok ve eksik parçanın analize etkisi. Olmayan şey için tahmin yapılmaz."))
+        doc.append(Table(["Kontrol", "Durum", "Kanıt", "Analize etkisi"], backup_coverage(an), "Backup yeterliliği",
+                         badge_cols=[1], widths=[24, 10, 30, 36]))
+
     # ---------------- PROJE ENVANTERİ ----------------
     doc.append(Topline("PROJE ENVANTERİ"))
     doc.append(Heading(1, "Proje bilgileri"))
@@ -617,6 +641,12 @@ def build_document(an: Analysis, full: bool = True) -> list:
     if full:
         doc.append(Heading(1, "Upgrade hazırlık listesi"))
         doc.append(Bullets(prep_list(an)))
+        from .readiness import quote_inputs
+        doc.append(Heading(1, "Teklif için girdiler"))
+        doc.append(Para("Sayılar backup'tan; süre / fiyat üretilmez. 'VERİ YOK' satırları müşteriden istenmeli."))
+        doc.append(Table(["Girdi", "Değer", "Kaynak / güven"], quote_inputs(an), widths=[28, 46, 26]))
+        if an.diag is not None:
+            _diag_section(an, doc)
         doc.append(Heading(1, "Manuel girişler ve müşteri soruları"))
         doc.append(Table(["Konu", "Değer / soru"], manual_items(an)))
         doc.append(Heading(1, "Teklif öncesi netleşmesi gerekenler"))
@@ -631,6 +661,28 @@ def build_document(an: Analysis, full: bool = True) -> list:
     if full:
         _appendix(an, doc)
     return doc
+
+
+def _diag_section(an: Analysis, doc: list) -> None:
+    dg = an.diag
+    doc.append(Heading(1, "Diagnostics (server fail)"))
+    files = ", ".join(f"{k}: {len(v)}" for k, v in dg.files.items() if v)
+    sql = dg.sql
+    doc.append(Bullets([f"Dosyalar: {files or '-'}",
+                        f"SQL Server: {sql.get('version') or '-'}" + (f" ({sql['bits']}-bit)" if sql.get("bits") else ""),
+                        "Startup parametreleri: " + (", ".join(sql.get("startup_params") or []) or "-"),
+                        "Olay sayıları: " + (", ".join(f"{k} {n}" for k, n in dg.category_counts.most_common()) or "-")]))
+    if dg.findings:
+        doc.append(Table(["Bulgu", "Önem", "Güven", "Detay", "Kaynak"],
+                         [[f.title, f.severity, f.confidence, f.detail, f.source] for f in dg.findings],
+                         badge_cols=[1, 2], widths=[18, 8, 9, 45, 20]))
+    key = [e for e in dg.events if e.category in ("sql_error", "sql_memory", "redundancy", "eventlog")][:60]
+    if key:
+        doc.append(Heading(2, "Zaman çizelgesi (önemli olaylar, ilk 60)"))
+        doc.append(Table(["Zaman", "Kategori", "Olay", "Dosya"], [[e.ts or "-", e.category, e.text, e.source] for e in key],
+                         widths=[16, 10, 54, 20]))
+    doc.append(Note("WinCC diagnose log formatları gerçek örnekle teyit edilmedi: sınıflandırma anahtar kelimeyle (ÇIKARIM). "
+                    ".evtx okunmaz; Event Viewer'dan CSV export alınmalı."))
 
 
 def _appendix(an: Analysis, doc: list) -> None:
@@ -653,9 +705,9 @@ def _appendix(an: Analysis, doc: list) -> None:
     doc.append(Para(f"Released Modules listesi: {an.released_list}" if an.released_list else
                     "Released Modules listesi (data/released_modules_<versiyon>.csv) yok: eşleştirme yapılmadı."))
     if an.hw_matches:
-        doc.append(Table(["MLFB", "FW", "Adet", "AS", "Durum"],
-                         [[m.order, m.fw or "-", str(m.count), _fmt_list(m.stations, 4), m.status] for m in
-                          sorted(an.hw_matches, key=lambda m: ("bulunamadı" not in m.status, m.order))], badge_cols=[4]))
+        doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
+                         [[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4), m.status] for m in
+                          sorted(an.hw_matches, key=lambda m: ("bulunamadı" not in m.status, m.order))], badge_cols=[5]))
     doc.append(Heading(2, "Block klasörleri"))
     rows = []
     for b in an.block_folders:
@@ -711,6 +763,11 @@ def _appendix(an: Analysis, doc: list) -> None:
                          [[_fmt_list(_b(g.members), 10), str(g.n_files), "referans" if g.is_reference else
                            f"+{len(g.only_in_group)} / -{len(g.missing_in_group)}", _fmt_list(_b(g.only_in_group), 6)]
                           for g in an.client_groups]))
+    from .readiness import findings_rows
+    doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)"))
+    doc.append(Para("KANIT = dosyada birebir görüldü; ÇIKARIM = heuristic / isimden yorum, teyit edilmeli (sarı)."))
+    doc.append(Table(["Konu", "Önem", "Güven", "Detay", "Kaynak"], findings_rows(an), badge_cols=[1, 2],
+                     widths=[14, 8, 9, 49, 20]))
     doc.append(Heading(1, "Ek B: Keşif ve uyarılar"))
     doc.append(Bullets([f"Kaynak: {an.source}", f"{d.n_files} dosya, {d.total_bytes / 1e9:.2f} GB",
                         f"Block klasörü: {len(d.block_folders)} ({sum(1 for b in d.block_folders if b.is_empty)} boş)",
@@ -785,6 +842,12 @@ SIEMENS_TOKENS = {
 
 def badge_class(v: str) -> str | None:
     v = str(v)
+    if v in ("Var", "KANIT"):
+        return "ok"
+    if v in ("Kısmen", "Yok", "ÇIKARIM", "VARSAYIM"):
+        return "medium"
+    if v == "VERİ YOK":
+        return "neutral"
     if v in (STATUS_OK, "listede"):
         return "ok"
     if v in (STATUS_NOT_CHECKED,):

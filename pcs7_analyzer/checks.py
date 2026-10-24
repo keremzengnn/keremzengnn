@@ -93,7 +93,7 @@ def hw_released(c, an):
 
 def hw_f_export_missing(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if "F-System" not in b.features and not b.f_driver_instances:
             continue
         sts = [s for s in an.stations if s.project == b.info.project]
@@ -160,7 +160,7 @@ def lib_mixed(c, an):
 
 def _feature(c, an, feat, text):
     return [_f(c, f"{b.as_label}: {text}", [b.info.dbf], scope=b.as_label)
-            for b in an.block_folders if feat in b.features]
+            for b in an.as_folders if feat in b.features]
 
 
 def lib_v71(c, an):
@@ -170,7 +170,7 @@ def lib_v71(c, an):
 
 def lib_lm(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if "Logic Matrix" not in b.features:
             continue
         st = an.lm_status.get(b.as_label, {})
@@ -191,7 +191,7 @@ def lib_lm(c, an):
 
 def lib_sfc(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if "SFC" not in b.features:
             continue
         n = b.fb_instances.get(300, 0)
@@ -206,13 +206,18 @@ def lib_f(c, an):
     from .analyze import author_version
     fp = sorted({x for o in an.os_projects for x in o.f_faceplates})
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if "F-System" not in b.features:
             continue
         vs = sorted({author_version(a) or a for a in b.libraries.get("S7 F Systems Failsafe Blocks", {})})
+        ok13 = [v for v in vs if _f_lib_ok(v)]
         d = (f"{b.as_label}: F-program Failsafe Blocks " + ("/".join(vs) if vs else "(versiyon tespit edilemedi)")
-             + " ile yazılmış. S7 F Systems ve F-library'nin V10 uyumlu versiyona geçişi S7 F Systems Readme'den "
-               "doğrulanmalı. Collective signature değişirse safety kabul (re-validation) gerekir.")
+             + " ile yazılmış. "
+             + ("Manual: F-library V1.3 veya üzeri olmalı -> şart sağlanıyor [1, Bölüm 9.5.17]. " if ok13 and len(ok13) == len(vs)
+                else "Manual: F-library V1.3 veya üzeri olmalı [1, Bölüm 9.5.17] -> versiyon teyit edilmeli. ")
+             + "F-@ chart'lar silinmemeli; F block update / compile signature'ı değiştirirse safety acceptance (re-validation) "
+               "gerekir. Update Block Types / compile'da F program şifresi sorulur -> müşteriden alınmalı (VERİ YOK). "
+               "S7 F Systems sürümü S7 F Systems Readme / Compatibility Tool'dan teyit edilmeli.")
         if b.f_driver_instances:
             d += f" Block klasöründe {b.f_driver_instances} F-channel driver instance var, yani F-I/O mevcut."
         if b.f_blocks_from_symbols:
@@ -223,19 +228,77 @@ def lib_f(c, an):
     return out
 
 
+def _f_lib_ok(v: str) -> bool:
+    """'V1_3' / 'V1.3' / 'V2_0' -> V1.3 veya üzeri mi?"""
+    import re as _re
+    m = _re.match(r"V(\d+)[._](\d+)", v or "")
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (1, 3)
+
+
+def proj_min_version(c, an):
+    """Proje en az PCS 7 V7.1 SP4 ile konfigüre edilmiş olmalı [1, 4.3]."""
+    import re as _re
+    fam = an.pcs7_family or ""
+    m = _re.match(r"V(\d+)\.(\d+)", fam)
+    if not m:
+        raise NotChecked("PCS 7 versiyonu tespit edilemedi")
+    if (int(m.group(1)), int(m.group(2))) < (7, 1):
+        return [_f(c, f"Proje PCS 7 {fam} ailesinde görünüyor: V7.1 SP4'ten eski proje doğrudan V10.0 SP2'ye update "
+                      "edilemez (önce ara versiyona taşınmalı).", [], Confidence.LOW if an.pcs7_family_confidence != "high"
+                   else Confidence.HIGH, blocking=True)]
+    if (int(m.group(1)), int(m.group(2))) == (7, 1):
+        return [_f(c, "Proje PCS 7 V7.1 ailesinde: SP4 veya üzeri olduğu teyit edilmeli (V7.1 SP4 altı doğrudan update "
+                      "edilemez).", [], Confidence.LOW)]
+    return []
+
+
+# Standart haberleşme block'ları (isimle tanınır; numaralar standart library numaralarıdır)
+STD_COMM = {"TCON", "TDISCON", "TSEND", "TRCV", "TUSEND", "TURCV", "AG_SEND", "AG_RECV", "AG_LSEND", "AG_LRECV",
+            "AG_CNTRL", "BSEND", "BRCV", "USEND", "URCV", "PUT", "GET", "MB_CPCLI", "MB_CPSRV", "MB_REDCL", "MB_REDSV",
+            "MB_RED_CLNT", "MB_RED_SRV", "MODBUSCP", "SEND_R", "REC_R"}
+STD_COMM_SFB = {8: "USEND", 9: "URCV", 12: "BSEND", 13: "BRCV", 14: "GET", 15: "PUT"}
+
+
+def comm_std(c, an):
+    out = []
+    for b in an.as_folders:
+        hits = []
+        for name, nr in sorted(b.fb_by_name.items()):
+            if name.upper() in STD_COMM:
+                hits.append(f"{name} (FB{nr}, {b.fb_instances.get(nr, 0)} inst.)")
+        for nr, n in sorted(b.sfb_instances.items()):
+            if nr in STD_COMM_SFB and n:
+                hits.append(f"{STD_COMM_SFB[nr]} (SFB{nr}, {n} inst.)")
+        if hits:
+            out.append(_f(c, f"{b.as_label}: haberleşme block'ları: " + _short(hits, 8) + ". Bağlantı parametreleri "
+                             "(ID / R_ID / IP / port / unit ID) ve NetPro bağlantıları backup'tan okunmadı (VERİ YOK): "
+                             "R_ID çakışması ve karşı taraf teyit edilmeli.", [b.info.dbf], scope=b.as_label))
+    return out
+
+
 def lib_modbus(c, an):
     return _feature(c, an, "Modbus TCP / Siemens add-on", "Modbus TCP / Siemens add-on block'ları; hedef versiyonda lisans ve block versiyonu teyit edilmeli.")
+
+
+OLD_MASTERDATA_BLOCKS = ("OB_DIAG", "OR_M_16", "OR_M_32")   # tam isim; OB_DIAG1 / OR_M_16C güncel block'lardır, silinmez
 
 
 def lib_masterdata(c, an):
     if not any(b.libraries.get("APL") or b.libraries.get("Basis Library") for b in an.block_folders):
         return []
-    return [_f(c, "Library update öncesi master data library'den OB_DIAG, OR_M_16, OR_M_32 silinmeli.")]
+    found = [(b, n) for b in an.block_folders for n in b.block_names if n.strip().upper() in OLD_MASTERDATA_BLOCKS]
+    if found:
+        where = "; ".join(f"{n} ({b.as_label})" for b, n in found)
+        return [_f(c, f"Eski block'lar bulundu: {where}. Library update öncesi master data library'den silinmeli "
+                      "(OB_DIAG1, OR_M_16C güncel Basis block'larıdır, silinmez).",
+                   sorted({b.info.dbf for b, _ in found}))]
+    return [_f(c, "OB_DIAG / OR_M_16 / OR_M_32 backup'taki block klasörlerinde bulunamadı; master data library ayrı "
+                  "bir projedeyse orada kontrol edilmeli (OB_DIAG1, OR_M_16C silinmez).", [], Confidence.LOW)]
 
 
 def blk_custom(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if not b.custom_blocks:
             continue
         items = [f"FB{x.number} {x.name or '(header yok)'}" + (" STL" if lang_name(x.lang) == "STL" else "")
@@ -246,7 +309,7 @@ def blk_custom(c, an):
 
 def blk_unused(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if not b.memo_available:
             continue
         unused = [f"FB{x.number} {x.name}" for x in b.custom_blocks if x.instances == 0]
@@ -259,7 +322,7 @@ def blk_unused(c, an):
 
 def blk_symbol(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if b.symbol_only:
             out.append(_f(c, f"{b.as_label}: symbol'de olup block klasöründe olmayan: {_short(b.symbol_only, 6)}",
                           [b.symbol_source, b.info.dbf], Confidence.LOW, scope=b.as_label))
@@ -269,7 +332,7 @@ def blk_symbol(c, an):
 def comm_as_as(c, an):
     pat = re.compile(r"(^|_)(GET|PUT|SEND|REC|BSEND|BRCV|USEND|URCV|AG_L?SEND|AG_L?RECV|TSEND|TRCV)", re.I)
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         hits = [f"FB{x.number} {x.name}" for x in b.custom_blocks if pat.search(x.name)]
         if "PCS 7 Lib V7.1" in b.features:
             hits.append("COMM71 SEND_R/REC_R")
@@ -287,7 +350,7 @@ STD_LIB_NAMES = {"MOT_SPED", "MOT_REV", "MOTOR", "VAL_MOT", "VALVE", "CTRL_PID",
 
 def lib_std(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         names = sorted({x.split(" ", 1)[-1] for x in b.unused_library_fbs} | {x.name for x in b.custom_blocks}
                        | set(b.block_names))
         hits = sorted(n for n in names if n.upper() in STD_LIB_NAMES)
@@ -318,7 +381,7 @@ def lib_interface(c, an):
         if r["interface_change"] == "yes":
             iface.setdefault(r["name"].upper(), r)
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if not b.counts:
             continue
         hits = []
@@ -346,7 +409,7 @@ def lib_interface(c, an):
 
 def im_drv(c, an):
     out = []
-    for b in an.block_folders:
+    for b in an.as_folders:
         if any(n.upper().startswith("IM_DRV") for n in b.block_names):
             out.append(_f(c, f"{b.as_label}: IM_DRV block'u var (high-precision time stamping). Update öncesi system "
                              "chart'lardaki IM_DRV block'ları geçici CFC chart'lara taşınmalı; taşındıktan sonra AS programı "
@@ -361,7 +424,7 @@ def box_rtx(c, an):
 
 
 def as_size(c, an):
-    full = [b for b in an.block_folders if b.counts]
+    full = [b for b in an.as_folders if b.counts]
     if len(full) < 2:
         return []
     big = max(full, key=lambda b: b.counts.get("DB", 0))
@@ -374,9 +437,9 @@ def as_size(c, an):
 
 
 def licenses(c, an):
-    if not an.block_folders:
+    if not an.as_folders:
         return []
-    opts = sorted({f for b in an.block_folders for f in b.features} & {"F-System", "Logic Matrix", "Modbus TCP / Siemens add-on", "SFC"})
+    opts = sorted({f for b in an.as_folders for f in b.features} & {"F-System", "Logic Matrix", "Modbus TCP / Siemens add-on", "SFC"})
     return [_f(c, "Upgrade paketleri kademeli (V7.1 → V8.2, V8.x → V9.x, V9.x → V10.0.x) [1, Bölüm 4.3]."
                + (f" {', '.join(opts)} gibi opsiyonların lisansları ayrıca kontrol edilmeli." if opts else ""))]
 
@@ -507,7 +570,7 @@ def os_conn_redundancy(c, an):
 
 def sfc_visu(c, an):
     out = []
-    fb300 = sum(b.fb_instances.get(300, 0) for b in an.block_folders if "SFC" in b.features)
+    fb300 = sum(b.fb_instances.get(300, 0) for b in an.as_folders if "SFC" in b.features)
     for o in an.os_projects:
         s = o.sfc
         if not s or not s.get("present"):
@@ -625,7 +688,7 @@ CHECKS: list[Check] = [
     Check("LIB_PCS7_V71", "PCS 7 Library V7.1", "PCS 7 Library V7.1 block'ları", M, f"{SW_UPDATE}, 8.5", lib_v71),
     Check("LIB_LOGIC_MATRIX", "Logic Matrix", "Logic Matrix: library update zorunlu", H, f"{SW_UPDATE}, 9.9.4", lib_lm),
     Check("LIB_SFC", "SFC", "SFC system block'ları elle güncellenmeli", M, f"{SW_UPDATE}, 9.5", lib_sfc),
-    Check("LIB_F_SYSTEM", "F-System", "F-System (Failsafe Blocks, F faceplate'leri)", H, "S7 F Systems Readme (eksik)", lib_f),
+    Check("LIB_F_SYSTEM", "F-System", "F-System (Failsafe Blocks, F faceplate'leri)", H, f"{SW_UPDATE}, 9.5.17", lib_f),
     Check("LIB_MODBUS_TCP", "Modbus TCP", "Modbus TCP / Siemens add-on block'ları", M, "-", lib_modbus),
     Check("LIB_MASTERDATA_DELETE", "Master data library", "OB_DIAG / OR_M_16 / OR_M_32 silinmeli", L, f"{SW_UPDATE}, 4.3", lib_masterdata),
     Check("LIB_INTERFACE", "Interface değişiklikleri", "V10'da interface'i değişen APL/Basis block tipleri", M,
@@ -639,6 +702,10 @@ CHECKS: list[Check] = [
     Check("BLK_CUSTOM", "Custom block'lar", "Custom block'lar (CFC kontrolü gerekli)", M, "-", blk_custom),
     Check("BLK_UNUSED", "Kullanılmayan block'lar", "Instance'sız custom/library FB'ler", L, "-", blk_unused),
     Check("BLK_SYMBOL_MISMATCH", "Symbol ↔ block", "Symbol'de olup block'u olmayan block'lar", M, "-", blk_symbol),
+    Check("PROJ_MIN_VERSION", "Proje versiyonu", "Proje en az PCS 7 V7.1 SP4 olmalı", H, f"{SW_UPDATE}, 4.3",
+          proj_min_version),
+    Check("COMM_STD", "Haberleşme block'ları", "TCON/TSEND/BSEND/PUT/GET/Modbus… kullanımı (parametreler VERİ YOK)", M, "-",
+          comm_std),
     Check("COMM_AS_AS", "AS-AS haberleşme", "AS-AS / multiproject'ler arası haberleşme", M, "-", comm_as_as),
     # --- OS ---
     Check("OS_CUSTOM_TYPICALS", "Custom typicals", "Custom picture object template'leri", M, f"{SW_UPDATE}, 9.6.4", os_typicals),

@@ -175,6 +175,21 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
 
+## Readiness / güven / diagnostics
+- `readiness.py`: `backup_coverage` (ne var / ne yok + analize etkisi; Var / Kısmen / Yok / VERİ YOK), `quote_inputs`
+  (teklif girdileri, süre/fiyat yok), `findings_rows` (güven: high -> KANIT, low -> ÇIKARIM; ÇIKARIM sarı). HTML/MD full
+  raporda + Excel `Backup_Yeterlilik`, `Teklif_Girdileri`, `Bulgular`. Word (müşteri raporu) Polisan yapısında kalır;
+  full rapordaki ek tablolar numarasız (Tablo 1-6 numaralandırması bozulmasın).
+- `parsers/diag.py` (DIAGNOSTICS: SQL ERRORLOG, WinCC diagnose, event log CSV, evtx listesi, segment sayısı) ->
+  `analyze._analyze_diag` (sadece ERRORLOG / diagnose / evtx varsa) -> rapor "Diagnostics (server fail)" + Excel `Diagnostics`.
+  WinCC diagnose formatları gerçek örnekle teyit edilmedi (keyword sınıflandırma, ÇIKARIM).
+- `mlfb_info.describe`: MLFB -> model (Released Modules açıklaması = KANIT; yoksa MLFB ailesi = çıkarım; bilinmiyorsa boş).
+- Block klasörü etiketi `BlockFolderInfo.label`: "Proje", "Proje · S7 program k/n", "Lib (library)" (.s7l); hex path'te.
+  Library projeleri `an.as_folders`'tan hariç (AS kontrollerine girmez), `LIB_MASTERDATA_DELETE` dahil tüm klasörlere bakar
+  (tam isim: OB_DIAG / OR_M_16 / OR_M_32; OB_DIAG1 / OR_M_16C silinmez).
+- Manual'dan teyitli ek kurallar: proje ≥ V7.1 SP4 (`PROJ_MIN_VERSION`, 4.3), F-library ≥ V1.3 + F-@ chart silinmez (9.5.17),
+  desteklenen OS / SQL 2019 / Maintenance functions (4.3), sadece WinCC 3D design (9.6.1).
+
 ## Paketle (`collect.py`, `--collect`)
 `needed(rel, size)` içeriği okunan dosyaları seçer; diğerleri `_pcs7_manifest.csv` (rel, size, mtime .3f, included).
 Zip'te manifest varsa `open_source` -> `source.PackageSource` (entries manifest'ten) -> analiz/envanter orijinalle aynı

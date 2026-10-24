@@ -20,6 +20,7 @@ from . import __version__
 from ._vendor import dbfread
 from .discovery import DiscoveryResult, discover_source, owner_project
 from .parsers import library_summary, parse_cfg, parse_subblk, read_symbol_asc_all, read_symlist_all, scan_s7h
+from .mlfb_info import describe, label as mlfb_label
 from .parsers.hwconfig import _MLFB
 from .parsers.wincc import picture_kind
 from .report import _css
@@ -94,7 +95,8 @@ def _projects(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
 
 
 def _hw_exports(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
-    mods = Sheet("HW modüller (export)", ["Station", "Export dosyası", "Konum", "MLFB / GSD", "FW", "İsim", "Tür"],
+    mods = Sheet("HW modüller (export)", ["Station", "Export dosyası", "Konum", "MLFB / GSD", "Model / açıklama", "FW",
+                                          "İsim (HW Config)", "Tür"],
                  note="HW Config -> Station -> Export (.cfg) dosyalarından")
     stations = Sheet("HW station (export)", ["Station", "Export dosyası", "F-capable", "PDM kullanımı",
                                              "USED_S7_VERSIONS", "Export eden STEP 7", "Subnet'ler"])
@@ -112,19 +114,20 @@ def _hw_exports(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
             kind = ("dahili (HSP/port)" if mo.is_internal else "GSD cihaz" if mo.is_gsd and mo.is_station_header
                     else "GSD modül" if mo.is_gsd else "slave (IM)" if mo.is_station_header else
                     "CPU" if _CPU_RE.match(mo.order_no) else "CP" if mo.order_no.startswith("6GK7") else "modül")
-            mods.rows.append([name, rel, mo.location, mo.order_no, mo.firmware, mo.name, kind])
+            mods.rows.append([name, rel, mo.location, mo.order_no, describe(mo.order_no)[0], mo.firmware, mo.name, kind])
     inv.sheets += [stations, mods]
 
 
 def _hw_internal(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
     """Export olmadan backup içinden HW: .s7h (MLFB + ardışık FW) ve hOmSave7 DBF'lerindeki MLFB'ler (ham tarama)."""
-    sh = Sheet("HW (backup içi)", ["Proje", "Kaynak", "Yöntem", "MLFB", "FW", "Adet"],
-               note="Export'suz ham tarama: MLFB ve FW doğru, rack/slot/adres yok; adetler kayıt sayısıdır (teyit edilmeli)")
+    sh = Sheet("HW (backup içi)", ["Proje", "Kaynak", "Yöntem", "MLFB", "Model / açıklama", "Açıklama kaynağı", "FW", "Adet"],
+               note="Export'suz ham tarama: MLFB doğru; FW her zaman okunamaz; rack/slot/adres yok; adetler kayıt "
+                    "sayısıdır (teyit edilmeli). Açıklama: Released Modules listesi veya MLFB ailesi (çıkarım).")
     pdirs = _proj_dirs(d)
     for rel in d.s7h_files:
         try:
             for (mlfb, fw), n in sorted(scan_s7h(src.materialize(rel)).items()):
-                sh.rows.append([owner_project(rel.rsplit("/", 1)[0], pdirs), rel, ".s7h tarama", mlfb, fw, n])
+                sh.rows.append([owner_project(rel.rsplit("/", 1)[0], pdirs), rel, ".s7h tarama", mlfb, *describe(mlfb), fw, n])
         except Exception as e:  # noqa: BLE001
             inv.warnings.append(f"{rel}: okunamadı ({e})")
     for e in src.entries:
@@ -142,7 +145,7 @@ def _hw_internal(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
                     fw = _FW.search(text)
                     found[(m.group().decode(), fw.group() if fw else "")] += 1
             for (mlfb, fw), n in sorted(found.items()):
-                sh.rows.append([owner_project(e.parent, pdirs), e.rel, "hOmSave7 DBF tarama", mlfb, fw, n])
+                sh.rows.append([owner_project(e.parent, pdirs), e.rel, "hOmSave7 DBF tarama", mlfb, *describe(mlfb), fw, n])
         except Exception as ex:  # noqa: BLE001
             inv.warnings.append(f"{e.rel}: DBF okunamadı ({ex})")
     inv.sheets.append(sh)
@@ -464,7 +467,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
 
     # 3) Hardware: HW Config export'larından; export'u olmayan projeler için backup içi .s7h taraması
     by_station: dict = defaultdict(lambda: {"cpu": [], "cp": [], "mod": 0, "slave": 0, "gsd": 0, "src": ""})
-    for st, rel, _loc, mlfb, fw, name, kind in get("HW modüller (export)"):
+    for st, rel, _loc, mlfb, _desc, fw, name, kind in get("HW modüller (export)"):
         x = by_station[st]
         x["src"] = rel
         if kind == "CPU":
@@ -489,14 +492,15 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
                      x["src"]])
     exported = {_norm_name(s) for s in by_station}
     internal: dict = defaultdict(Counter)
-    for proj, _rel, method, mlfb, fw, n in get("HW (backup içi)"):
+    for proj, _rel, method, mlfb, _desc, _dsrc, fw, n in get("HW (backup içi)"):
         if method == ".s7h tarama":
             internal[proj][(mlfb, fw)] += n
     for proj, c in sorted(internal.items()):
         if proj in stale or _norm_name(Path(proj).name) in exported:
             continue                                    # eski kopya / export'u var: yukarıda
-        cpus = [f"{m} {fw}".strip() + (f" ×{n}" if n > 1 else "") for (m, fw), n in sorted(c.items()) if _CPU_RE.match(m)]
-        cps = [f"{m} {fw}".strip() for (m, fw), n in sorted(c.items()) if m.startswith("6GK7")]
+        cpus = [f"{mlfb_label(m)} {fw}".strip() + (f" ×{n}" if n > 1 else "") for (m, fw), n in sorted(c.items())
+                if _CPU_RE.match(m)]
+        cps = [f"{mlfb_label(m)} {fw}".strip() for (m, fw), n in sorted(c.items()) if m.startswith("6GK7")]
         lab = plabel(proj)
         rows.append(["Hardware", f"{lab}: CPU (backup içi)", ", ".join(cpus) or "-", ".s7h tarama (export yok)"])
         if cps:
