@@ -123,6 +123,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                         variable=mode_var).pack(anchor="w")
         ttk.Radiobutton(mf, text="Envanter: backup'taki her şeyi listele, değerlendirme yapma (Excel + HTML)",
                         value="inventory", variable=mode_var).pack(anchor="w")
+        ttk.Radiobutton(mf, text="Paketle: analiz için gereken dosyaları küçük bir zip'e topla (göndermek için)",
+                        value="collect", variable=mode_var).pack(anchor="w")
         r += 1
     for label, var in (("Hazırlayan", author_var), ("Departman", dept_var), ("Müşteri / proje (kapak)", cust_var)):
         lab = ttk.Label(body, text=label)
@@ -165,21 +167,23 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     r += 1
 
     def on_mode(*_):
+        col = mode_var.get() == "collect"
         for widgets in info_rows:
             for w in widgets:
-                if mode_var.get() == "inventory":
+                if mode_var.get() in ("inventory", "collect"):
                     w.grid_remove()
                 else:
                     w.grid()
         inv = mode_var.get() == "inventory"
         word_btn.configure(text="Excel'i aç" if inv else "Word'ü aç")
-        run_btn.configure(text="3  Envanteri çıkar" if inv else "3  Analizi başlat")
-        if inv:
+        run_btn.configure(text="3  Paketi oluştur" if col else "3  Envanteri çıkar" if inv else "3  Analizi başlat")
+        if inv or col:
             disc_chk.grid_remove()
         else:
             disc_chk.grid()
         hint.configure(text="Backup sadece okunur; hiçbir dosyası değiştirilmez ve hiçbir yere gönderilmez. "
-                            + ("Envanter değerlendirme içermez; yapi_tanisi.txt müşteri verisi içermez." if inv
+                            + ("Paket müşteri verisi içerir: paylaşmadan önce veri kullanım kurallarını teyit edin." if col
+                               else "Envanter değerlendirme içermez; yapi_tanisi.txt müşteri verisi içermez." if inv
                                else f"Hedef: {TARGET_LABEL}."))
     ttk.Label(body, text="Rapor klasörü").grid(row=r, column=0, sticky="w", pady=3)
     ttk.Entry(body, textvariable=out_var).grid(row=r, column=1, sticky="ew", padx=8)
@@ -219,11 +223,11 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     def log(msg):
         q.put(("log", str(msg)))
 
-    def worker(src, out, disc, author, dept, cust, inv, manual, exports):
+    def worker(src, out, disc, author, dept, cust, mode, manual, exports):
         try:
-            p = run(Path(src), Path(out) if out else None, discover_only=disc, log=log,
-                    author=author, department=dept, customer=cust or None, inventory=inv,
-                    manual=manual, exports=exports)
+            p = run(Path(src), Path(out) if out else None, discover_only=disc and mode == "analysis", log=log,
+                    author=author, department=dept, customer=cust or None, inventory=mode == "inventory",
+                    manual=manual, exports=exports, collect=mode == "collect")
             q.put(("done", p))
         except Exception as e:  # noqa: BLE001
             q.put(("log", traceback.format_exc()))
@@ -240,6 +244,12 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
                     bar.stop()
                     run_btn.configure(state="normal")
                     result["path"] = Path(val)
+                    folder_btn.configure(state="normal")
+                    if Path(val).suffix.lower() == ".zip":          # paket: klasörü göster
+                        logbox.insert("end", f"\nPaket hazır: {val}\n")
+                        logbox.see("end")
+                        _open_file(Path(val).parent)
+                        continue
                     open_btn.configure(state="normal")
                     folder_btn.configure(state="normal")
                     if (Path(val).parent / "rapor.docx").exists() or (Path(val).parent / "envanter.xlsx").exists():
@@ -271,7 +281,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
         bar.start(12)
         threading.Thread(target=worker, daemon=True,
                          args=(src, out, disc_var.get(), author_var.get().strip(), dept_var.get().strip(),
-                               cust_var.get().strip(), mode_var.get() == "inventory",
+                               cust_var.get().strip(), mode_var.get(),
                                ManualInputs(as_rt_po=po_as.get().strip(), os_po=po_os.get().strip(),
                                             archive_tags=po_arc.get().strip(),
                                             pc_stations=[x.strip() for x in pcs_var.get().replace(";", ",").split(",")

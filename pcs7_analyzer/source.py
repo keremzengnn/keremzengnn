@@ -163,6 +163,34 @@ class ZipSource(Source):
 NESTED_SEP = "!/"
 
 
+class PackageSource(ZipSource):
+    """
+    `--collect` ile üretilmiş paket: dosya listesi manifest'ten (orijinal path, boyut, tarih); içeriği sadece
+    pakete alınmış dosyalar için okunabilir. Analiz orijinal backup'la aynı dosya listesini görür.
+    """
+
+    def __init__(self, zip_path: Path, progress=None, temp_dir: Path | None = None):
+        super().__init__(zip_path, progress, temp_dir)
+        from .collect import MANIFEST, read_manifest
+        orig, rows = read_manifest(self.zf.read(MANIFEST))
+        self.original_label = orig
+        self.entries = sorted((Entry(r, size, mtime) for r, size, mtime, _ in rows), key=lambda e: e.rel)
+        self._included = {r for r, _, _, inc in rows if inc and r in self._info}
+        self.warnings.append(f"Paket okunuyor (orijinal backup: {orig}); büyük dosyaların sadece adı/boyutu/tarihi var")
+        if progress:
+            progress(f"Paket: {len(self.entries)} dosya ({len(self._included)} içerikli)")
+
+    def materialize(self, rel: str) -> Path:
+        if rel not in self._included:
+            raise FileNotFoundError(f"pakette içerik yok (sadece listede): {rel}")
+        return super().materialize(rel)
+
+    def read_head(self, rel: str, n: int) -> bytes:
+        if rel not in self._included:
+            raise FileNotFoundError(f"pakette içerik yok (sadece listede): {rel}")
+        return super().read_head(rel, n)
+
+
 class NestedSource(Source):
     """
     Temel kaynağın içindeki .zip'leri de açar (1 seviye). İç arşivin dosyaları
@@ -219,6 +247,11 @@ def open_source(path: Path, progress=None, nested: bool = True) -> Source:
     if path.is_dir():
         base = FolderSource(path, progress)
     elif path.is_file() and zipfile.is_zipfile(path):
+        from .collect import MANIFEST
+        with zipfile.ZipFile(path) as zf:
+            is_package = MANIFEST in zf.NameToInfo
+        if is_package:
+            return PackageSource(path, progress)
         base = ZipSource(path, progress)
     if base is not None:
         if nested and any(e.rel.lower().endswith(".zip") for e in base.entries):

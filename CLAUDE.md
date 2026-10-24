@@ -175,6 +175,11 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
 
+## Paketle (`collect.py`, `--collect`)
+`needed(rel, size)` içeriği okunan dosyaları seçer; diğerleri `_pcs7_manifest.csv` (rel, size, mtime .3f, included).
+Zip'te manifest varsa `open_source` -> `source.PackageSource` (entries manifest'ten) -> analiz/envanter orijinalle aynı
+(`tests/test_collect.py`). Analiz yeni bir dosyanın İÇERİĞİNİ okumaya başlarsa `needed`'e eklenmeli, yoksa pakette eksik kalır.
+
 ## Ek prompt: WinCC / OS / alarm / arşiv / SFC / Logic Matrix / lisans
 **Düzeltmeler (uyulmalı):**
 - ENG (Eng alt projesindeki OS) SRV1'in master kopyası DEĞİL; ES üzerinde çalışan ayrı, tam OS (connection'lar `ASn_ES` / `ASn_SRV`).

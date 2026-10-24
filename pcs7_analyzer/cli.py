@@ -43,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="WinCC Configuration Studio export klasörü/dosyası (backup dışındaysa); birden fazla verilebilir")
     p.add_argument("--manual", type=Path, help="Manuel girişler JSON (PO, archive tag, PC station listesi…); "
                                               "şablon: data/manuel_giris_ornek.json")
+    p.add_argument("--collect", action="store_true",
+                   help="Paketle: sadece analiz için gereken dosyaları küçük bir zip'e topla (paylaşım için); "
+                        "paket bu programla orijinal backup gibi analiz edilir")
     p.add_argument("--no-inventory", action="store_true",
                    help="Analizle birlikte envanter (envanter.xlsx) üretme (büyük backup'ta süreyi kısaltır)")
     p.add_argument("--discover", action="store_true", help="Sadece keşif: yapı raporu, analiz yok")
@@ -95,7 +98,7 @@ def _tee_log(log, path: Path):
 def run(source: Path, out_dir: Path | None = None, target: str = TARGET, released: Path | None = None,
         discover_only: bool = False, log=print, template: Path | None = None, author: str | None = None,
         department: str | None = None, customer: str | None = None, inventory: bool = False,
-        manual=None, exports: list[Path] | None = None, with_inventory: bool = True) -> Path:
+        manual=None, exports: list[Path] | None = None, with_inventory: bool = True, collect: bool = False) -> Path:
     """Analizi (veya envanteri) çalıştırır, çıktıları yazar ve ana HTML dosyasının yolunu döndürür.
     with_inventory: analizle birlikte envanter (envanter.xlsx, Mevcut durum sayfası) de üretilir; kaynak bir kez açılır."""
     from . import settings
@@ -110,6 +113,15 @@ def run(source: Path, out_dir: Path | None = None, target: str = TARGET, release
         raise ValueError(f"Çıktı kaynak klasörün içine yazılamaz (salt okuma kuralı): {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     log = _tee_log(log, out_dir / "log.txt")
+
+    if collect:
+        from .collect import collect as do_collect
+        name = re.sub(r"[^\w.-]+", "_", source.stem or "backup")
+        z = out_dir / f"{name}_paket.zip"
+        do_collect(source, z, log)
+        log("Paket müşteri verisi içerir (block / symbol adları, HW, script'ler): paylaşmadan önce veri kullanım "
+            "kurallarını teyit edin.")
+        return z
 
     if inventory:
         from .inventory import build_inventory, write_outputs
@@ -230,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         manual = ManualInputs.load(args.manual) if args.manual else None
         out = run(src, args.out_dir, TARGET, args.released, args.discover, log, args.template,
                   args.author, args.department, args.customer, args.inventory, manual, args.exports,
-                  with_inventory=not args.no_inventory)
+                  with_inventory=not args.no_inventory, collect=args.collect)
     except ValueError as e:
         parser.error(str(e))
     if args.open:

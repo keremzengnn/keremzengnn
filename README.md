@@ -48,6 +48,16 @@ python -m pcs7_analyzer --demo C:\Temp\demo               # sahte demo projesiyl
 python -m pcs7_analyzer --list-checks                     # tanımlı kontroller
 ```
 
+## Paketle (backup'ı göndermek için)
+5+ GB backup'ın çoğu (WinCC .mdf/.ldf, arşivler, picture'lar) analizde sadece adı/boyutu/tarihiyle kullanılır.
+Pencerede **Paketle** (veya `--collect`) sadece içeriği okunan dosyaları (block klasörleri, HW, DBF'ler, symbol table,
+.mcp, script'ler, export'lar) `<backup>_paket.zip` içine toplar; diğer tüm dosyalar manifest'te listelenir.
+Paket bu programla orijinal backup gibi analiz edilir (aynı sonuç, test ile korunuyor).
+Paket müşteri verisi içerir: paylaşmadan önce veri kullanım kurallarını teyit edin.
+```
+python -m pcs7_analyzer D:\Backup\Proje.zip --collect -o D:\Paket
+```
+
 ## WinCC tag / alarm (Configuration Studio export)
 Tag ve alarm konfigürasyonu OS projesinin `.mdf` veritabanındadır. Configuration Studio'da **Tag Management** ve **Alarm Logging**
 export edilip (`.txt`, dosya adında OS projesinin adı geçsin: ör. `SRV1_Tags.txt`, `ENG_Alarms.txt`) backup klasörüne konur ya da
