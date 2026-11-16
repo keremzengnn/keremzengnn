@@ -104,12 +104,20 @@ class FolderSource(Source):
             return f.read(n)
 
 
+class BadArchive(zipfile.BadZipFile):
+    """Bozuk veya okunamayan .zip girdisi (mesaj Türkçe, kullanıcıya gösterilir).
+    BadZipFile alt sınıfı: iç içe zip'lerdeki mevcut `except BadZipFile` uyarı akışı aynen çalışır."""
+
+
 class ZipSource(Source):
     def __init__(self, zip_path: Path, progress=None, temp_dir: Path | None = None):
         self.path = Path(zip_path).resolve()
         self.label = str(self.path)
         self.warnings = []
-        self.zf = zipfile.ZipFile(self.path)
+        try:
+            self.zf = zipfile.ZipFile(self.path)
+        except (zipfile.BadZipFile, OSError) as ex:
+            raise BadArchive(f"Zip dosyası açılamadı (bozuk veya okunamıyor): {self.path} ({type(ex).__name__}: {ex})") from ex
         self._tmp = Path(tempfile.mkdtemp(prefix="pcs7an_", dir=temp_dir))
         self._info: dict[str, zipfile.ZipInfo] = {}
         self.entries = []
@@ -265,10 +273,15 @@ def open_source(path: Path, progress=None, nested: bool = True) -> Source:
     base: Source | None = None
     if path.is_dir():
         base = FolderSource(path, progress)
+    elif path.is_file() and path.suffix.lower() == ".zip" and not zipfile.is_zipfile(path):
+        raise BadArchive(f"Zip dosyası açılamadı (bozuk veya zip değil): {path}")
     elif path.is_file() and zipfile.is_zipfile(path):
         from .collect import MANIFEST
-        with zipfile.ZipFile(path) as zf:
-            is_package = MANIFEST in zf.NameToInfo
+        try:
+            with zipfile.ZipFile(path) as zf:
+                is_package = MANIFEST in zf.NameToInfo
+        except (zipfile.BadZipFile, OSError) as ex:
+            raise BadArchive(f"Zip dosyası açılamadı (bozuk veya okunamıyor): {path} ({type(ex).__name__}: {ex})") from ex
         if is_package:
             try:
                 return PackageSource(path, progress)

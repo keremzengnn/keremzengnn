@@ -7,8 +7,11 @@ hardware, OS projeleri) çıkarır ve **PCS 7 V10.0 SP2** upgrade'i için riskle
 - Hedef sabit: PCS 7 V10.0 SP2. Mevcut versiyon proje dosyalarından tespit edilir (bu PC'nin yazılımından değil).
 
 ## Kurulum
-- **Exe (önerilen, Python gerekmez):** GitHub → Actions → "Windows test + exe" → son çalışma → *Artifacts* →
-  `PCS7Analyzer-windows` → `PCS7Analyzer.exe`'yi çift tıklayın.
+- **Exe (önerilen, Python gerekmez):** GitHub → Releases → `PCS7Analyzer-<sürüm>.exe` dosyasını indirip çift tıklayın
+  (release yoksa: Actions → "Windows test + exe" → *Artifacts* → `PCS7Analyzer-windows`).
+- Sürüm geçmişi: [CHANGELOG.md](CHANGELOG.md). Adım adım kılavuz: [docs/KULLANIM.md](docs/KULLANIM.md).
+- **Sorun bildir:** pencerede **Sorun bildir** düğmesi veya `--support-bundle` komutu.
+- **Uyarı:** müşteri backup'ı ve çıktıları repoya commit edilmez, e-postayla gönderilmez.
 - **Python ile:** Python 3.11+ kurun (ek paket gerekmez), repo klasöründe `Baslat.bat`'a çift tıklayın.
 
 ## Kullanım (3 adım)

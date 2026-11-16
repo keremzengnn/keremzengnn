@@ -108,7 +108,10 @@ def build_ir(an, doc: list, profile: str = "teklif", src_hash: str = "", project
     # omitted'a girmez (QA omitted_blocker): teyit maddesi sayılır.
     omitted += [{"finding_id": f.fid, "check_id": f.check_id, "severity": f.severity.value,
                  "reason": "teyit listesinde"} for f in unverified_findings(an) if f.fid and not f.blocking]
+    from . import __version__
+    from .quality import compute as quality_compute
     return {"schema_version": SCHEMA_VERSION, "profile": profile, "project_meta": project_meta or {},
+            "quality": quality_compute(an), "tool_version": __version__,
             "generated_at": datetime.now().isoformat(timespec="seconds"), "input_hash": src_hash,
             "sections": sections, "finding_ids": sorted(f.fid for f in verified_findings(an) if f.fid),
             "stats": stats(an), "omitted": omitted}

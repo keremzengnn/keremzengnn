@@ -57,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--demo", type=Path, metavar="KLASÖR", help="Bu klasöre sahte demo backup'ı üret ve analiz et")
     p.add_argument("--list-checks", action="store_true", help="Tanımlı kontrolleri listele")
     p.add_argument("--gui", action="store_true", help="Pencereyi aç")
+    p.add_argument("--support-bundle", type=Path, metavar="ÇIKTI_KLASÖRÜ",
+                   help="Tanı dosyalarını (maskeli) tek zip'e koy; -o zip yolu (varsayılan: klasör yanında destek_paketi.zip)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -306,7 +308,24 @@ def _revision(ir: dict, compare_to: Path, out_dir: Path, log) -> None:
     log(f"Revizyon r{rev}: {len(d['new'])} yeni, {len(d['closed'])} kapanan, {len(d['changed'])} değişen (revizyon.md)")
 
 
-SUBCOMMANDS = ("compare", "kb", "diag", "qa", "learn", "extract-style")
+SUBCOMMANDS = ("compare", "kb", "diag", "qa", "learn", "extract-style", "release-check")
+
+
+def _support_bundle(folder: Path, dest: Path | None) -> int:
+    from . import support_bundle as sb
+    if not folder.is_dir():
+        print(f"Klasör bulunamadı: {folder}", file=sys.stderr)
+        return 2
+    print("Destek paketine girecek dosyalar (yollar maskelenir):")
+    print(sb.describe(folder))
+    print("Göndermeden önce içeriği kontrol edin.")
+    try:
+        z, _ = sb.build(folder, dest or folder.resolve().parent / "destek_paketi.zip")
+    except (OSError, ValueError) as e:
+        print(f"Destek paketi oluşturulamadı: {e}", file=sys.stderr)
+        return 1
+    print(z)
+    return 0
 
 
 def _sub_main(argv: list[str]) -> int:
@@ -315,6 +334,9 @@ def _sub_main(argv: list[str]) -> int:
     if cmd == "kb":
         from .kb import main as kb_main
         return kb_main(rest)
+    if cmd == "release-check":
+        from .release_check import main as rc_main
+        return rc_main(rest)
     if cmd == "learn":
         from .learn import main as learn_main
         return learn_main(rest)
@@ -388,7 +410,51 @@ def _write_diag(res, out: Path) -> Path:
     return p
 
 
+_CTX: dict = {}
+
+
+def _log_unexpected(tb: str) -> str:
+    """Traceback'i log.txt'ye ekler (çıktı klasörü, yoksa ayar klasörü); yolu döndürür."""
+    from . import settings
+    out = _CTX.get("out_dir")
+    for d in ([Path(out)] if out else []) + [settings.settings_path().parent]:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            p = d / "log.txt"
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(f"\n--- HATA {datetime.now():%Y-%m-%d %H:%M} (pcs7_analyzer {__version__}) ---\n{tb}\n")
+            return str(p)
+        except OSError:
+            continue
+    return "log.txt"
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Kullanıcıya traceback göstermez: beklenmedik hata -> kısa Türkçe mesaj + log.txt, çıkış kodu 1."""
+    _CTX.clear()
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        print("İptal edildi.", file=sys.stderr)
+        return 130
+    except Exception as e:  # noqa: BLE001  (SystemExit geçer)
+        import traceback
+        where = _log_unexpected(traceback.format_exc())
+        print(f"Beklenmeyen hata: {type(e).__name__}: {e}\nAyrıntı (traceback): {where}", file=sys.stderr)
+        return 1
+
+
+def _is_bad_zip(e: BaseException) -> bool:
+    import zipfile
+    try:
+        from .source import BadArchive
+        bad: tuple = (BadArchive,)
+    except ImportError:
+        bad = ()
+    return isinstance(e, (zipfile.BadZipFile,) + bad)
+
+
+def _main(argv: list[str] | None = None) -> int:
     import os
     if sys.stdout is None:        # windowed exe: konsol yok
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
@@ -406,6 +472,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_checks:
         print(_list_checks())
         return 0
+    if args.support_bundle is not None:
+        return _support_bundle(args.support_bundle, args.out_dir)
+    _CTX["out_dir"] = args.out_dir if args.out_dir and args.out_dir.is_dir() else None
     if args.gui or (args.source is None and args.demo is None):
         from .gui import main as gui_main
         return gui_main()
@@ -441,6 +510,11 @@ def main(argv: list[str] | None = None) -> int:
                   compare_to=args.compare_to)
     except UsageError as e:
         parser.error(str(e))
+    except Exception as e:  # noqa: BLE001
+        if src.is_file() and (_is_bad_zip(e) or (isinstance(e, OSError) and not isinstance(e, PermissionError)
+                                                  and src.suffix.lower() == ".zip")):
+            parser.error("Zip dosyası bozuk veya okunamıyor")
+        raise
     idx = index_path(out)
     if args.open:
         webbrowser.open(idx.resolve().as_uri())

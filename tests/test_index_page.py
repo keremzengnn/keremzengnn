@@ -14,7 +14,8 @@ def test_analysis_index_summary_and_links(tmp_path):
     assert index_path(p) == out / "index.html"
     html = (out / "index.html").read_text(encoding="utf-8")
     lines = index_page.summary_lines(out)
-    assert len(lines) == 6 and lines[5].startswith("Teyit edilecek noktalar: ")      # 5 satır + teyit sayısı
+    assert len(lines) == 7 and lines[5].startswith("Teyit edilecek noktalar: ")      # 5 satır + teyit + kalite
+    assert lines[6].startswith("Veri kalitesi: ")
     assert 'href="envanter.html#teyit"' in html
     assert lines[0].startswith("PCS 7 versiyonu: V8.1")
     assert lines[1].startswith("AS: 2 station") and "414-5H" in lines[1]
@@ -36,8 +37,8 @@ def test_inventory_index_without_findings(tmp_path):
     assert main([str(build_demo_project(tmp_path / "d")), "--inventory", "-o", str(out)]) == 0
     lines = index_page.summary_lines(out)
     assert lines[0].startswith("PCS 7 versiyonu: V8.1")
-    assert lines[-2] == "Bulgular: değerlendirme yapılmadı (sadece envanter)"
-    assert lines[-1].startswith("Teyit edilecek noktalar: ")
+    assert lines[-3] == "Bulgular: değerlendirme yapılmadı (sadece envanter)"
+    assert lines[-2].startswith("Teyit edilecek noktalar: ") and lines[-1].startswith("Veri kalitesi: ")
     assert all(confirm.is_clean(x) for x in lines)
     html = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="envanter.xlsx"' in html and 'href="rapor.html"' not in html

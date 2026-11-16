@@ -78,7 +78,12 @@ def write_inventory_summary(inv, out_dir: Path) -> Path | None:
             rows = [list(map(str, r[:4])) for r in inv.sheet("Mevcut durum").rows]
         except (StopIteration, AttributeError):
             pass
+        fa = getattr(inv, "folder_as", {}) or {}
+        quality = {"hw_sure": 0, "hw_total": 0, "folders_sure": sum(1 for v in fa.values() if "ÇIKARIM" not in str(v)),
+                   "folders_total": len(fa), "confirm": len(getattr(inv, "confirm", []) or []),
+                   "warnings": len(getattr(inv, "warnings", []) or [])}
         data = {"source": str(getattr(inv, "source", "")), "created": str(getattr(inv, "created", "")),
+                "quality": quality,
                 "n_files": getattr(d, "n_files", None), "total_bytes": getattr(d, "total_bytes", None),
                 "current_state": rows, "warnings": len(getattr(inv, "warnings", []) or []),
                 "confirm_count": len(getattr(inv, "confirm", []) or [])}
@@ -171,6 +176,14 @@ def summary_lines(out_dir: Path) -> list[str]:
     n_confirm = confirm_count(out_dir)
     if n_confirm:
         lines.append(f"Teyit edilecek noktalar: {n_confirm}")
+
+    # 7) Veri kalitesi (analiz: report_ir.json, yoksa envanter_ozet.json)
+    q = (ir or {}).get("quality") if isinstance(ir, dict) else None
+    if not isinstance(q, dict) and isinstance(inv, dict):
+        q = inv.get("quality")
+    if isinstance(q, dict):
+        from .quality import line as quality_line
+        lines.append(quality_line(q))
     return lines
 
 

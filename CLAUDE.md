@@ -279,3 +279,12 @@ Acik_Konular_Kaynak); Word'e Tablo 4 WinCC yapısı; HTML'e upgrade hazırlık l
 - XUTILS çağrı ağacı (`parsers/xutils.py`, ÇIKARIM): custom FB'yi çağıran FC/OB raporda, Excel ve envanterde.
 - Sağlamlık: `scratchpad/fuzz/stress.py` benzeri 92 bozuk varyant; `cli.UsageError` sadece kullanıcı girdisi hatası,
   diğer hatalar log.txt'ye. Word metninde XML'e uygun olmayan karakterler `word._t`'de temizlenir.
+
+## Belirsizlik dili
+Kullanıcı çıktısında (rapor, Excel, HTML, Word) "KANIT / ÇIKARIM / heuristic / belirsiz" etiketi ve belirsizlik dili yok:
+doğrulanmış bulgular ana tabloda, diğerleri sonda "Teyit edilecek noktalar" bölümünde. HANDOFF kural 5'teki KANIT / ÇIKARIM
+ayrımı **dahili model** olarak kalır (`Confidence`, `confidence: low`); sadece kullanıcıya gösterilmez.
+
+## Sürümleme
+SemVer; tek kaynak `pcs7_analyzer/__init__.py` `__version__` (pyproject senkron). Her sürümde `CHANGELOG.md` (Keep a Changelog)
+ilk başlığı aynı sürüm olmalı (`tests/test_version.py`). Release: `v<sürüm>` tag'i -> `windows.yml` `PCS7Analyzer-<sürüm>.exe` yayınlar.

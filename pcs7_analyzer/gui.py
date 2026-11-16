@@ -91,7 +91,7 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title(f"PCS 7 Upgrade Analyzer {__version__}")
+    root.title(f"PCS 7 Upgrade Analyzer v{__version__}")
     root.geometry("920x800")
     root.minsize(760, 600)
     root.configure(bg=T["light-sand"])
@@ -252,6 +252,8 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
     kb_btn.pack(side="left", padx=6)
     dig_btn = ttk.Button(obtn, text="Doküman özeti çıkar (geliştiriciye)")
     dig_btn.pack(side="left")
+    issue_btn = ttk.Button(obtn, text="Sorun bildir…")
+    issue_btn.pack(side="left", padx=6)
     adv_var = tk.BooleanVar(value=False)
     ttk.Checkbutton(obtn, text="Gelişmiş", variable=adv_var).pack(side="left", padx=(6, 0))
     info = ttk.Frame(other)
@@ -488,6 +490,36 @@ def main(mode: str = "analysis", fixed: bool = False) -> int:
             return
         start("kb_digest", src=str(Path.cwd()))      # kaynak gerekmez (KB ayarlardan bulunur)
     dig_btn.configure(command=start_digest)
+
+    def report_issue():
+        from . import support_bundle
+        folder = result["out"]
+        if not folder:
+            d = filedialog.askdirectory(title="Rapor (çıktı) klasörünü seçin", initialdir=str(out_root() or Path.home()))
+            folder = Path(d) if d else None
+        if not folder:
+            return
+        files = support_bundle.collect(Path(folder))
+        if not files:
+            messagebox.showwarning("Sorun bildir", "Bu klasörde tanı dosyası (log.txt vb.) yok.")
+            return
+        listing = support_bundle.describe(Path(folder))
+        if not messagebox.askokcancel(
+                "Sorun bildir - paket içeriği",
+                "Zip'e şu dosyalar girecek (sadece mutlak yollar maskelenir; rapor ve backup dosyaları girmez):\n\n"
+                f"{listing}\n\nMüşteri/proje/station adı gibi metinler maskelenmez; müşteri adı garantisi yoktur. "
+                "Göndermeden önce içeriği kontrol edin. Devam edilsin mi?"):
+            return
+        dest = filedialog.asksaveasfilename(title="Destek paketini kaydet", defaultextension=".zip",
+                                            initialfile="destek_paketi.zip", filetypes=[("Zip", "*.zip")])
+        if not dest:
+            return
+        try:
+            z, _ = support_bundle.build(Path(folder), Path(dest))
+            messagebox.showinfo("Sorun bildir", f"Destek paketi kaydedildi:\n{z}\n\nGöndermeden önce içeriğini kontrol edin.")
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Sorun bildir", f"Destek paketi oluşturulamadı: {e}")
+    issue_btn.configure(command=report_issue)
     index_btn.configure(command=lambda: result["path"] and webbrowser.open(result["path"].resolve().as_uri()))
     word_btn.configure(command=lambda: result["out"] and (result["out"] / "rapor.docx").exists()
                        and _open_file(result["out"] / "rapor.docx"))
