@@ -87,7 +87,9 @@ def hw_released(c, an):
             f"{m.order} ×{m.count} ({m.note.split(':')[0]}; {', '.join(m.stations)})" for m in acc),
             [an.released_list], severity=L))
     if bad:
-        lines = [f"{m.order} {m.fw} ×{m.count} ({m.status}; {', '.join(m.stations)})".replace("  ", " ") for m in bad]
+        def _st(s):    # kullanıcı çıktısında belirsizlik eki yok ('bulunamadı, teyit edilmeli' -> 'bulunamadı')
+            return re.sub(r",?\s*teyit (edilmeli|gerekli)", "", str(s)).strip()
+        lines = [f"{m.order} {m.fw} ×{m.count} ({_st(m.status)}; {', '.join(m.stations)})".replace("  ", " ") for m in bad]
         out.append(_f(c, f"{len(bad)} MLFB/FW Released Modules listesinde bulunamadı: " + _short(lines, 6),
                       [an.released_list]))
     return out

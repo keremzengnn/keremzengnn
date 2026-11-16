@@ -62,6 +62,7 @@ def _cfg(station: str, *, f_capable: bool, extra: list[str]) -> bytes:
         'RACK 0, SLOT 3, SUBSLOT 1, SUBMODULE 1, "6ES7 960-1AA06-0XA0", "H-Sync"',
         'RACK 0, SLOT 3, SUBSLOT 1, SUBMODULE 2, "6ES7 960-1AA06-0XA0", "H-Sync"',
         'RACK 0, SLOT 5, "6GK7 443-1EX30-0XE0" "V3.0", "CP 443-1"',
+        'RACK 0, SLOT 7, "6ES7 351-3AA23-0AB0", "IM 351"',     # Released listesinde yok -> "bulunamadı" yolu
         "CPU_ATTRIBUTES", f'  CAPABLE_F_SAFETY "{1 if f_capable else 0}"', f'  USED_S7_VERSIONS "{used}"',
         'DPSUBSYSTEM 1, DPADDRESS 3, "6ES7 152-1AA00-0AB0", "ET 200iSP"',
         'DPSUBSYSTEM 1, DPADDRESS 3, SLOT 4, "6ES7 131-7RF00-0AB0", "8DI NAMUR"',
