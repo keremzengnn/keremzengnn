@@ -130,6 +130,30 @@ paralel başlatır, sonuçları birleştirir, test eder, commit eder.
 
 ---
 
+## 5b. Siemens Claude Code ortamı (kullanıcının kurumsal kurulumu — uy)
+
+Kullanıcı Claude Code'u Siemens'in **managed setup** script'i ve **SDC LLM Gateway** (`llm.sdc.siemens.cloud`) ile kullanıyor.
+Kurumsal kurallar (Siemens iç dokümanı "Set up Claude Code", kullanıcının aktardığı haliyle):
+- **Input sınıfı:** Claude Code'a sadece **ACP2 veya altı** sınıflandırılmış veri girilebilir. Müşteri backup'ı, müşteri
+  raporu, teklif, Siemens dokümanı vermeden önce kullanıcıya sınıflandırmayı sor; emin değilse maskeli tanı dosyası /
+  yapı özeti iste. Gerçek backup'ı zaten okumuyoruz (bölüm 4.3).
+- **Human review zorunlu:** her değişikliği kullanıcı inceler. Commit/push'tan önce kısa değişiklik özeti ver; büyük
+  değişiklikte onay iste.
+- **Mandatory ayarlar** (`~/.claude/settings.json`, script yönetir — DEĞİŞTİRME, önerme): gateway URL, telemetri,
+  `permissions.deny: WebFetch, WebSearch` (web yok), **GenAI-CodeScan PreToolUse hook** (her Write/Edit taranır; hook
+  çalışmazsa değişiklik bloklanır — bu normal, devre dışı bırakma), minimum sürüm.
+- **Model:** şirket model sabitlemez; `/model` gateway'in sunduklarını listeler (ör. `claude-opus-5-5`, `claude-sonnet-5`,
+  `claude-haiku-5-5`). `ANTHROPIC_DEFAULT_*_MODEL` / `ANTHROPIC_MODEL`'i settings.json'a yazma (script siler, gateway
+  bilinmeyen ID'yi reddeder). Agent frontmatter'daki `opus/sonnet/haiku` alias'ları gateway'de çalışmazsa (hata / "model
+  not found") `.claude/agents/*.md` içindeki `model:` değerlerini `/model` listesindeki tam ID'lerle değiştir; `opusplan`
+  çalışmazsa ana oturumu `/model` ile Sonnet'e al, zor işte Opus'a geç.
+- Önerilen kullanım tablosu (Siemens): basit soru/tekrarlı küçük iş = Haiku; genel geliştirme / doküman = Sonnet; büyük
+  refactor / mimari = Sonnet ile başla, gerekirse Opus; zor debug = Sonnet, kök neden zorsa Opus, her fazdan sonra
+  `/compact`. Opus varsayılan değil. Yeni iş = `/clear`. Dosyaları hedefli göster, repoyu toptan okutma.
+- Kullanıcının kendi `permissions.allow` kuralları korunur (onay yorgunluğunu azaltmak için önerilebilir).
+- **Repo konumu:** proje şu an public GitHub'da. Siemens iş kodu için code.siemens.com (iç GitLab) daha uygun olabilir;
+  bu kurumsal bir karar — kullanıcıya bir kez hatırlat, kendi başına taşıma.
+
 ## 6. Gerçek projelerden öğrenilenler (maskeli tanı dosyalarıyla, 3 tur)
 
 Hepsi CLAUDE.md'de ayrıntılı. Özet:
