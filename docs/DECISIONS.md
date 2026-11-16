@@ -101,3 +101,26 @@ Master prompt'taki [DANIŞ] maddeleri ve diğer mimari kararlar. Her karar: tari
 - **Karar:** `--narrative` yok; tüm metin kalıplardan üretilir.
 - **Gerekçe:** Araç offline çalışır, backup verisi bilgisayardan çıkmaz; katman prompt'ta da varsayılan kapalı ve sadece "cila".
   Rapor bu katman olmadan eksiksiz. Gerekirse IT kararı ve maskelenmiş IR özetiyle ayrı modül olarak eklenir.
+
+## 2026-11-16 — HW_BOX_RTX kapsamı daraltıldı, HW_AS_RTX eklendi; Released Modules CSV'ye props sütunu eklenmedi
+- **Karar:** `HW_BOX_RTX` (blocking) sadece station metninde "BOX RTX" geçenler. WinLC / WinAC RTX (BOX yazmayan) için yeni
+  `HW_AS_RTX` (Orta, ÇIKARIM, blocking değil).
+- **Gerekçe:** Software update V10.0 SP2 manual'ı 4.1 sadece "SIMATIC PCS 7 BOX RTX update edilemez (WinAC RTX yeni Windows'u
+  desteklemiyor)" der; 9.3.4 ise "PCS 7 AS RTX" için HW Config'te AS versiyonu 3.3 veya eskiyse WinLC RTX V4.6+'ya geçiş adımları
+  verir (ön koşul PC'de WinAC RTX >= V4.6). Manual "AS RTX = BOX RTX" eşlemesini yazmıyor; eski kod üçünü de blocking sayıyordu
+  (yanlış pozitif riski). BOX RTX / AS RTX ayrımı müşteriden teyit edilir (ACTIONS).
+- **Released Modules CSV:** `discontinued` bilgisi zaten `status` sütununda ("discontinued MM/YY"; `HwMatch.discontinued`).
+  F/C/R/T `props` sütunu (P = PROFINET released, SM, Y) eklenmedi: extractor'ın bu sütunları okuduğu teyit edilmedi, `HW_PN_NOT_RELEASED`
+  kuralı backlog'da. Mevcut okuyucuyu bozmamak için CSV şeması değişmedi.
+- **Faceplate kuralı teyidi:** ps7sw 9.10.4: V10.0 SP2 faceplate'leri sadece APL V9.0.x ve V9.1.x block'larıyla mixed operation.
+  4.3: bir OS birden fazla AS'ye atanmışsa her AS için sadece APL >= V9.0.x (yeni `LIB_APL_MULTI_AS`, atama okunamadığı için ÇIKARIM).
+
+## 2026-11-16 — Durum etiketleri sadeleştirildi, Word hücre bütçesi, referans numaraları
+- **Karar:** Özet tablosu durum etiketleri dörde indi: Uygun / Dikkat / Aksiyon gerekli / Kontrol edilmedi. Eski "Detaylı İnceleme" ve
+  "Değiştirilmeli" artık "Aksiyon gerekli" (yüksek renk); "Teyit edilmeli" = "Dikkat". Bilerek yapıldı: tutarsız etiketler müşteri
+  raporunda kafa karıştırıyordu.
+- **Word (müşteri raporu):** hücreler ≤ 25 kelime (`_wcap`); tam metin HTML + Excel 'Bulgular'. Konu başına gösterilen bulgu en kötü
+  severity'ye göre seçilir (Yüksek bulgu "+N daha" içinde kalmaz).
+- **Referanslar:** [4] Software update V9.1, [5] APL Readme V10.0 SP2, [6] Software update V8.1 dönemi (A5E32786218-AB). Yeni
+  check'ler bu numaralara bağlı (`checks.APL_README`, `OLD_UPD`).
+- **LIB_RESERVED_NUMBERS:** header'sız / author'sız FB245/246/300 = ÇIKARIM (Siemens standart block yanlış pozitifi riski).

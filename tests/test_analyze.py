@@ -115,7 +115,7 @@ def test_report_structure(an):
     assert "Upgrade yaklaşımı" not in md
     assert "| AS02 F-System | Yüksek |" in md
     assert "| AS01 opsiyonları | Düşük–Orta |" in md       # Logic Matrix kurulu ama kullanılmıyor -> Düşük
-    assert "| AS02 F-System | Detaylı İnceleme |" in md
+    assert "| AS02 F-System | Aksiyon gerekli |" in md
     html = render_html(an)
     assert "#000028" in html and "#009999" in html
     assert 'class="badge high"' in html

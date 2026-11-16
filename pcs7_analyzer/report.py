@@ -80,10 +80,10 @@ class ReportMeta:
 
 STATUS_OK = "Uygun"
 STATUS_ATTN = "Dikkat"
-STATUS_DETAIL = "Detaylı İnceleme"
-STATUS_CHANGE = "Değiştirilmeli"
+STATUS_DETAIL = "Aksiyon gerekli"
+STATUS_CHANGE = "Aksiyon gerekli"
 STATUS_NOT_CHECKED = "Kontrol edilmedi"
-STATUS_CONFIRM = "Teyit edilmeli"
+STATUS_CONFIRM = "Dikkat"
 
 REFERENCES = [
     ["[1]", "SIMATIC PCS 7 Software update V10.0 SP2, Service Manual", "A5E52547272-AD", "06/2026"],
@@ -91,6 +91,7 @@ REFERENCES = [
     ["[3]", "SIMATIC PCS 7 Basis Library Readme V10.0 SP2 (Online)", "A5E55678980-AA", "07/2026"],
     ["[4]", "SIMATIC PCS 7 Software update with utilization of new functions V9.1, Service Manual", "A5E50318285-AA", "02/2021"],
     ["[5]", "SIMATIC PCS 7 Advanced Process Library Readme V10.0 SP2 (Online)", "A5E55664721-AA", "2026"],
+    ["[6]", "SIMATIC PCS 7 Software update without utilization of new functions (V7.1 SP4 - V8.1 SP1), Service Manual", "A5E32786218-AB", "03/2015"],
 ]
 
 GENERIC_OPEN_ITEMS = [
@@ -128,6 +129,16 @@ GROUPS = {
     "HW_GSD_3RD_PARTY": ("3rd party GSD", 90),
     "LIB_MASTERDATA_DELETE": ("Diğer notlar", 99), "OS_PO_INCREASE": ("Diğer notlar", 99),
     "AS_STOP_NO_TCIR": ("Diğer notlar", 99),
+    # Yeni donanım kontrolleri: "AS hardware" satırında toplanır
+    "HW_CPU_PRE_0499": ("AS hardware", 10), "HW_CPU_EXT_DRIVER_FW": ("AS hardware", 10),
+    "HW_CPU_INT_PN": ("AS hardware", 10), "HW_ET200SP_IM": ("AS hardware", 10),
+    "HW_UNSUPPORTED_CP": ("AS hardware", 10), "HW_DIAG_REPEATER": ("AS hardware", 10),
+    "HW_AS_RTX": ("AS hardware", 10), "HW_CPU410_FW_TCIR": ("AS hardware", 10),
+    "HW_CPU_RT_SFC78": ("AS hardware", 10), "HW_APL_S7400_ONLY": ("AS hardware", 10),
+    "HW_FF_AB7000": ("AS hardware", 10), "HW_DISCONTINUED": ("AS hardware", 10),
+    # Library / block
+    "LIB_APL_MULTI_AS": ("Library update (APL)", 40), "LIB_LEGACY_AUTHOR": ("Eski PCS 7 Standard Library", 35),
+    "LIB_RESERVED_NUMBERS": ("Custom block'lar", 50), "BLK_PA_CPU_MANUAL": ("{as} opsiyonları", 30),
 }
 _CONS_PREFIX = {"CONS_ES_SERVER": "OS projeleri", "CONS_CLIENTS": "Client'lar", "CONS_BACKUP_DATES": "Backup'lar",
                 "WINCC_DIFF": "Tag / alarm"}
@@ -192,7 +203,7 @@ def group_findings(an: Analysis) -> list[tuple[str, list[Finding]]]:
     return sorted(groups.items(), key=lambda kv: (-_SEV_ORDER.index(_worst(kv[1])), order[kv[0]]))
 
 
-def _actions_text(fs: list[Finding], limit: int | None = None) -> str:
+def _actions_text(fs: list[Finding], limit: int | None = None, words: int | None = None) -> str:
     """Gruplanmış bulguların aksiyonları (tekrarsız) + sorumlu + Finding ID'leri (Excel 'Bulgular' ile bağ)."""
     from .checks import action_for
     seen, out = set(), []
@@ -202,8 +213,14 @@ def _actions_text(fs: list[Finding], limit: int | None = None) -> str:
             seen.add(act)
             out.append(f"{act} ({who})")
     ids = [f.fid for f in fs if f.fid]
+    id_line = ""
     if ids:
-        out.append("[" + ", ".join(ids[:6]) + (f" +{len(ids) - 6}" if len(ids) > 6 else "") + "]")
+        k = 3 if words else 6
+        id_line = "[" + ", ".join(ids[:k]) + (f" +{len(ids) - k}" if len(ids) > k else "") + "]"
+    if words:
+        out = [_wcap("\n".join(out), max(words - len(id_line.split()), 4))] if out else []
+    if id_line:
+        out.append(id_line)
     return "\n".join(out)
 
 
@@ -219,13 +236,34 @@ def _first_sentence(d: str, limit: int = WORD_CELL_WORDS) -> str:
     return " ".join(words[:limit]) + " …" if len(words) > limit else s
 
 
-def _finding_text(f: Finding, group: str, short: bool = False) -> str:
+WORD_CELL_MAX = 25    # QA CELL_WORDS ile aynı: Word tablo hücresi kelime üst sınırı
+
+
+def _wcap(text: str, n: int = WORD_CELL_MAX) -> str:
+    """Hücreyi en fazla `n` kelimeye indirir: satırlar sırayla alınır, sığmayan satır cümle/kelime sınırında kesilir."""
+    if len(text.split()) <= n:
+        return text
+    out, left = [], n
+    for line in text.split("\n"):
+        w = line.split()
+        if len(w) <= left:
+            out.append(line)
+            left -= len(w)
+        elif left >= 4:
+            out.append(_first_sentence(line, left - 1))
+            break
+        else:
+            break
+    return "\n".join(out)
+
+
+def _finding_text(f: Finding, group: str, short: bool = False, words: int = WORD_CELL_WORDS) -> str:
     d = f.detail
     if f.scope and group.startswith(f.scope + " ") and d.startswith(f.scope + ": "):
         d = d[len(f.scope) + 2:]
         d = d[:1].upper() + d[1:]
     if short:
-        d = _first_sentence(d)
+        d = _first_sentence(d, words)
     if f.check_id in _CONS_PREFIX:
         d = f"**{_CONS_PREFIX[f.check_id]}:** {d}"
     if f.confidence is Confidence.LOW and "teyit" not in d.lower():
@@ -574,7 +612,7 @@ def manual_items(an: Analysis) -> list[list[str]]:
     return rows
 
 
-def _software_rows(an: Analysis) -> list[list[str]]:
+def _software_rows(an: Analysis, full: bool = True) -> list[list[str]]:
     rows = []
     for b in sorted((b for b in an.block_folders if b.counts), key=lambda b: _natkey(b.as_label)):
         libs = []
@@ -607,16 +645,28 @@ def _software_rows(an: Analysis) -> list[list[str]]:
         if b.custom_blocks:
             names = [c.name.replace(" (symbol)", "") or f"FB{c.number}" for c in b.custom_blocks]
             n_inst = sum(c.instances for c in b.custom_blocks)
-            custom.append(_fmt_list(names, 8) + (f" (toplam {n_inst} instance)" if b.memo_available else ""))
+            inst_txt = f", {n_inst} instance" if b.memo_available else ""
+            if full:
+                custom.append(_fmt_list(names, 8) + (f" (toplam {n_inst} instance)" if b.memo_available else ""))
+            else:
+                custom.append(f"{len(names)} custom block{inst_txt} (liste: Excel 'Custom_Blocklar')")
             for c in b.custom_blocks:
                 if c.headerless:
                     custom.append(f"FB{c.number} {c.name.replace(' (symbol)', '')} header'sız"
                                   + (" STL" if lang_name(c.lang) == "STL" else "") + " block")
             noinst = [c.name or f"FB{c.number}" for c in b.custom_blocks if c.instances == 0 and b.memo_available]
             if noinst:
-                custom.append(f"{_fmt_list(noinst, 4)} (instance görünmüyor)")
+                if full:
+                    shown = set(names[:8])
+                    extra = [x for x in noinst if x not in shown]
+                    custom.append(f"{len(noinst)} block'ta instance görünmüyor" + (f": {_fmt_list(extra, 4)}" if extra else ""))
+                else:
+                    custom.append(f"{len(noinst)} block'ta instance görünmüyor")
         for s in b.symbol_only:
             custom.append(f"{s.split(' ', 1)[-1]} symbol table'da var, block klasöründe yok")
+        if not full:
+            rows.append([b.as_label, _wcap("\n".join(lines) or "-"), _wcap("\n".join(custom) or "—")])
+            continue
         rows.append([b.as_label, "\n".join(lines) or "-", "\n".join(custom) or "—"])
     return rows
 
@@ -645,7 +695,10 @@ def build_document(an: Analysis, full: bool = True) -> list:
     else:
         doc.append(Para(f"PCS 7 versiyonu backup'tan otomatik tespit edilemedi (HW Config export ve WinCC projesi "
                         f"bulunamadı veya tanınmadı). {last}"))
-    doc.append(Table(["Konu", "Durum", "Not"], _summary_rows(an, by_group), cap("Genel değerlendirme"),
+    summ = _summary_rows(an, by_group)
+    if not full:
+        summ = [[a, b, _wcap(c)] for a, b, c in summ]
+    doc.append(Table(["Konu", "Durum", "Not"], summ, cap("Genel değerlendirme"),
                      badge_cols=[1], widths=[26, 16, 58]))
     doc.append(Note("Planlı duruş (AS STOP) ve PC / Windows yenilemesi her upgrade'de zaten kapsamdadır; "
                     "zorluk olarak listelenmemiştir."))
@@ -660,11 +713,14 @@ def build_document(an: Analysis, full: bool = True) -> list:
     else:
         doc.append(Para("HW Config bulunamadı (.cfg export veya .s7h yok); AS envanteri çıkarılamadı."))
     if an.os_projects:
-        doc.append(Table(["MP", "OS / PC yapısı"], _os_rows(an), cap("OS yapısı"), widths=[20, 80]))
+        osr = _os_rows(an)
+        if not full:
+            osr = [[a, _wcap(b)] for a, b in osr]
+        doc.append(Table(["MP", "OS / PC yapısı"], osr, cap("OS yapısı"), widths=[20, 80]))
     if an.wincc:
         doc.append(Table(["MP", "OS", "Tag (DmTag + struct)", "Alarm", "Connection"], _wincc_rows(an), cap("WinCC yapısı"),
                          widths=[14, 14, 16, 12, 44]))
-    sw = _software_rows(an)
+    sw = _software_rows(an, full)
     if sw:
         doc.append(Table(["AS", "Library / opsiyon", "Custom block'lar"], sw, cap("Yazılım içeriği"), widths=[10, 45, 45]))
 
@@ -676,12 +732,21 @@ def build_document(an: Analysis, full: bool = True) -> list:
         for label, fs in by_group:
             row_ids.append([f.fid for f in fs])
             # her iki modda ilk cümle; çalışma raporunda tüm bulgular (tam metin Ek C + Excel 'Bulgular')
-            texts = [_finding_text(f, label, short=True) for f in (fs if full else fs[:WORD_MAX_FINDINGS])]
-            if not full and len(fs) > WORD_MAX_FINDINGS:
-                texts.append(f"+{len(fs) - WORD_MAX_FINDINGS} bulgu daha (Excel 'Bulgular')")
-            if label == "Custom block'lar":
-                texts.insert(0, "Recompile ve fonksiyon testi gerekli. **Bu block'ların kullanıldığı CFC'ler** kontrol edilmeli.")
-            rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs, None if full else WORD_MAX_FINDINGS)])
+            if full:
+                texts = [_finding_text(f, label, short=True) for f in fs]
+                if label == "Custom block'lar":
+                    texts.insert(0, "Recompile ve fonksiyon testi gerekli. **Bu block'ların kullanıldığı CFC'ler** kontrol edilmeli.")
+                rows.append([label, _sev_range(fs), "\n".join(texts), _actions_text(fs)])
+            else:
+                # müşteri raporu: ilk bulgunun ilk cümlesi + "+N daha"; tam metin HTML + Excel 'Bulgular'
+                fs = sorted(fs, key=lambda f: -_SEV_ORDER.index(f.severity))   # en kötü bulgu Word'de görünsün
+                more = f"\n+{len(fs) - 1} bulgu daha (Excel 'Bulgular')" if len(fs) > 1 else ""
+                budget = WORD_CELL_MAX - (6 if more else 0)
+                if label == "Custom block'lar":
+                    first = "Recompile ve fonksiyon testi gerekli; kullanıldığı CFC'ler kontrol edilmeli."
+                else:
+                    first = _finding_text(fs[0], label, short=True, words=budget - 1)
+                rows.append([label, _sev_range(fs), _wcap(first, budget) + more, _actions_text(fs, 1, WORD_CELL_MAX)])
         doc.append(Table(["Konu", "Etki", "Açıklama", "Aksiyon (sorumlu)"], rows, cap("Zorluklar ve etkileri"),
                          badge_cols=[1], widths=[16, 10, 50, 24], row_ids=row_ids))
         if full:
@@ -1020,7 +1085,7 @@ def badge_class(v: str) -> str | None:
         return "neutral"
     if v in (STATUS_CHANGE, "bulunamadı, teyit edilmeli") or v.endswith(Severity.HIGH.value):
         return "high"
-    if v in (STATUS_ATTN, STATUS_DETAIL, STATUS_CONFIRM, "listede, FW listede yok") or v.endswith(Severity.MEDIUM.value):
+    if v in (STATUS_ATTN, "listede, FW listede yok") or v.endswith(Severity.MEDIUM.value):
         return "medium"
     if v.endswith(Severity.LOW.value):
         return "low"

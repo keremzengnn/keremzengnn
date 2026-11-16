@@ -221,7 +221,12 @@ def _phase1(an) -> list:
         _from_checks(an, "Upgrade lisansları (kademeli paketler)", ["LICENSES"]),
         _from_checks(an, "OS RT PO lisansı", ["OS_PO_INCREASE"]),
         _from_checks(an, "BOX RTX: donanım değişimi", ["HW_BOX_RTX"]),
+        _from_checks(an, "AS RTX (WinLC RTX): tip ve sürüm teyidi", ["HW_AS_RTX"]),
         _from_checks(an, "Hardware uyumluluğu (Released Modules)", ["HW_RELEASED"]),
+        _from_checks(an, "CPU / modül değişimleri ve FW güncellemeleri",
+                     ["HW_CPU_PRE_0499", "HW_CPU_EXT_DRIVER_FW", "HW_CPU_INT_PN", "HW_ET200SP_IM", "HW_UNSUPPORTED_CP",
+                      "HW_DIAG_REPEATER", "HW_CPU410_FW_TCIR", "HW_CPU_RT_SFC78", "HW_APL_S7400_ONLY", "HW_FF_AB7000"]),
+        _from_checks(an, "Discontinued modüller (lifecycle)", ["HW_DISCONTINUED"]),
         _from_checks(an, "3rd party GSD dosyaları", ["HW_GSD_3RD_PARTY"],
                      detail="GSD dosyaları V10 ES'e kurulmalı (HW Config → Options → Install GSD File → 'from the STEP 7 "
                             "project'); üreticiden V10 uyumu teyit edilmeli."),
@@ -293,10 +298,29 @@ def _tcir_step(an) -> Step | None:
                 confidence=KANIT)
 
 
+def _apl_procedure_step(an) -> Step | None:
+    """APL / Basis V10.0 update prosedürü (Readme'ler: V9.1 SP2 >= Upd4 / V9.1.2.4 kaynaklı; V10.x ara adımlar)."""
+    f = _feats(an)
+    if not ({"APL", "Basis"} & f):
+        return None
+    return Step("", "APL / Basis V10.0 update prosedürü",
+                "V9.1 SP2 >= Update 4 (Basis: V9.1.2.4) -> V10.0: Close Textual Interconnections = Yes, AS complete compilation "
+                "+ complete download, OS complete compilation; AS STOP gerekir (410-5H + TCiR + yeterli instance memory hariç). "
+                "V10.x ara adımlarda (SP1, SP1 Upd1, SP2): changes compile/download, AS STOP yok, OS complete compilation; "
+                "Basis ara adımlarında 'generate module drivers' ile complete compile. Mevcut sürüm teyit edilmeli.",
+                owner=OWNER_SIEMENS, sources=["APL Readme V10.0 SP2, 5.1.3 / 5.2.3 / 5.3.2 / 5.4.3",
+                                              "Basis Library Readme V10.0 SP2, 6.1.3 / 6.2.3"],
+                confidence=KANIT, generic=True)
+
+
 def _phase3(an) -> list:
     return [
         _from_checks(an, "Master data: eski block'ları sil", ["LIB_MASTERDATA_DELETE"]),
         _from_checks(an, "IM_DRV block'larını system chart'tan taşı", ["IM_DRV"]),
+        _from_checks(an, "SFC için ayrılmış block numaraları (rename)", ["LIB_RESERVED_NUMBERS"]),
+        _from_checks(an, "Eski library block'ları / PA_CPU / OS-AS APL şartı",
+                     ["LIB_LEGACY_AUTHOR", "BLK_PA_CPU_MANUAL", "LIB_APL_MULTI_AS"]),
+        _apl_procedure_step(an),
         _from_checks(an, "Logic Matrix kararı / library update", ["LIB_LOGIC_MATRIX"]),
         _tcir_step(an),
         _from_checks(an, "APL / Basis library update + Update Block Types", ["LIB_APL_V8", "LIB_MIXED_VERSIONS"],
@@ -354,6 +378,11 @@ def _phase5(an) -> list:
                               "OS compile ve download" + (" ('SFC visualization' işaretli)" if sfc else "")
                               + "; server / standby / client'lara dağıtım.",
                               sources=[INTERNAL], why_an=an, check_ids=["SFC_VISU"]))
+    if [o for o in an.os_projects if o.role in ("server", "standby")] and any(o.role == "standby" for o in an.os_projects):
+        steps.append(_generic("Redundant OS: sıralı download",
+                              "Redundant OS çiftine iki server aynı anda download edilmez; sıralı complete download, ardından "
+                              "yeni archive segment / redundancy durumu kontrolü (iç doküman: redundant OS download donma analizi).",
+                              sources=[INTERNAL], owner=OWNER_BOTH))
     fat = ["AS ↔ OS connection'ları", "alarm ve archive", "faceplate / picture'lar"]
     if any(any("5H" in (n or o).upper() for o, _, n in s.cpus) for s in an.stations):
         fat.append("H-system redundancy switchover")

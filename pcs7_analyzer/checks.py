@@ -463,8 +463,9 @@ def im_drv(c, an):
 
 
 def box_rtx(c, an):
-    hits = [s for s in an.stations if re.search(r"BOX\s*RTX|WinAC\s*RTX|WinLC\s*RTX", s.station_text, re.I)]
-    return [_f(c, f"{s.name}: SIMATIC PCS 7 BOX RTX / WinAC RTX update edilemez (yeni Windows sürümlerini desteklemiyor) "
+    # Manual 4.1: sadece "SIMATIC PCS 7 BOX RTX" update edilemez. WinLC/WinAC RTX (AS RTX) 9.3.4'te update adımı var -> HW_AS_RTX
+    hits = [s for s in an.stations if re.search(r"BOX\s*RTX", s.station_text, re.I)]
+    return [_f(c, f"{s.name}: SIMATIC PCS 7 BOX RTX update edilemez (WinAC RTX yeni Windows sürümlerini desteklemiyor) "
                   "-> AS donanımı değiştirilmeli.", [s.source], scope=s.name, blocking=True) for s in hits]
 
 
@@ -719,15 +720,302 @@ def cons_backups(c, an):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Kural önerilerinden eklenen kontroller (A/B/C birleşimi). Güven: kaynak V10.0 SP2 doküman ise KANIT,
+# V8.1/V9.1 dönemi doküman veya eşleme/yorum içeriyorsa ÇIKARIM (Confidence.LOW).
+# ---------------------------------------------------------------------------
+APL_README = "[5] APL Readme V10.0 SP2"
+OLD_UPD = "[6] Software update without new functions (V8.1 dönemi)"
+
+
+def _norm_mlfb(s: str) -> str:
+    return re.sub(r"[\s\-]", "", (s or "").upper())
+
+
+def _fw_tuple(fw: str):
+    m = re.match(r"\s*V?(\d+)\.(\d+)(?:\.(\d+))?", fw or "")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)) if m else None
+
+
+def _inventory(an):
+    """(station, MLFB, FW, adet) — HW export / .s7h taramasından."""
+    for s in an.stations:
+        for (order, fw), n in s.inventory.items():
+            yield s, order, fw, n
+
+
+def _mlfb_hits(an, wanted: set) -> dict:
+    """{normalize MLFB: [(station, order, fw, n)]} (istenen MLFB'ler)."""
+    out: dict = {}
+    for s, order, fw, n in _inventory(an):
+        k = _norm_mlfb(order)
+        if k in wanted:
+            out.setdefault(k, []).append((s, order, fw, n))
+    return out
+
+
+def _fmt_hits(hits) -> str:
+    return _short(f"{o} {fw} ×{n} ({s.name})".replace("  ", " ") for s, o, fw, n in hits)
+
+
+def hw_diag_repeater(c, an):
+    hits = _mlfb_hits(an, {"6ES79720AB000XA0"}).get("6ES79720AB000XA0")
+    if not hits:
+        return []
+    return [_f(c, "Diagnostic repeater 6ES7 972-0AB00-0XA0 PCS 7 V6.0 ile gelen fonksiyonları desteklemez (AB01 destekler): "
+                  + _fmt_hits(hits) + ".", [h[0].source for h in hits[:1]], scope=hits[0][0].name)]
+
+
+def _note_hits(an, prefix: str):
+    return [m for m in an.hw_matches if m.kind == "modül" and (m.note or "").startswith(prefix)]
+
+
+def hw_cpu_pre_0499(c, an):
+    hits = _note_hits(an, "21.14")
+    if not hits:
+        return []
+    return [_f(c, "CPU prior to 04/99 (PCS 7 V4.02'ye kadar): Released Modules listesinde var ama driver design V5.0 ve "
+                  "üstüne geçilemez -> CPU değişimi gerekir: " + _short(f"{m.order} ×{m.count} ({', '.join(m.stations)})"
+                                                                         for m in hits)
+                  + ". HW_RELEASED bunu 'listede' sayar, bu yüzden ayrıca raporlanır.", [an.released_list],
+               scope=hits[0].stations[0] if hits[0].stations else "")]
+
+
+def hw_cpu_ext_driver_fw(c, an):
+    bad = []
+    for m in _note_hits(an, "21.12") + _note_hits(an, "21.13"):
+        t = _fw_tuple(m.fw)
+        if t and t < (3, 0, 0):
+            bad.append(m)
+    if not bad:
+        return []
+    return [_f(c, "Extended driver design (PCS 7 V5.2) için CPU FW >= V3.0 gerekir; FW eski: "
+                  + _short(f"{m.order} {m.fw} ({', '.join(m.stations)})" for m in bad)
+                  + ". FW update veya CPU değişimi, sonra driver generator + complete compile.", [an.released_list])]
+
+
+def hw_cpu_int_pn(c, an):
+    hits = _mlfb_hits(an, {"6ES74143EM050AB0", "6ES74163ER050AB0"})
+    if not hits:
+        return []
+    allh = [h for v in hits.values() for h in v]
+    return [_f(c, "CPU 414-3EM05 / 416-3ER05: internal PROFINET interface PCS 7 ile kullanıma released değil: " + _fmt_hits(allh)
+                  + ". Internal PN interface'in kullanılıp kullanılmadığı backup'tan teyit edilmedi (kullanılıyorsa harici CP / "
+                    "CPU değişimi).", [allh[0][0].source], Confidence.LOW, scope=allh[0][0].name)]
+
+
+ET200SP_IM_MLFB = {"6ES71346TD000CA1", "6ES71346JF000CA1", "6ES71936AP200AA0", "6ES71936AP400AA0"}
+ET200SP_NOT_DPHF = {"6ES71346PA000BD0", "6ES71326HD000BB0"}
+
+
+def hw_et200sp_im(c, an):
+    h1 = _mlfb_hits(an, ET200SP_IM_MLFB)
+    h2 = _mlfb_hits(an, ET200SP_NOT_DPHF)
+    out = []
+    srcs = [h[0][0].source for h in list(h1.values()) + list(h2.values())][:1]
+    if h1:
+        allh = [h for v in h1.values() for h in v]
+        out.append(_f(c, "ET 200SP modül / bus adapter IM FW şartı: AI HART HF / AI RTD/TC HF modülleri ve bus adapter "
+                         "6ES7 193-6AP20/AP40 için IM155-6 PN HF FW >= V3.1 (bus adapter: HW >= V3) gerekir: " + _fmt_hits(allh)
+                         + ". IM tipi / FW'si backup'tan eşlenmedi, teyit edilmeli.", srcs, Confidence.LOW,
+                      scope=allh[0][0].name))
+    if h2:
+        allh = [h for v in h2.values() for h in v]
+        out.append(_f(c, "6ES7 134-6PA00-0BD0 / 6ES7 132-6HD00-0BB0 IM155-6DP HF üzerinde released değildir: " + _fmt_hits(allh)
+                         + ". IM tipi teyit edilmeli.", srcs, Confidence.LOW, scope=allh[0][0].name))
+    return out
+
+
+def hw_unsupported_cp(c, an):
+    pat = re.compile(r"CP\s?(1413|1613|5412)", re.I)
+    out = []
+    for s in an.stations:
+        hit = sorted({m.group(0).upper().replace("  ", " ") for m in pat.finditer(s.station_text or "")})
+        if hit:
+            out.append(_f(c, f"{s.name}: eski dönem (V8.1) dokümanında desteklenmeyen CP: {', '.join(hit)}. Hedef versiyon için "
+                             "Released Modules ile teyit edilmeli; PROFIBUS plant bus desteklenmez (sadece Industrial Ethernet).",
+                          [s.source], Confidence.LOW, scope=s.name))
+    return out
+
+
+def _is_410h(order: str) -> bool:
+    return bool(re.match(r"6ES7 ?410-5H", order or "", re.I))
+
+
+def hw_cpu410_fw_tcir(c, an):
+    bad, unk = [], []
+    for s in an.stations:
+        for order, fw, name in s.cpus:
+            if not _is_410h(order):
+                continue
+            t = _fw_tuple(fw)
+            if t is None:
+                unk.append(f"{s.name}: {order}")
+            elif t < (8, 2, 0):
+                bad.append(f"{s.name}: {order} {fw}")
+    out = []
+    if bad:
+        out.append(_f(c, "CPU 410-5H FW < V8.2: Basis Library TCiR ile güncellenemez, AS STOP gerekir: " + _short(bad)
+                         + ". FW >= V8.2'ye yükseltme veya AS STOP penceresi.", [BASIS_README + ", 5.2"], scope=bad[0].split(":")[0]))
+    if unk:
+        out.append(_f(c, "CPU 410-5H FW okunamadı, TCiR için FW >= V8.2 teyit edilmeli: " + _short(unk), [], Confidence.LOW))
+    return out
+
+
+def hw_cpu_rt_sfc78(c, an):
+    out = []
+    for b in an.as_folders:
+        if not any(n.upper() == "CPU_RT" for n in b.block_names):
+            continue
+        for s in (x for x in an.stations if x.project == b.info.project):
+            for order, fw, name in s.cpus:
+                t = _fw_tuple(fw)
+                h = bool(re.match(r"6ES7 ?41\d-\dH", order or "", re.I))
+                if t and ((h and t < (4, 5, 0)) or (not h and t < (5, 0, 0))):
+                    out.append(_f(c, f"{b.as_label}: CPU_RT var, CPU {order} {fw}: load display (SFC 78) standart CPU için FW >= V5.0, "
+                                     "H-CPU için >= V4.5 gerektirir; eski FW'de sadece 'Stop notification on overload' çalışır.",
+                                  [b.info.dbf, s.source], scope=b.as_label))
+    return out
+
+
+def hw_apl_s7400_only(c, an):
+    out = []
+    for b in an.as_folders:
+        if not ({"APL", "Basis"} & set(b.features)):
+            continue
+        for s in (x for x in an.stations if x.project == b.info.project):
+            odd = sorted({o for o, _, _ in s.cpus if not re.match(r"6ES7 ?4\d\d-", o or "")})
+            if odd:
+                out.append(_f(c, f"{b.as_label}: APL / Basis block'ları sadece S7-400 AS için tasarlanmıştır; station {s.name} CPU: "
+                                 + ", ".join(odd) + " (S7-400 değil). F uygulamaya uygun değildir.",
+                              [b.info.dbf, s.source], Confidence.LOW, scope=b.as_label))
+    return out
+
+
+def hw_ff_ab7000(c, an):
+    out = []
+    for s in an.stations:
+        txt = (s.station_text or "") + " " + " ".join(s.gsd)
+        if "AB7000" in txt.upper():
+            out.append(_f(c, f"{s.name}: Profibus Slave AB7000 arkasında FF field device (ilk uygulama aşaması) V10 APL'de artık "
+                             "desteklenmiyor; isim eşleşmesi, teyit edilmeli.", [s.source], Confidence.LOW, scope=s.name))
+    return out
+
+
+def hw_discontinued(c, an):
+    hits = [m for m in an.hw_matches if m.kind == "modül" and m.discontinued]
+    if not hits:
+        return []
+    return [_f(c, f"{len(hits)} modül tipinde Released Modules listesinde discontinuation tarihi var (hâlâ desteklenir, yedek parça / "
+                  "lifecycle planı gerekir): " + _short([f"{m.order} (disc. {m.discontinued}; {', '.join(m.stations)})" for m in hits], 6),
+               [an.released_list])]
+
+
+def hw_as_rtx(c, an):
+    out = []
+    for s in an.stations:
+        t = s.station_text or ""
+        if re.search(r"BOX\s*RTX", t, re.I) or not re.search(r"WinAC\s*RTX|WinLC\s*RTX|AS\s*RTX", t, re.I):
+            continue
+        out.append(_f(c, f"{s.name}: PC tabanlı AS (WinLC / WinAC RTX). Manual 9.3.4: HW Config'te AS versiyonu 3.3 veya eskiyse "
+                         "WinLC RTX V4.6+'ya yükseltilir (PC'de WinAC RTX >= V4.6 şart). Bu station 'BOX RTX' mi (update edilemez) "
+                         "yoksa 'AS RTX' mi, manual açıkça eşlemiyor; teyit edilmeli.", [s.source, f"{SW_UPDATE}, 4.1"],
+                      Confidence.LOW, scope=s.name))
+    return out
+
+
+def lib_reserved_numbers(c, an):
+    out = []
+    for b in an.as_folders:
+        clash = []
+        weak = False   # header'sız / author'sız block Siemens standart olabilir (bilinen yanlış pozitif) -> ÇIKARIM
+        for nr in (245, 246, 300):
+            name, lib, author = b.fb_library.get(nr, ("", "", ""))
+            if (nr in b.fb_library) and lib != "SFC system" and (author or "").upper() != "ES_SFC":
+                clash.append(f"FB{nr} {name or '(header yok)'} ({author or 'author yok'})")
+                weak = weak or not (name and author)
+        if clash:
+            out.append(_f(c, f"{b.as_label}: SFC için ayrılmış numaralarda SFC system block'u olmayan block var: " + ", ".join(clash)
+                             + ". FB245/246/300 ve FC240…250 yeniden adlandırılamaz; aynı numara/isimdeki user block'lar SFC "
+                               "kullanılmadan önce rename edilmeli.", [b.info.dbf],
+                         Confidence.LOW if weak else Confidence.HIGH, scope=b.as_label))
+        fcs = sorted(k for k in b.code_len if k.startswith("FC") and k[2:].isdigit() and 240 <= int(k[2:]) <= 250)
+        if fcs and "SFC" not in b.features:
+            out.append(_f(c, f"{b.as_label}: {', '.join(fcs)} SFC için ayrılmış aralıkta (FC240…250) ama SFC system library "
+                             "tespit edilmedi: custom FC olabilir, teyit edilmeli.", [b.info.dbf], Confidence.LOW, scope=b.as_label))
+    return out
+
+
+def lib_legacy_author(c, an):
+    pat = re.compile(r"^(DRIVER|COMM)(60|70)$", re.I)
+    out = []
+    for b in an.block_folders:
+        hits = sorted({a for libs in b.libraries.values() for a in libs if pat.match(a)})
+        if hits:
+            out.append(_f(c, f"{b.as_label}: eski PCS 7 library author'ları ({', '.join(hits)}): master data library güncellenmeden "
+                             "önce APL / Basis karşılığına taşınmalı. Author soneki eşlemesi çıkarımdır.", [b.info.dbf],
+                          Confidence.LOW, scope=b.as_label))
+    return out
+
+
+def blk_pa_cpu(c, an):
+    return [_f(c, f"{b.as_label}: PA_CPU block'u var; Update Block Types ile otomatik güncellenmez, CFC library'den block "
+                  "folder'a elle kopyalanmalı.", [b.info.dbf], scope=b.as_label)
+            for b in an.as_folders if any(n.upper() == "PA_CPU" for n in b.block_names)]
+
+
+def lib_apl_multi_as(c, an):
+    v8 = {v: a for v, a in _lib_versions(an, "APL").items() if v.startswith("V8")}
+    n_as = len([b for b in an.as_folders if b.counts])
+    if not v8 or n_as < 2 or not an.os_projects:
+        return []
+    return [_f(c, f"APL V8.x block'lı AS: {_short(sorted({x for a in v8.values() for x in a}))}; projede {n_as} AS ve "
+                  f"{len(an.os_projects)} OS projesi var. Bir OS birden fazla AS'ye atanmışsa her AS için sadece APL V9.0.x ve "
+                  "üzeri block'lar konfigüre edilebilir. OS-AS ataması backup'tan kesin okunmadı, teyit edilmeli.", [],
+               Confidence.LOW)]
+
+
 CHECKS: list[Check] = [
     # --- Hardware ---
     Check("HW_RELEASED", "Hardware uyumluluğu", "Released Modules listesinde bulunamayan MLFB/FW", H, RELEASED, hw_released),
     Check("HW_F_EXPORT_MISSING", "F-I/O HW export", "F-block/F-driver var ama HW export'ta F-I/O yok", H, "-", hw_f_export_missing),
     Check("HW_GSD_3RD_PARTY", "3rd party GSD", "3rd party GSD cihazlar", M, "-", hw_gsd),
+    Check("HW_CPU_PRE_0499", "CPU (04/99 öncesi)", "CPU prior to 04/99: listede ama V5.0+ driver design'a geçilemez", H,
+          f"{RELEASED}, 21.14", hw_cpu_pre_0499),
+    Check("HW_CPU_EXT_DRIVER_FW", "CPU FW (driver design)", "Extended driver design için CPU FW >= V3.0", M,
+          f"{RELEASED}, 21.12 / 21.13", hw_cpu_ext_driver_fw),
+    Check("HW_CPU_INT_PN", "CPU internal PN", "CPU 414-3EM05 / 416-3ER05 internal PROFINET released değil", M,
+          f"{RELEASED}, 21.9", hw_cpu_int_pn),
+    Check("HW_ET200SP_IM", "ET 200SP IM şartları", "ET 200SP modül / bus adapter için IM155 FW şartı ve DP HF kısıtı", M,
+          f"{RELEASED}, 12 (ET 200SP)", hw_et200sp_im),
+    Check("HW_UNSUPPORTED_CP", "Desteklenmeyen CP", "CP 1413 / CP 1613 / CP 5412 (V8.1 dönemi dokümanı)", M,
+          f"{OLD_UPD}, 5.2.7", hw_unsupported_cp),
+    Check("HW_DIAG_REPEATER", "Diagnostic repeater", "Diagnostic repeater 6ES7 972-0AB00 -> AB01", L,
+          f"{SW_UPDATE}, 7.4", hw_diag_repeater),
+    Check("HW_AS_RTX", "AS RTX (WinLC RTX)", "PC tabanlı AS (WinLC / WinAC RTX): V4.6 adımları, BOX RTX ayrımı teyit", M,
+          f"{SW_UPDATE}, 9.3.4", hw_as_rtx),
+    Check("HW_CPU410_FW_TCIR", "CPU 410-5H FW (TCiR)", "CPU 410-5H FW < V8.2: Basis TCiR yok", M,
+          f"{BASIS_README}, 5.2", hw_cpu410_fw_tcir),
+    Check("HW_CPU_RT_SFC78", "CPU_RT load display", "CPU_RT yük göstergesi (SFC 78) için CPU FW şartı", L,
+          f"{BASIS_README}, 5.2", hw_cpu_rt_sfc78),
+    Check("HW_APL_S7400_ONLY", "APL / Basis CPU tipi", "APL / Basis block'ları sadece S7-400 AS için", M,
+          f"{APL_README}, 6", hw_apl_s7400_only),
+    Check("HW_FF_AB7000", "FF / AB7000", "Profibus Slave AB7000 arkasında FF field device desteklenmiyor", M,
+          f"{APL_README}, 6", hw_ff_ab7000),
+    Check("HW_DISCONTINUED", "Discontinued modüller", "Released Modules'ta discontinuation tarihi olan modüller", L,
+          f"{RELEASED}, Appendix A.1", hw_discontinued),
     Check("AS_STOP_NO_TCIR", "AS STOP", "Basis Library update TCiR ile yapılamıyor (410-5H değil)", L, BASIS_README, as_stop),
     # --- Block / library ---
     Check("LIB_APL_V8", "APL library update", "APL V8.x block'ları: library update zorunlu", H, f"{SW_UPDATE}, 9.10.4", lib_apl_v8),
-    Check("LIB_MIXED_VERSIONS", "Karışık library versiyonları", "Aynı library'nin karışık versiyonları", M, "-", lib_mixed),
+    Check("LIB_APL_MULTI_AS", "APL (OS çok AS)", "OS birden fazla AS'ye atanmışsa her AS APL >= V9.0.x olmalı", H,
+          f"{SW_UPDATE}, 4.3", lib_apl_multi_as),
+    Check("LIB_RESERVED_NUMBERS", "SFC ayrılmış numaralar", "FB245/246/300, FC240-250: SFC için ayrılmış, custom block çakışması", H,
+          f"{SW_UPDATE}, 9.5.15", lib_reserved_numbers),
+    Check("LIB_LEGACY_AUTHOR", "Eski library author'ları", "Eski PCS 7 (V6/V7.0) library block'ları (DRIVER60/70, COMM60/70)", M,
+          f"{SW_UPDATE}, 9.5.11", lib_legacy_author),
+    Check("BLK_PA_CPU_MANUAL", "PA_CPU", "PA_CPU otomatik güncellenmez, elle kopyalanır", L, f"{SW_UPDATE}, 9.5.15", blk_pa_cpu),
+    Check("LIB_MIXED_VERSIONS", "Karışık library versiyonları", "Aynı library'nin karışık versiyonları", M,
+          f"{SW_UPDATE}, 9.5.2 / 8.7", lib_mixed),
     Check("LIB_PCS7_V71", "PCS 7 Library V7.1", "PCS 7 Library V7.1 block'ları", M, f"{SW_UPDATE}, 8.5", lib_v71),
     Check("LIB_LOGIC_MATRIX", "Logic Matrix", "Logic Matrix: library update zorunlu", H, f"{SW_UPDATE}, 9.9.4", lib_lm),
     Check("LIB_SFC", "SFC", "SFC system block'ları elle güncellenmeli", M, f"{SW_UPDATE}, 9.5", lib_sfc),
@@ -741,7 +1029,8 @@ CHECKS: list[Check] = [
     Check("LIB_STD_LIB", "Eski Standard Library", "PCS 7 Standard Library (APL öncesi) block'ları", H, f"{SW_UPDATE}, 8.5", lib_std),
     Check("AS_SIZE", "AS büyüklüğü", "Diğerlerinden belirgin büyük AS (compile/test süresi)", M, "-", as_size),
     Check("LICENSES", "Lisanslar", "Kademeli upgrade paketleri ve opsiyon lisansları", M, f"{SW_UPDATE}, 4.3", licenses),
-    Check("CAS_PH", "Arşiv (CAS / PH)", "CAS desteklenmiyor, PH/IS OS gereksinimi", M, "-", cas_ph),
+    Check("CAS_PH", "Arşiv (CAS / PH)", "CAS desteklenmiyor, PH/IS OS gereksinimi", M,
+          f"{SW_UPDATE}, 4.2 / 4.3 / 9.8.2", cas_ph),
     Check("BLK_CUSTOM", "Custom block'lar", "Custom block'lar (CFC kontrolü gerekli)", M, "-", blk_custom),
     Check("BLK_UNUSED", "Kullanılmayan block'lar", "Instance'sız custom/library FB'ler", L, "-", blk_unused),
     Check("BLK_SYMBOL_MISMATCH", "Symbol ↔ block", "Symbol'de olup block'u olmayan block'lar", M, "-", blk_symbol),
@@ -803,25 +1092,48 @@ def run_checks(an) -> None:
 # Sorumlu: Siemens (bizim iş kalemi) / Müşteri (bilgi / karar / şifre) / Siemens + Müşteri
 # ---------------------------------------------------------------------------
 ACTIONS: dict[str, tuple[str, str]] = {
-    "HW_RELEASED": ("Listede olmayan MLFB/FW için Released Modules / Compatibility Tool'dan teyit al; gerekiyorsa değişim planla.", "Siemens"),
+    "HW_RELEASED": ("Listede olmayan MLFB/FW için Released Modules Excel listesi (SIOS) ve Compatibility Tool'dan teyit al "
+                    "(manual ile Excel farklı olabilir; SIPLUS modülün standart muadili aranır; halef modül spare-part uyumlu "
+                    "modda kullanılabilir); gerekiyorsa değişim planla.", "Siemens"),
     "HW_F_EXPORT_MISSING": ("HW Config export'unu S7 F Configuration Pack kurulu PC'den al, F-I/O listesini doğrula.", "Siemens + Müşteri"),
     "HW_GSD_3RD_PARTY": ("GSD dosyalarını projeden V10 ES'e kur; üreticiden V10 uyumunu teyit et.", "Siemens"),
-    "AS_STOP_NO_TCIR": ("Library update için AS STOP penceresini müşteriyle planla.", "Müşteri"),
+    "AS_STOP_NO_TCIR": ("Library update için AS STOP penceresini müşteriyle planla; 410-5H dışında delta yeteneği korunacaksa eski "
+                        "APL block'larında kalma seçeneğini (V10 yeni özellikleri olmadan) müşteriyle değerlendir.", "Müşteri"),
     "LIB_APL_V8": ("Dry-run'da APL update + Update Block Types + entire program compile yap.", "Siemens"),
-    "LIB_MIXED_VERSIONS": ("Library update'te tüm block'ları tek versiyona getir; farklı versiyonlu tipleri listele.", "Siemens"),
+    "LIB_MIXED_VERSIONS": ("Library update'te tüm block'ları tek versiyona getir (bir station'a tek PCS 7 versiyonunun block'ları "
+                           "yüklenebilir); farklı versiyonlu tipleri listele, uyumu Compatibility Tool ile doğrula.", "Siemens"),
     "LIB_PCS7_V71": ("V7.1 block'ları için Library V7.1 SP3 Upd4 + Faceplates V7.1 SP3 Upd1 kur veya APL'e geçiş kararı al.", "Siemens + Müşteri"),
     "LIB_LOGIC_MATRIX": ("Kullanılıyorsa library update planla; kullanılmıyorsa kaldırma kararını müşteriyle al.", "Siemens + Müşteri"),
-    "LIB_SFC": ("Güncel SFC system block'larını kopyala, complete compile yap.", "Siemens"),
-    "LIB_F_SYSTEM": ("F program şifresini ve safety acceptance planını müşteriden al; S7 F Systems sürümünü teyit et.", "Müşteri"),
+    "LIB_SFC": ("Güncel SFC system block'larını kopyala, complete compile yap; interface değişen SFC type'ları da güncelle.", "Siemens"),
+    "LIB_F_SYSTEM": ("F program şifresini ve safety acceptance planını müşteriden al (collective signature değişir -> re-validation); "
+                     "S7 F Systems sürümünü teyit et.", "Müşteri"),
     "LIB_MODBUS_TCP": ("Modbus TCP add-on'un V10 sürümünü ve lisansını teyit et.", "Siemens"),
     "LIB_MASTERDATA_DELETE": ("Library update öncesi master data'dan OB_DIAG / OR_M_16 / OR_M_32'yi sil.", "Siemens"),
     "LIB_INTERFACE": ("Interface'i değişen tipler için pin bağlantılarını dry-run'da kontrol et.", "Siemens"),
     "IM_DRV": ("IM_DRV block'larını update öncesi system chart'tan taşı.", "Siemens"),
     "HW_BOX_RTX": ("BOX RTX için yeni donanım / çözüm teklif et.", "Siemens + Müşteri"),
+    "HW_AS_RTX": ("RTX tipini (BOX RTX / AS RTX) ve WinLC RTX sürümünü müşteriden teyit et; AS RTX ise [1] 9.3.4 adımlarını planla, "
+                  "BOX RTX ise donanım değişimi.", "Siemens + Müşteri"),
+    "HW_CPU_PRE_0499": ("CPU'yu V10.0 SP2'de desteklenen CPU ile değiştir (H-CPU ise 410-5H migration planı).", "Siemens + Müşteri"),
+    "HW_CPU_EXT_DRIVER_FW": ("CPU FW'yi >= V3.0'a yükselt veya CPU'yu değiştir; driver generator sonrası complete compile.", "Siemens"),
+    "HW_CPU_INT_PN": ("Internal PN interface kullanımını teyit et; kullanılıyorsa harici CP 443-1 / CPU değişimi planla.", "Siemens + Müşteri"),
+    "HW_ET200SP_IM": ("IM155-6 PN HF FW >= V3.1 olduğunu teyit et veya modülü uygun IM'e taşı.", "Siemens"),
+    "HW_UNSUPPORTED_CP": ("PC station CP'lerini Released Modules'a karşı kontrol et; listede yoksa onaylı CP ile değiştir.", "Siemens + Müşteri"),
+    "HW_DIAG_REPEATER": ("6ES7 972-0AB00-0XA0'ı AB01 ile değiştirmeyi planla.", "Siemens + Müşteri"),
+    "HW_CPU410_FW_TCIR": ("CPU FW'sini >= V8.2'ye yükselt veya library update için AS STOP planla.", "Siemens"),
+    "HW_CPU_RT_SFC78": ("CPU FW'sini güncelle veya CPU_RT load display beklentisini düzelt.", "Siemens"),
+    "HW_APL_S7400_ONLY": ("S7-400 dışı CPU'daki APL / Basis kullanımını teyit et.", "Siemens"),
+    "HW_FF_AB7000": ("AB7000 arkasındaki FF cihazlar için alternatif entegrasyon planla.", "Siemens"),
+    "HW_DISCONTINUED": ("Discontinued modüller için yedek parça / lifecycle planı çıkar (upgrade kapsamında değişim gerekmez).", "Müşteri"),
+    "LIB_APL_MULTI_AS": ("OS-AS atamasını teyit et; V8.x APL AS'lerini APL V9.0.x+ ile güncelle.", "Siemens"),
+    "LIB_RESERVED_NUMBERS": ("Çakışan block'u başka numaraya taşı (symbol table güncelle), sonra SFC convert + complete compile.", "Siemens + Müşteri"),
+    "LIB_LEGACY_AUTHOR": ("Eski library block'larını APL / Basis karşılığına taşı veya custom ilan et (block bazlı karar).", "Siemens"),
+    "BLK_PA_CPU_MANUAL": ("Her AS'de PA_CPU'yu CFC library'den block folder'a elle kopyala.", "Siemens"),
     "LIB_STD_LIB": ("Eski Standard Library block'ları için V7.1 paketleri veya APL'e geçiş kararı al.", "Siemens + Müşteri"),
     "AS_SIZE": ("Büyük AS için compile / test süresini iş planında ayrı kalem yap.", "Siemens"),
     "LICENSES": ("PCS 7 License Information ve ALM key listesini müşteriden al; upgrade paketlerini belirle.", "Müşteri"),
-    "CAS_PH": ("CAS yerine Process Historian geçişini planla; .PCK dosyalarını sil.", "Siemens + Müşteri"),
+    "CAS_PH": ("CAS yerine Process Historian geçişini planla; .PCK dosyalarını sil. PH / IS sürümünü teyit et: PH, OS server'lardan "
+               "ÖNCE yükseltilir; OS değişirse Windows Server 2019/2022 ve tam backup/restore gerekir.", "Siemens + Müşteri"),
     "BLK_CUSTOM": ("Custom block source'larını iste; dry-run'da compile ve fonksiyon testi yap.", "Siemens + Müşteri"),
     "BLK_UNUSED": ("Instance'sız block'ların gerçekten kullanılmadığını teyit et (multi-instance olabilir).", "Siemens"),
     "BLK_SYMBOL_MISMATCH": ("Symbol table ile block klasörünü SIMATIC Manager'da karşılaştır.", "Siemens"),
@@ -830,7 +1142,8 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "BLK_KNOW_HOW": ("Korumalı block'ların şifresini veya üreticinin V10 sürümünü müşteriden iste.", "Müşteri"),
     "COMM_STD": ("Bağlantı parametrelerini (ID, R_ID, IP, port) ve NetPro'yu kontrol et; karşı tarafı teyit et.", "Siemens + Müşteri"),
     "COMM_AS_AS": ("Karşı taraf AS / sistemleri ve haberleşme şeklini müşteriyle teyit et.", "Müşteri"),
-    "OS_CUSTOM_TYPICALS": ("Custom typicals'ı picture object update öncesi ayrı ele al.", "Siemens"),
+    "OS_CUSTOM_TYPICALS": ("Custom typicals'ı picture object update öncesi ayrı ele al; block icon migration aracı "
+                           "(@PCS7_Block_Icon_Migration.pdl) indexed property, iç interconnection ve script'leri migrate etmez, elle düzelt.", "Siemens"),
     "OS_OPC": ("Harici OPC client'ları ve bağlantı ayarlarını müşteriden al.", "Müşteri"),
     "OS_PO_INCREASE": ("Mevcut OS RT PO kullanımını ve lisansını teyit et.", "Müşteri"),
     "OS_MIGRATION_VOLUME": ("CCMigrator süresini iş planına ayrı kalem olarak koy.", "Siemens"),

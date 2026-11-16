@@ -92,6 +92,35 @@ def backup_coverage(an) -> list[list[str]]:
                  "3rd party / add-on yazılım uyumu teyit edilemez; tesis PC'lerinde çalıştırılmalı"])
     rows.append(["CPU local data / F program şifresi", VERI_YOK, "-",
                  "Download'da local data yetersizliği ve F block update'te şifre sorusu öngörülemez; müşteriden alınmalı"])
+    rows += _extra_coverage(an)
+    return rows
+
+
+def _extra_coverage(an) -> list[list[str]]:
+    """Kural önerilerinden gelen 'müşteriye sor' maddeleri (hepsi backup'tan okunamaz -> VERİ YOK)."""
+    mk = (an.discovery.markers or {})
+    rows = []
+    if any("F-System" in b.features for b in an.as_folders):
+        rows.append(["F-System parametreleri (F-monitoring time, switchover süresi, F Configuration Pack, S7 F Systems / Safety Matrix sürümü)",
+                     VERI_YOK, "-",
+                     "F-monitoring time her F alt grubu için aktif kanal switchover süresinden uzun olmalı; F Config Pack ve "
+                     "Safety Matrix sürümü hedefe uygun mu teyit edilemez; müşteriden / HW Config'ten alınmalı"])
+    rows.append(["Process Historian / Information Server (sürüm, update seviyesi, OS)", VERI_YOK, "-",
+                 "Desteklenen yol: PH 2014 SP3 Upd6 / 2020 SP2 Upd6 / 2024 SP1 Upd2 -> 2024 SP1 Upd3; PH OS server'lardan ÖNCE "
+                 "yükseltilir, OS değişirse Windows Server 2019/2022 ve tam backup/restore gerekir [1, 4.2 / 4.3 / 9.8.2]"])
+    rows.append(["PC station envanteri (OS sürümü, Server/Workstation, NIC / CP tipi)", VERI_YOK, "-",
+                 "OS değişiminde network adapter sırası ve HW Config atamaları değişebilir; PC OS'i backup'tan okunamaz [1, 4.3 / 9.4.1]"])
+    rows.append(["ES yazılım versiyonları (Step7Bas.ver / SIMATIC Version View: STEP 7, CFC, SFC, Basis/APL, PDM, F Systems)", VERI_YOK, "-",
+                 "Kurulu yazılım sürümü backup'tan okunamaz; müşteriden Version View çıktısı istenmeli"])
+    rows.append(["Time synchronization (time master, NetPro time-of-day mode, WinCC Time Sync)", VERI_YOK, "-",
+                 "V5-uyumlu mod kullanımı ve saat kaynağı bilinmiyor; ES / OS CP'lerinin time-of-day ayarı NetPro'da kontrol edilmeli [1, 4.3 / 9.4.1]"])
+    rows.append(["Archive SQL yapılandırması (bağlı DB / segment sayısı, segment süresi)", KISMEN if mk.get("mdf") else VERI_YOK,
+                 f"{mk.get('mdf', 0)} .mdf" if mk.get("mdf") else "-",
+                 "Segment config / bağlı DB sayısı (redundant OS download riski) için sys.databases ve archive config müşteriden alınmalı"])
+    rows.append(["Lifebeat Monitoring / OPC DA Server / SIMATIC Logon (parola koruması, FDA)", VERI_YOK, "-",
+                 "OS rolü başına lifebeat / OPC DA beklentisi ve SIMATIC Logon gereksinimi bilinmiyor [1, 4.3 / 8.3 / 9.2.2]"])
+    rows.append(["ES compile log'u (son compile / download zaman damgaları)", VERI_YOK, "-",
+                 "ES ile AS'deki program aynı mı (Last compilation vs loaded program) teyit edilemez [1, 6.1.3 - 6.1.8]"])
     return rows
 
 
