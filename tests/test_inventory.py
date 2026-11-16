@@ -19,7 +19,7 @@ def inv_out(tmp_path_factory):
 def test_sheets(inv_out):
     inv, _ = inv_out
     names = [s.name for s in inv.sheets]
-    assert names[:2] == ["Mevcut durum", "Hardware"] and names[-1] == "Uyarılar"
+    assert names[:2] == ["Mevcut durum", "Hardware"] and names[-1] == "Teyit edilecekler"
     for n in ("Projeler", "Block klasörleri", "Özel bloklar", "OS projeleri"):
         assert n in names
     for gone in ("Bloklar", "Instance sayıları", "Library özeti", "DB family", "S7 program ↔ AS"):
@@ -32,10 +32,12 @@ def test_current_state(inv_out):
     assert rows[("Yazılım", "PCS 7")] == "V8.1"
     assert "V5.5 SP4" in rows[("Yazılım", "STEP 7")] and "AS01" in rows[("Yazılım", "STEP 7")]
     # eski kopya (ESKI_BACKUP) özete katılmaz: APL sayıları çift sayılmaz
-    assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and rows[("Library", "APL")].index("V9.1") < rows[("Library", "APL")].index("V10.0") and "ESKI_BACKUP" not in rows[("Library", "APL")]
-    assert "karışık versiyon" in rows[("Library", "APL")]
+    # 3 haneli author (AdvLb100): sürüm doğrulanmadığı için ham kod gösterilir, teyit listesine girer
+    assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and "V9.1" in rows[("Library", "APL")] and "ESKI_BACKUP" not in rows[("Library", "APL")]
+    assert "V10.0" not in rows[("Library", "APL")] and "karışık versiyon" in rows[("Library", "APL")]
+    assert any(c.topic == "Library versiyonu" for c in inv.confirm)
     assert rows[("Library", "Custom FB")].startswith("4 FB integratör") and "(AS01 1, AS02 3)" in rows[("Library", "Custom FB")]
-    assert "1 FB tanınmayan author'lu, ÇIKARIM (AS01 1)" in rows[("Library", "Custom FB")]
+    assert "1 FB tanınmayan author'lu (AS01 1)" in rows[("Library", "Custom FB")]
     assert rows[("Hardware", "AS01")].startswith("CPU 414-5H PN/DP V6.0, CP 443-1 V3.0")
     assert "F-capable" in rows[("Hardware", "AS02")] and "F-capable" not in rows[("Hardware", "AS01")]
     assert any(k[0] == "Not" and "ESKI_BACKUP" in v for k, v in rows.items())

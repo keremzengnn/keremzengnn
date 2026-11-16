@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .confirm import HEADING
 
 INDEX = "index.html"
 INV_SUMMARY = "envanter_ozet.json"
@@ -32,13 +33,13 @@ FILES = [
     ("semboller.xlsx", "Detay", "Symbol table'lar (tüm semboller) ve sembol kontrolleri"),
     ("fark.xlsx", "Detay", "Karşılaştırma: iki backup arasındaki farklar + hangisi baz alınmalı"),
     ("fark.md", "Detay", "Karşılaştırma özeti (metin)"),
-    ("*_paket.zip", "Detay", "Paket: analiz için gereken dosyalar (müşteri verisi içerir; paylaşmadan önce kuralları teyit edin)"),
+    ("*_paket.zip", "Detay", "Paket: analiz için gereken dosyalar (müşteri verisi içerir; paylaşmadan önce veri kullanım kurallarını kontrol edin)"),
     ("kesif.md", "Detay", "Keşif: backup klasör yapısı (proje, block klasörü, HW, OS)"),
     ("qa_report.md", "Detay", "Rapor kalite kontrolü (HATA varsa raporu müşteriye göndermeden düzeltin)"),
     ("revizyon.md", "Detay", "Revizyon: önceki rapora göre yeni / kapanan / değişen bulgular"),
     ("rapor.md", "Detay", "Çalışma raporunun Markdown hali"),
     ("yol_haritasi.md", "Detay", "Yol haritasının Markdown hali"),
-    ("findings.json", "Detay", "Bulgular (BLOCKER / RİSK / BİLGİ / VERİ YOK, KANIT / ÇIKARIM) — makine okunur"),
+    ("findings.json", "Detay", "Bulgular (BLOCKER / RİSK / BİLGİ / VERİ YOK) — makine okunur"),
     ("rapor.json", "Detay", "Analiz verisinin tamamı — makine okunur"),
     ("report_ir.json", "Detay", "Rapor modeli (profil, bölümler, istatistik) — makine okunur"),
     ("log.txt", "Detay", "Çalışma günlüğü: uyarılar, hatalar (müşteri dosya yolları içerir)"),
@@ -79,7 +80,8 @@ def write_inventory_summary(inv, out_dir: Path) -> Path | None:
             pass
         data = {"source": str(getattr(inv, "source", "")), "created": str(getattr(inv, "created", "")),
                 "n_files": getattr(d, "n_files", None), "total_bytes": getattr(d, "total_bytes", None),
-                "current_state": rows, "warnings": len(getattr(inv, "warnings", []) or [])}
+                "current_state": rows, "warnings": len(getattr(inv, "warnings", []) or []),
+                "confirm_count": len(getattr(inv, "confirm", []) or [])}
         p = Path(out_dir) / INV_SUMMARY
         p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         return p
@@ -106,11 +108,11 @@ def summary_lines(out_dir: Path) -> list[str]:
 
     # 1) PCS 7 versiyonu
     ver = ""
-    if isinstance(rep, dict) and rep.get("pcs7_family"):
-        ver = str(rep["pcs7_family"])
-        if rep.get("pcs7_family_confidence") != "high":
-            ver += " (çıkarım, teyit edilmeli)"
+    if isinstance(rep, dict) and rep.get("pcs7_family") and rep.get("pcs7_family_confidence") == "high":
+        ver = str(rep["pcs7_family"])          # kesin değilse gösterilmez (teyit sayısına girer)
     ver = ver or _state_value(inv, "Yazılım", "PCS 7")
+    if ver == "tespit edilemedi":
+        ver = ""
     if ver or rep or inv:
         lines.append(f"PCS 7 versiyonu: {ver or 'tespit edilemedi'} (proje dosyalarından)")
 
@@ -136,11 +138,13 @@ def summary_lines(out_dir: Path) -> list[str]:
     if isinstance(rep, dict) and rep.get("os_projects"):
         roles = Counter(str(o.get("role") or "?") for o in rep["os_projects"])
     elif _state_rows(inv, "OS"):
-        for r in _state_rows(inv, "OS"):   # 'OS server' / 'OS client?' ... ; değer 'N proje …' ile başlayabilir
+        for r in _state_rows(inv, "OS"):   # 'OS server' / 'OS client' ... ; değer 'N proje …' ile başlayabilir
             m = re.match(r"\s*(\d+) proje", r[2] if len(r) > 2 else "")
             roles[(r[1].replace("OS ", "", 1).strip() or "?")] += int(m.group(1)) if m else 1
     if roles:
-        lines.append(f"OS projeleri: {sum(roles.values())} ({', '.join(f'{k} {n}' for k, n in roles.most_common())})")
+        known = [(k, n) for k, n in roles.most_common() if k != "?" and not k.endswith("?")]
+        line = f"OS projeleri: {sum(roles.values())}"        # rolü belirsiz olanlar dökümde yok (teyit sayısına girer)
+        lines.append(line + (f" ({', '.join(f'{k} {n}' for k, n in known)})" if known else ""))
     elif rep or inv:
         lines.append("OS projeleri: bulunamadı")
 
@@ -162,7 +166,29 @@ def summary_lines(out_dir: Path) -> list[str]:
         lines.append("Bulgular: " + " · ".join(f"{s} {by.get(s, 0)}" for s in STATUSES))
     elif inv:
         lines.append("Bulgular: değerlendirme yapılmadı (sadece envanter)")
+
+    # 6) Teyit edilecek noktalar: doğrulanamayan bulgular + envanter maddeleri
+    n_confirm = confirm_count(out_dir)
+    if n_confirm:
+        lines.append(f"Teyit edilecek noktalar: {n_confirm}")
     return lines
+
+
+def confirm_count(out_dir: Path) -> int:
+    """findings.json'da kesin olmayan (confidence low / assumption) bulgular + envanter_ozet.json 'confirm_count'."""
+    out_dir = Path(out_dir)
+    fnd = _load(out_dir / "findings.json")
+    inv = _load(out_dir / INV_SUMMARY)
+    n = 0
+    if isinstance(fnd, list):
+        n += sum(1 for x in fnd if isinstance(x, dict) and x.get("status") != "VERİ YOK"
+                 and (x.get("confidence") == "low" or x.get("assumption") is True))
+    if isinstance(inv, dict):
+        try:
+            n += int(inv.get("confirm_count") or 0)
+        except (TypeError, ValueError):
+            pass
+    return n
 
 
 def _source_info(out_dir: Path, source) -> dict:
@@ -200,8 +226,12 @@ def produced_files(out_dir: Path) -> list[tuple[str, str, str]]:
     return res
 
 
-def next_steps(files: set[str]) -> list[str]:
+def next_steps(files: set[str], n_confirm: int = 0) -> list[str]:
     s = []
+    if n_confirm and "envanter.html" in files:
+        s.append(f"{HEADING} ({n_confirm}): <a href=\"envanter.html#teyit\">envanter.html</a> son bölümü.")
+    elif n_confirm and "rapor.html" in files:
+        s.append(f"{HEADING} ({n_confirm}): <a href=\"rapor.html\">rapor.html</a>.")
     if "envanter.html" in files:
         s.append("Mevcut durumu kontrol edin: <a href=\"envanter.html\">envanter.html</a> (versiyon, library, hardware, OS).")
     if "yol_haritasi.html" in files:
@@ -209,7 +239,7 @@ def next_steps(files: set[str]) -> list[str]:
     if "rapor.html" in files:
         s.append("BLOCKER / RİSK bulgularını ve açık konuları inceleyin: <a href=\"rapor.html\">rapor.html</a>.")
     if "rapor.docx" in files:
-        s.append("Müşteri raporunu gözden geçirin (sarı = çıkarım, teyit edilmeli): <a href=\"rapor.docx\">rapor.docx</a>.")
+        s.append("Müşteri raporunu gözden geçirin: <a href=\"rapor.docx\">rapor.docx</a>.")
     if "qa_report.md" in files:
         s.append("Göndermeden önce <a href=\"qa_report.md\">qa_report.md</a>'de HATA olmadığından emin olun.")
     return s
@@ -249,7 +279,7 @@ def render(out_dir: Path, source=None, mode: str = "analysis") -> str:
     if lines:
         parts.append("<section><h2>Proje özeti</h2><ul class=\"summary\">"
                      + "".join(f"<li>{e(x)}</li>" for x in lines) + "</ul></section>")
-    steps = next_steps(names)
+    steps = next_steps(names, confirm_count(out_dir))
     if steps:
         parts.append("<section><h2>Sonraki adımlar</h2><ol>" + "".join(f"<li>{s}</li>" for s in steps) + "</ol></section>")
     for g in GROUPS:

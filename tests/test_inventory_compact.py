@@ -39,7 +39,7 @@ def test_hardware_single_table(inv_out):
     as01 = [r for r in hw.rows if r[0] == "AS01"]
     assert as01[0][1] == "CPU"                                  # station içinde CPU önce
     assert any(r[1] == "GSD" and r[5] == 2 for r in as01)       # aynı GSD cihaz -> Adet
-    assert any(r[3].endswith("(çıkarım)") for r in hw.rows)     # MLFB ailesinden açıklama işaretli
+    assert not any("çıkarım" in str(r[3]) for r in hw.rows)     # MLFB ailesinden türetilen açıklama yok
 
 
 def test_symbols_separate_file(inv_out):
@@ -60,17 +60,17 @@ def test_current_state_compact(inv_out):
     assert all(r[0] != "OS" or r[1] for r in rows)
 
 
-def test_hardware_without_export_uses_s7h_scan(tmp_path):
+def test_hardware_without_export_has_no_scan_rows_but_confirm_item(tmp_path):
     bk = build_demo_project(tmp_path)
     shutil.rmtree(bk / "exports")
     inv = build_inventory(bk)
-    hw = inv.sheet("Hardware").rows
-    sheet = inv.sheet("Hardware")
-    assert hw and ".s7h taraması" in sheet.note and "S00001.s7h" in sheet.note
-    assert {r[0] for r in hw} == {"AS01"}                       # ESKI_BACKUP kopyası hariç
-    assert next(r for r in hw if r[1] == "CPU")[5] == 1        # tek .s7h dosyası, tek kayıt -> güvenilir adet
+    assert inv.hw_scan                                          # dahili okuma var (tanı), ana sayfada gösterilmez
+    assert not inv.has("Hardware")                              # boş sayfa yazılmaz
     cur = {(r[0], r[1]): r[2] for r in inv.sheet("Mevcut durum").rows}
-    assert "(backup taraması, çıkarım)" in cur[("Hardware", "AS01")]
+    assert cur[("Hardware", "-")] == "HW Config export yok"
+    assert not any(r[0] == "Hardware" and r[1] != "-" for r in inv.sheet("Mevcut durum").rows)
+    hw = [c for c in inv.confirm if c.topic == "Hardware"]
+    assert hw and ".cfg" in hw[0].action
     assert cur[("Yazılım", "STEP 7")].startswith("tespit edilemedi")
 
 

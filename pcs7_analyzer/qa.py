@@ -6,6 +6,7 @@ Kontroller tek listede (`QA_CHECKS`): yeni kontrol = bir fonksiyon + bir satır.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import zipfile
@@ -20,6 +21,8 @@ EXCEL_ERRORS = ("#REF!", "#NAME?", "#DIV/0!", "#VALUE!", "#N/A", "#NUM!", "#NULL
 SECRET_PATTERNS = [(re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "IP adresi"),
                    (re.compile(r"(?i)\b(password|passwd|şifre|parola)\s*[:=]\s*\S+"), "şifre")]
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+EXTRA_TEXTS = ("rapor.html", "index.html", "yol_haritasi.html", "yol_haritasi.md", "envanter.html")
+FORBIDDEN_MAX_PER_SOURCE = 8      # bir çıktıdan en fazla bu kadar yasak kalıp satırı raporlanır (kalanı özet)
 
 
 @dataclass
@@ -38,6 +41,8 @@ class QaInput:
     md: str | None = None
     docx: dict | None = None          # {"paras": [...], "tables": [...], "runs": [...]}
     xlsx: dict | None = None          # {sheet: [[cell, ...], ...]}
+    texts: dict[str, str] = field(default_factory=dict)        # ek metin çıktıları (html / md), ham metin
+    xlsx_other: dict[str, dict] = field(default_factory=dict)  # ek Excel çıktıları (envanter.xlsx)
     missing: list[str] = field(default_factory=list)
     unreadable: dict[str, str] = field(default_factory=dict)   # dosya -> hata (bozuk çıktı: QA HATA)
 
@@ -131,6 +136,20 @@ def load(folder: Path) -> QaInput:
     q.md = opt("rapor.md", lambda p: p.read_text(encoding="utf-8"))
     q.docx = opt("rapor.docx", _read_docx)
     q.xlsx = opt("rapor.xlsx", _read_xlsx)
+    # isteğe bağlı çıktılar (yoksa 'missing' notu düşülmez): yasak kalıp taramasına girer
+    for name in EXTRA_TEXTS:
+        p = folder / name
+        if p.exists():
+            try:
+                q.texts[name] = p.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:  # noqa: BLE001
+                q.unreadable[name] = f"{type(e).__name__}: {e}"
+    p = folder / "envanter.xlsx"
+    if p.exists():
+        try:
+            q.xlsx_other["envanter.xlsx"] = _read_xlsx(p)
+        except Exception as e:  # noqa: BLE001
+            q.unreadable["envanter.xlsx"] = f"{type(e).__name__}: {e}"
     return q
 
 
@@ -177,7 +196,8 @@ def qa_counts(q):
     """IR stats == findings.json == Excel 'Bulgular' (durum bazında)."""
     sources = {}
     if q.findings is not None:
-        sources["findings.json"] = Counter(f.get("status") for f in q.findings)
+        # doğrulanmamış (ÇIKARIM) bulgular ana çıktılarda yok: teyit bölümünde; sayıma girmez
+        sources["findings.json"] = Counter(f.get("status") for f in q.findings if f.get("guven") != "ÇIKARIM")
     if q.ir is not None:
         st = q.ir.get("stats", {})
         c = Counter(st.get("by_status", {}))
@@ -204,12 +224,15 @@ def qa_unreadable(q):
 
 
 def qa_highlight(q):
+    """Sarı highlight yalnız 'Teyit edilecek noktalar' bölümünde olur; ana bölümlerde kalmamalı."""
     if not q.docx:
         return
-    from .word import is_assumption
-    miss = [r["text"] for r in q.docx["runs"] if r["text"].strip() and is_assumption(r["text"]) and not r["highlight"]]
-    if miss:
-        yield Issue(HATA, "HIGHLIGHT", f"{len(miss)} varsayım / çıkarım metni sarı değil (ilk: '{miss[0][:60]}')",
+    from .confirm import HEADING
+    runs = q.docx["runs"]
+    cut = next((i for i, r in enumerate(runs) if r["text"].strip() == HEADING), len(runs))
+    main = [r["text"] for r in runs[:cut] if r["highlight"] and r["text"].strip()]
+    if main:
+        yield Issue(HATA, "HIGHLIGHT", f"{len(main)} metin ana bölümde sarı highlight'lı (ilk: '{main[0][:60]}')",
                     "rapor.docx")
 
 
@@ -281,8 +304,64 @@ def qa_repeats(q):
             yield Issue(UYARI, "REPEAT", f"aynı cümle {n} kez: '{s[:70]}'", "rapor.docx")
 
 
+_CONFIRM_H = re.compile(r"(?i)<h[1-6][^>]*>\s*(?:Teyit edilecek noktalar|Teyit edilecekler)\b")
+
+
+def _plain(raw: str, name: str) -> str:
+    """Taranacak düz metin: html etiketsiz; teyit bölümü (başlıktan sonrası) hariç."""
+    if name.endswith(".html"):
+        if name in ("rapor.html", "envanter.html"):     # index / yol haritası: bölüm yok, sadece bağlantı metni (FORBIDDEN izin verir)
+            m = _CONFIRM_H.search(raw)
+            raw = raw[:m.start()] if m else raw
+        raw = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", raw)
+        return html.unescape(re.sub(r"<[^>]+>", " ", raw))
+    from .confirm import HEADING
+    out = []
+    for line in raw.splitlines():
+        if line.strip().lstrip("#").strip() == HEADING and line.lstrip().startswith("#"):
+            break
+        out.append(line)
+    return "\n".join(out)
+
+
+def qa_forbidden_words(q):
+    """Kullanıcı çıktılarında belirsizlik dili yok (confirm.FORBIDDEN); 'Teyit edilecek noktalar' bölümü / sayfası hariç."""
+    from .confirm import FORBIDDEN, HEADING, SHEET_ANALYSIS, SHEET_INVENTORY
+
+    def scan(where: str, text: str):
+        n = 0
+        for m in FORBIDDEN.finditer(text):
+            n += 1
+            if n <= FORBIDDEN_MAX_PER_SOURCE:
+                s = text[max(0, m.start() - 30):m.end() + 30].replace("\n", " ")
+                yield Issue(HATA, "FORBIDDEN_WORDS", f"yasak kalıp '{m.group()}': …{s.strip()}…", where)
+        if n > FORBIDDEN_MAX_PER_SOURCE:
+            yield Issue(HATA, "FORBIDDEN_WORDS", f"{n - FORBIDDEN_MAX_PER_SOURCE} yasak kalıp daha", where)
+
+    skip = {SHEET_ANALYSIS.lower(), SHEET_INVENTORY.lower()}
+
+    def scan_xlsx(fname: str, book: dict):
+        for sheet, rows in book.items():
+            if sheet.lower() in skip:
+                continue
+            yield from scan(f"{fname}/{sheet}", "\n".join(" | ".join(str(v) for v in r) for r in rows))
+    if q.md:
+        yield from scan("rapor.md", _plain(q.md, "rapor.md"))
+    if q.docx:
+        paras = q.docx["paras"]
+        cut = next((i for i, p in enumerate(paras) if p.strip() == HEADING), len(paras))
+        yield from scan("rapor.docx", "\n".join(paras[:cut]))     # tablo hücreleri paragraflara dahildir
+    if q.xlsx:
+        yield from scan_xlsx("rapor.xlsx", q.xlsx)
+    for name, book in q.xlsx_other.items():
+        yield from scan_xlsx(name, book)
+    for name, raw in q.texts.items():
+        yield from scan(name, _plain(raw, name))
+
+
 QA_CHECKS = [qa_unreadable,
              qa_placeholders, qa_actions, qa_glossary, qa_counts, qa_highlight, qa_direct_format, qa_excel_errors,
+             qa_forbidden_words,
              qa_empty_sections, qa_omitted_blocker, qa_mask, qa_cell_words, qa_table_layout, qa_repeats]
 
 

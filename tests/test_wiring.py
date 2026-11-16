@@ -46,18 +46,21 @@ def test_ablative_and_fc_callers_text():
     assert [_ablative(n) for n in (35, 1, 30, 100, 82, 86, 40)] == ["ten", "den", "dan", "den", "den", "dan", "tan"]
     b = SimpleNamespace(fc_callers={7: [("OB", 35, 1)], 8: [("FC", 7, 2), ("FB", 3, 1)],
                                     9: [("OB", 1, 1), ("FC", 2, 1)]})
-    assert fc_callers_text(b, 7) == "OB35'ten çağrılıyor (runtime group?)"
+    assert fc_callers_text(b, 7) == "OB35'ten çağrılıyor (runtime group)"
     assert fc_callers_text(b, 8) == "FC7 ×2, FB3"
-    assert fc_callers_text(b, 9) == "OB1'den çağrılıyor (runtime group?), FC2"
+    assert fc_callers_text(b, 9) == "OB1'den çağrılıyor (runtime group), FC2"
     assert fc_callers_text(b, 99) == "" and fc_callers_text(SimpleNamespace(), 7) == ""
 
 
 def test_excel_custom_blocks_caller_column(demo, an):
+    # çağıran bilgisi doğrulanmış değil: Custom_Blocklar'da sütun yok, 'Teyit_Edilecekler' sayfasında aksiyon olarak
     p = write_excel(an, demo[0] / "rapor.xlsx")
     with zipfile.ZipFile(p) as z:
         s = z.read(f"xl/worksheets/sheet{SHEETS.index('Custom_Blocklar') + 1}.xml").decode("utf-8")
-    assert "Çağıran (ÇIKARIM)" in s
-    assert re.search(r's="4" t="inlineStr"><is><t xml:space="preserve">FC1 \(runtime group\?, OB35\)', s)  # sarı
+        names = re.findall(r'<sheet name="([^"]+)"', z.read("xl/workbook.xml").decode("utf-8"))
+        t = z.read(f"xl/worksheets/sheet{names.index('Teyit_Edilecekler') + 1}.xml").decode("utf-8")
+    assert "Çağıran" not in s and "ÇIKARIM" not in s
+    assert "FC1 (runtime group, OB35)" in t
 
 
 def test_excel_no_caller_column_without_xutils(an, tmp_path):
@@ -73,7 +76,7 @@ def test_excel_no_caller_column_without_xutils(an, tmp_path):
 def test_inventory_special_blocks_caller_column(demo):
     inv = build_inventory(demo[1])
     sh = inv.sheet("Özel bloklar")
-    assert sh.headers[-1] == "Çağıran (ÇIKARIM)"
+    # çağıran bilgisi kesin değil: envanterde sütun yok, tek teyit maddesi
+    assert not any("Çağıran" in h for h in sh.headers)
     assert all(len(r) == len(sh.headers) for r in sh.rows)
-    hit = [r for r in sh.rows if r[3] == "FB" and r[4] == 2501]
-    assert hit and hit[0][-1] == "FC1 (runtime group?, OB35)"
+    assert any(c.topic == "Çağıran block'lar" for c in inv.confirm)

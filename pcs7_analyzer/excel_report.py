@@ -21,11 +21,12 @@ from pathlib import Path
 
 from .fmt import fmt_month, fmt_num
 from .analyze import Analysis, author_version, staged_path_from
-from .model import Severity
+from . import confirm
+from .model import Confidence, Severity
 from .mlfb_info import describe
 from .parsers.subblk import lang_name
-from .parsers.xutils import callers_text, fc_callers_text
-from .report import GENERIC_OPEN_ITEMS, REFERENCES, _natkey, decision, manual_items, prep_list, tr_upper
+from .report import (GENERIC_OPEN_ITEMS, REFERENCES, _clean_status, _natkey, confirm_items, coverage_rows, decision,
+                     manual_items, prep_list, quote_rows, tr_upper)
 from .xlsx import Cell, Workbook, col_letter
 
 PETROL = "009999"
@@ -95,7 +96,7 @@ def _hw_rows(an: Analysis) -> list[list]:
     rows = []
     for name, m, n in out:
         style = "yellow" if m.kind != "modül" else "red" if bad(m) else ""
-        rows.append([Cell(v, style) for v in (name, m.order, describe(m.order)[0], m.fw, n, m.status, m.fw_status,
+        rows.append([Cell(v, style) for v in (name, m.order, describe(m.order)[0], m.fw, n, _clean_status(m.status), m.fw_status,
                                               m.listed_fw, m.discontinued, m.kind, m.note)])
     return rows
 
@@ -159,7 +160,7 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     for k, v in [("Kaynak", an.source), ("Analiz tarihi", an.created), ("Sonuç", title.replace("Sonuç: ", "")),
                  ("Mevcut versiyon", f"PCS 7 {fam}" if fam else "tespit edilemedi"),
                  ("Hedef", an.target.replace("SP", " SP")),
-                 ("İç prosedür yolu", f"{fam or '?'} → {' → '.join(staged_path_from(fam))}"),
+                 ("İç prosedür yolu", f"{fam or '-'} →{' → '.join(staged_path_from(fam))}"),
                  ("Multiproject", ", ".join(tr_upper(m) for m in _mps(an))),
                  ("AS (dolu block klasörü)", sum(1 for b in an.block_folders if b.counts)),
                  ("OS projesi (ES içinde)", sum(1 for o in an.os_projects if o.in_es))]:
@@ -177,7 +178,7 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     lastr = len(rows)
     rows.append([Cell("Toplam", "bold")] + [Cell(None, "bold_num", f"SUM({c}{first}:{c}{lastr})") for c in "BCD"])
     rows.append(["Not: V10 update'inde OS RT PO sayısı artabilir [1, Bölüm 4.3]; mevcut lisans key'leri (ALM) ile karşılaştırılmalı. "
-                 "SFC visualization lisans ihtiyacı teyit edilmeli."])
+                 "SFC visualization lisans ihtiyacı PCS 7 License Information'dan kontrol edilmeli."])
     rows.append([])
     headers.add(len(rows))
     rows.append(["OS projeleri fark özeti (ENG_SRV1_Farklar)", "Adet", ""])
@@ -194,7 +195,8 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     st_cnt = Counter(r[i_st] for r in frows)
     for st in ("BLOCKER", "RİSK", "BİLGİ", "VERİ YOK"):
         rows.append([Cell(st, STATUS_STYLE.get(st, "")), Cell(st_cnt.get(st, 0), "num", f'COUNTIF({st_ref},"{st}")'), ""])
-    top = [(f, r) for f, r in zip(an.findings, frows) if r[i_st] == "BLOCKER" or f.severity is Severity.HIGH]
+    sure = [f for f in an.findings if f.verified]          # findings_rows varsayılanı: yalnız doğrulanmış (sıra aynı)
+    top = [(f, r) for f, r in zip(sure, frows) if r[i_st] == "BLOCKER" or f.severity is Severity.HIGH]
     if top:
         rows.append([])
         headers.add(len(rows))
@@ -226,7 +228,8 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
                      ", ".join(f"{k} ×{v}" for k, v in st.slaves.items()) if st else "",
                      ", ".join(f"{k} ×{v}" for k, v in st.gsd.items()) if st else "",
                      b.counts.get("FB", 0), b.counts.get("FC", 0), b.counts.get("DB", 0), b.counts.get("OB", 0),
-                     apl, ", ".join(x for x in b.features if x not in ("APL", "Basis")), f"{b.info.path} ({b.mapping})"])
+                     apl, ", ".join(x for x in b.features if x not in ("APL", "Basis")),
+                     b.info.path + (f" ({b.mapping})" if b.mapping_confidence == Confidence.HIGH.value and b.mapping != "-" else "")])
     n = len(rows)
     if n > 1:
         rows.append([Cell("Toplam", "bold")] + [""] * 7 + [Cell(None, "bold_num", f"SUM({c}2:{c}{n})") for c in "IJKL"])
@@ -244,29 +247,22 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
                  widths=[10, 26, 30, 10, 6, 30, 24, 12, 12, 14, 50])
 
     # ---------------- 4 Custom_Blocklar ----------------
-    # "Çağıran (ÇIKARIM)": XUTILS call tree (parsers.xutils) -> sadece bir AS klasöründe çağıran bilgisi varsa
-    with_callers = any(b.callers or b.fc_callers for b in an.as_folders)
-    rows = [["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Not"]
-            + (["Çağıran (ÇIKARIM)"] if with_callers else [])]
+    # Çağıran FC/OB bilgisi (XUTILS çağrı ağacı) doğrulanmış değil: bu sayfada yok, 'Teyit_Edilecekler' sayfasında.
+    rows = [["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Not"]]
     for b in sorted(an.as_folders, key=lambda b: _natkey(b.as_label)):       # library projeleri AS değil
         for c in sorted(b.custom_blocks, key=lambda c: (c.kind, c.number)):
-            row = [b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
-                   lang_name(c.lang), c.version,
-                   c.instances if b.memo_available else "",
-                   "header'sız" if c.headerless else
-                   ("Tanınmayan author (ÇIKARIM)" if c.category == "Tanınmayan author" else
-                    "Şifreli, Siemens dışı" if c.category == "Şifreli, Siemens dışı" else "")]
-            if with_callers:
-                txt = (callers_text(b, c.number) if c.kind == "FB" else
-                       fc_callers_text(b, c.number) if c.kind == "FC" else "")
-                row.append(Cell(txt, "yellow") if txt else "")
-            rows.append(row)
+            rows.append([b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
+                         lang_name(c.lang), c.version,
+                         c.instances if b.memo_available else "",
+                         "header'sız" if c.headerless else
+                         ("Tanınmayan author" if c.category == "Tanınmayan author" else
+                          "Şifreli, Siemens dışı" if c.category == "Şifreli, Siemens dışı" else "")])
         for s in b.symbol_only:
             rows.append([b.as_label, s.split(" ", 1)[0], s.split(" ", 1)[-1], "", "", "", "", "",
-                         "symbol table'da var, block klasöründe yok"] + ([""] if with_callers else []))
+                         "symbol table'da var, block klasöründe yok"])
     _no_data(rows, "custom block bulunamadı (sadece library block'ları) veya block klasörü yok")
     wb.add_sheet("Custom_Blocklar", rows, header_rows={0}, filter_row=0, freeze=1,
-                 widths=[10, 10, 30, 12, 12, 8, 9, 9, 40] + ([40] if with_callers else []))
+                 widths=[10, 10, 30, 12, 12, 8, 9, 9, 40])
 
     # ---------------- 5 Instance_Sayilari ----------------
     rows = [["AS", "Library", "Author", "Versiyon (author)", "FB tipi", "Instance", f"En çok kullanılan (ilk {TOP_INSTANCES})",
@@ -351,8 +347,8 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     for k, v in manual_items(an):
         rows.append(["Müşteri sorusu" if k == "Müşteri sorusu" else "Manuel giriş",
                      v if k == "Müşteri sorusu" else k, "" if k == "Müşteri sorusu" else v])
-    rows += [["Açık konu", x, ""] for x in list(an.open_items) + list(GENERIC_OPEN_ITEMS)]
-    rows += [["Uyarı", w, ""] for w in an.warnings]
+    rows += [["Açık konu", x, ""] for x in GENERIC_OPEN_ITEMS]      # analizden gelen açık konular: Teyit_Edilecekler
+    rows += [["Uyarı", w, ""] for w in an.warnings if confirm.is_clean(w)]       # diğerleri Teyit_Edilecekler'de
     rows += [["Kaynak", f"{r[0]} {r[1]}", f"{r[2]} ({r[3]})"] for r in REFERENCES]
     # "Kontrol edilemedi" satırları Bulgular'da (VERİ YOK); aynı konu (ör. müşteri sorusu = açık konu) bir kez
     seen: set[str] = set()
@@ -361,38 +357,41 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
     wb.add_sheet("Acik_Konular_Kaynak", rows, header_rows={0}, filter_row=0, freeze=1, widths=[16, 90, 50])
 
     # ---------------- 9-11 Readiness ----------------
-    from .readiness import backup_coverage, findings_rows, quote_inputs
+    from .readiness import findings_rows
     sty = {"Var": "green", "Kısmen": "yellow", "Yok": "yellow", "VERİ YOK": "red"}
     rows = [["Kontrol", "Durum", "Kanıt", "Analize etkisi"]]
-    rows += [[Cell(r[0]), Cell(r[1], sty.get(r[1], "")), Cell(r[2]), Cell(r[3])] for r in backup_coverage(an)]
+    rows += [[Cell(r[0]), Cell(r[1], sty.get(r[1], "")), Cell(r[2]), Cell(r[3])] for r in coverage_rows(an)[0]]
     _no_data(rows, "backup kapsamı değerlendirilemedi")
     wb.add_sheet("Backup_Yeterlilik", rows, header_rows={0}, freeze=1, widths=[40, 12, 50, 80])
-    rows = [["Girdi", "Değer", "Kaynak / güven"]]
-    rows += [[Cell(r[0]), Cell(r[1], "red" if r[1] == "VERİ YOK" else ""), Cell(r[2])] for r in quote_inputs(an)]
+    rows = [["Girdi", "Değer", "Kaynak"]]
+    rows += [[Cell(r[0]), Cell(r[1], "red" if r[1] == "VERİ YOK" else ""), Cell(r[2])] for r in quote_rows(an)[0]]
     _no_data(rows, "teklif girdisi üretilemedi")
     wb.add_sheet("Teklif_Girdileri", rows, header_rows={0}, freeze=1, widths=[36, 70, 40])
     from .readiness import FINDINGS_COLUMNS
-    rows = [list(FINDINGS_COLUMNS)]
-    i_status, i_conf, i_detail = (FINDINGS_COLUMNS.index(c) for c in ("Durum", "Güven", "Detay"))
-    for r in findings_rows(an):
-        assumption = r[i_conf] not in ("KANIT", "-")       # ÇIKARIM -> sarı (Güven + Detay)
-        cells = [Cell(v) for v in r]
-        cells[i_status].style = STATUS_STYLE.get(r[i_status], "")
-        if assumption:
-            cells[i_conf].style = cells[i_detail].style = "yellow"
+    keep = [i for i, c in enumerate(FINDINGS_COLUMNS) if c != "Güven"]       # güven etiketi kullanıcı sayfasında yok
+    rows = [[FINDINGS_COLUMNS[i] for i in keep]]
+    i_status = FINDINGS_COLUMNS.index("Durum")
+    for r in findings_rows(an):                                              # yalnız doğrulanmış bulgular
+        cells = [Cell(r[i]) for i in keep]
+        cells[keep.index(i_status)].style = STATUS_STYLE.get(r[i_status], "")
         rows.append(cells)
     _no_data(rows, "bulgu yok ve kontrol edilemeyen kontrol yok")
-    wb.add_sheet("Bulgular", rows, header_rows={0}, filter_row=0, freeze=1, widths=[8, 28, 10, 10, 12, 100, 60, 50])
+    wb.add_sheet("Bulgular", rows, header_rows={0}, filter_row=0, freeze=1, widths=[8, 28, 10, 10, 100, 60, 50])
     rows = [["Modül", "Dosya (backup içi tam yol)", "Neden", "Alan / ofset", "Ham değer"]] + an.unknown.rows()
     _no_data(rows, "okunamayan / tanınmayan dosya kaydı yok")
     wb.add_sheet("Analiz_Edilemeyenler", rows, header_rows={0}, filter_row=0, freeze=1, widths=[14, 70, 90, 14, 20])
     if an.diag is not None:
         dg = an.diag
-        rows = [["Tür", "Zaman / önem", "Kategori / güven", "Metin", "Kaynak"]]
-        rows += [["Bulgu", f.severity, f.confidence, f"{f.title}: {f.detail}", f.source] for f in dg.findings]
+        rows = [["Tür", "Zaman / önem", "Kategori", "Metin", "Kaynak"]]
+        rows += [["Bulgu", f.severity, "", f"{f.title}: {f.detail}", f.source] for f in dg.findings if f.confidence == "KANIT"]
         rows += [["Olay", ev.ts, ev.category, ev.text, ev.source] for ev in dg.events]
         _no_data(rows, "DIAGNOSTICS arşivinde bulgu / olay yok")
         wb.add_sheet("Diagnostics", rows, header_rows={0}, filter_row=0, freeze=1, widths=[10, 20, 14, 100, 50])
+    # Teyit_Edilecekler: EN SONDA; doğrulanamayan her şey aksiyon cümlesi olarak. Boşsa yazılmaz.
+    items = confirm_items(an)
+    if items:
+        rows = [["Konu", "Aksiyon", "Nerede"]] + [[Cell(i.topic, "wrap"), Cell(i.action, "wrap"), Cell(i.where, "wrap")] for i in items]
+        wb.add_sheet(confirm.SHEET_ANALYSIS, rows, header_rows={0}, filter_row=0, freeze=1, widths=[40, 98, 50])
     return wb
 
 

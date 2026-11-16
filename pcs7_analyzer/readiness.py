@@ -20,8 +20,18 @@ KANIT, CIKARIM, VARSAYIM = "KANIT", "ÇIKARIM", "VARSAYIM"
 
 
 def conf_label(c) -> str:
-    """Confidence -> KANIT (dosyada birebir) / ÇIKARIM (heuristic, teyit edilmeli)."""
+    """Confidence -> KANIT (dosyada birebir) / ÇIKARIM (dahili etiket; sadece findings.json, kullanıcı çıktısında yok)."""
     return KANIT if c in (Confidence.HIGH, Confidence.HIGH.value) else CIKARIM
+
+
+def verified_findings(an) -> list:
+    """Ana tablolara girecek bulgular (doğrulanmış: Confidence.HIGH), sıra korunur."""
+    return [f for f in an.findings if f.verified]
+
+
+def unverified_findings(an) -> list:
+    """Doğrulanamayan bulgular: sadece `confirm.collect` ile 'Teyit edilecek noktalar'a gider."""
+    return [f for f in an.findings if not f.verified]
 
 
 def _ex(items, n=2) -> str:
@@ -53,22 +63,22 @@ def backup_coverage(an) -> list[list[str]]:
         "Block / library / instance analizi yapılamaz",
         partial=bool(no_dbt), impact_partial=f"{len(no_dbt)} klasörde SUBBLK.DBT yok: instance sayıları eksik")
     row("HW Config export (.cfg)", bool(d.cfg_exports), f"{len(d.cfg_exports)}: {_ex(d.cfg_exports)}",
-        "Rack/slot, adres, F-capable, PDM bilgisi yok; HW sadece .s7h'den (MLFB/FW) okunur. "
-        "F-I/O export'ta görünmeyebilir (F Configuration Pack)")
+        "Rack/slot, adres, F-capable, PDM bilgisi yok; HW sadece MLFB/FW düzeyinde listelenir. "
+        "F-I/O için export S7 F Configuration Pack kurulu PC'den alınmalı")
     row("HW backup içi (.s7h)", bool(d.s7h_files), f"{len(d.s7h_files)}", "Export da yoksa AS hardware'i çıkarılamaz")
     row("Symbol table (SYMLIST.DBF / .asc)", bool(d.symbol_tables or d.symbol_exports),
         f"{len(d.symbol_tables)} SYMLIST, {len(d.symbol_exports)} export",
-        "Block klasörü ↔ AS eşlemesi ve header'sız F-block isimleri teyit edilemez")
+        "Block klasörü ↔ AS eşlemesi ve header'sız F-block isimleri doğrulanamaz")
     src_n = mk.get("s7asrcom", 0) + mk.get("awl", 0) + mk.get("scl", 0)
     row("Block source'ları (s7asrcom / AWL / SCL)", bool(src_n), f"{fmt_num(src_n)} dosya",
-        "Custom block source'u görülemedi: recompile edilebilirlik teyit edilmeli (RİSK)")
+        "Custom block source'u backup'ta yok: recompile edilebilirlik kontrol edilemedi")
     row("CFC / SFC chart verisi (s7cfc)", bool(mk.get("s7cfc")), f"{fmt_num(mk.get('s7cfc', 0))} dosya",
         "Chart verisi yok", partial=bool(mk.get("s7cfc")),
         impact_partial="Var, ama chart / runtime group içeriği bu sürümde okunmuyor (FC 64 KB riski VERİ YOK)")
     row("OS projeleri (wincproj / .mcp)", bool(d.os_projects), f"{len(d.os_projects)}: {_ex(o.name for o in d.os_projects)}",
         "OS analizi yapılamaz (picture, script, OPC, SFC visualization)")
     row("OS picture'ları (.pdl)", bool(mk.get("pdl")), f"{fmt_num(mk.get('pdl', 0))} dosya",
-        "Picture analizi yapılamaz; tahmin edilmez")
+        "Picture analizi yapılamaz")
     row("OS veritabanı (.mdf)", bool(mk.get("mdf")), f"{mk.get('mdf', 0)} .mdf, {mk.get('ldf', 0)} .ldf",
         "Arşiv / SQL boyutu değerlendirilemez")
     row("Configuration Studio export (tag / alarm)", bool(d.wincc_exports), f"{len(d.wincc_exports)}",
@@ -82,7 +92,7 @@ def backup_coverage(an) -> list[list[str]]:
         impact_partial=(("Kopya var ama karşılaştırma koşmadı" if not n_cmp else "Bazı kopyalar karşılaştırılamadı")
                         + ": aynı adlı ES OS projesi yok"
                         + (f" ({len(unm)} kopya eşleşmedi)" if unm else "")
-                        + "; farklı adlı eşleme tahmin edilmez, ES↔OS farkı VERİ YOK"))
+                        + "; farklı adlı kopyalar eşlenmedi, ES↔OS farkı VERİ YOK"))
     row("Aynı projenin farklı tarihli backup'ı", bool(an.backups), f"{len(an.backups)}",
         "Tek backup: güncellik karşılaştırması yok (normal)")
     diag_n = mk.get("sql_errorlog", 0) + mk.get("evtx", 0) + mk.get("diagnose", 0)
@@ -151,7 +161,7 @@ def quote_inputs(an) -> list[list[str]]:
     roles = Counter(o.role for o in os_pool)
     rows.append(["OS projeleri (ES içinde)" if es_any or not an.os_projects else "OS projeleri (.s7p yok: sadece WinCC)",
                  ", ".join(f"{r}: {n}" for r, n in sorted(roles.items())) or "-",
-                 f"wincproj, rol proje adından ({CIKARIM})"])
+                 "wincproj"])
     m = an.manual
     rows.append(["AS RT PO / OS PO / archive tag",
                  " / ".join(x or "eksik" for x in (m.as_rt_po, m.os_po, m.archive_tags)),
@@ -161,11 +171,11 @@ def quote_inputs(an) -> list[list[str]]:
     rows.append(["SFC", f"FB300 instance {fb300}; OS'te görselleştirilen chart {charts}" if fb300 or charts else "yok",
                  f"SUBBLK + SfcRtBase/ChartLst ({KANIT})"])
     rows.append(["SFC visualization lisansı", "runtime station başına (chart başına değil); chart'lar OS RT PO'ya sayılır"
-                 if charts else "-", "kullanıcı bilgisi (manual'dan teyit edilmeli)" if charts else "-"])
+                 if charts else "-", "PCS 7 manual [1]" if charts else "-"])
     f_as = [b.as_label for b in an.as_folders if "F-System" in b.features]
     rows.append(["F-System", ", ".join(f_as) if f_as else "yok", f"F-block / F-driver ({KANIT})" if f_as else "-"])
     lm = [k for k, v in an.lm_status.items() if not str(v.get("status", "")).startswith("kurulu, kullanılmıyor")]
-    rows.append(["Logic Matrix (kullanılan)", ", ".join(lm) or "yok / kullanılmıyor", f"instance + WinCC ({CIKARIM})"])
+    rows.append(["Logic Matrix (kullanılan)", ", ".join(lm) or "yok / kullanılmıyor", "instance + WinCC"])
     if an.wincc:
         for name, w in sorted(an.wincc.items()):
             rows.append([f"WinCC {name}: tag / alarm / connection", f"{fmt_num(w.total_tags)} / {fmt_num(w.alarms)} / {len(w.connections)}",
@@ -199,13 +209,14 @@ def _kb(an, check_id: str) -> list[str]:
 FINDINGS_COLUMNS = ["ID", "Konu", "Durum", "Önem", "Güven", "Detay", "Aksiyon (sorumlu)", "Kaynak"]
 
 
-def findings_rows(an) -> list[list[str]]:
-    """FINDINGS_COLUMNS sırasıyla satırlar + kontrol edilemeyenler (VERİ YOK)."""
+def findings_rows(an, include_unverified: bool = False) -> list[list[str]]:
+    """FINDINGS_COLUMNS sırasıyla satırlar + kontrol edilemeyenler (VERİ YOK). Varsayılan: sadece doğrulanmış bulgular."""
     from .checks import action_for
+    pool = an.findings if include_unverified else verified_findings(an)
     rows = [[f.fid, f.title, finding_status(f), f.severity.value, conf_label(f.confidence), f.detail,
              " ".join(x for x in (action_for(f.check_id)[0], f"({action_for(f.check_id)[1]})"
                                   if action_for(f.check_id)[1] else "") if x) or "-",
-             "; ".join(f.sources + _kb(an, f.check_id)) or "-"] for f in an.findings]
+             "; ".join(f.sources + _kb(an, f.check_id)) or "-"] for f in pool]
     from .checks import CHECKS
     titles = {c.id: c.title for c in CHECKS}
     rows += [["-", titles.get(i, i), VERI_YOK, "-", "-", f"Kontrol edilemedi: {why}", "Eksik veriyi sağla", "-"]
@@ -228,5 +239,6 @@ def findings_json(an) -> list[dict]:
     return out
 
 
-__all__ = ["backup_coverage", "quote_inputs", "findings_rows", "findings_json", "finding_status", "conf_label", "VAR", "KISMEN", "YOK", "VERI_YOK",
+__all__ = ["backup_coverage", "quote_inputs", "findings_rows", "findings_json", "finding_status", "conf_label",
+           "verified_findings", "unverified_findings", "VAR", "KISMEN", "YOK", "VERI_YOK",
            "KANIT", "CIKARIM", "VARSAYIM"]

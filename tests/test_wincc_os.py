@@ -154,8 +154,11 @@ def test_hw_fw_columns(an):
 
 def test_prep_list_and_manual(an):
     p = "\n".join(prep_list(an))
-    for s in ("S7 F Systems", "V7.1 SP3 Upd4", "GSD", "FB245", "OB_DIAG", "SFC visualization", "@PCS7TypicalsAPC"):
+    for s in ("S7 F Systems", "V7.1 SP3 Upd4", "GSD", "FB245", "SFC visualization", "@PCS7TypicalsAPC"):
         assert s in p, s
+    # demo'da OB_DIAG block'u yok: master data bulgusu doğrulanamaz -> ana listede değil, teyit listesinde
+    from pcs7_analyzer.confirm import collect
+    assert any("OB_DIAG" in i.action for i in collect(an))
     m = dict((k, v) for k, v in manual_items(an) if k != "Müşteri sorusu")
     assert m["AS RT PO (PCS 7 License Information)"] == "250" and m["OS PO"] == "eksik"
     md = render_markdown(an)

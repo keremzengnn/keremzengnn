@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from . import confirm as confirm_mod
+from .confirm import ConfirmItem
 from ._vendor import dbfread
 from .discovery import DiscoveryResult, discover_source, owner_project
 from .parsers import subblk
@@ -63,7 +65,13 @@ class Inventory:
     hw_scan: list = field(default_factory=list)          # ham tarama: [(proje klasörü, rel, yöntem, mlfb, fw, adet)]
     os_rows: list = field(default_factory=list)          # [(OsProjectInfo, rol, yer)]
     symbol_sheets: list = field(default_factory=list)    # semboller.xlsx (envantere girmez)
-    os_sigs: dict = field(default_factory=dict)          # {OS proje path: client_signature} (sadece client / client?)
+    os_sigs: dict = field(default_factory=dict)          # {OS proje path: client_signature} (sadece client)
+    confirm: list = field(default_factory=list)          # [confirm.ConfirmItem]: doğrulanamayanlar -> 'Teyit edilecekler'
+
+    def add_confirm(self, topic: str, action: str, where: str = "") -> None:
+        item = ConfirmItem(topic, action, where)
+        if item not in self.confirm:
+            self.confirm.append(item)
 
     def sheet(self, name: str) -> Sheet:
         return next(s for s in self.sheets if s.name == name)
@@ -117,7 +125,7 @@ HW_KINDS = ("CPU", "CP", "IM", "PS", "modül", "GSD", "diğer")
 _IM_RE = re.compile(r"^6ES7 ?(15\d|46\d|36\d)-")
 _PS_RE = re.compile(r"^6ES7 ?(40[57]|307)-")
 _OTHER_RE = re.compile(r"^6ES7 ?(400|390|960|972)-")      # rack, H-Sync, bus connector…
-SRC_EXPORT, SRC_S7H, SRC_DBF = "HW export", ".s7h taraması (çıkarım)", "hOmSave7 DBF taraması (çıkarım)"
+SRC_EXPORT, SRC_S7H, SRC_DBF = "HW export", "s7h", "homsave7_dbf"        # dahili yöntem kimlikleri (kullanıcıya gösterilmez)
 
 
 def hw_kind(mlfb: str, station_header: bool = False, gsd: bool = False) -> str:
@@ -138,11 +146,11 @@ def hw_kind(mlfb: str, station_header: bool = False, gsd: bool = False) -> str:
 
 
 def _model(mlfb: str, fallback: str = "") -> str:
-    """Model / açıklama: Released Modules listesi; MLFB ailesinden ise ' (çıkarım)'; yoksa HW Config ismi."""
+    """Model / açıklama: yalnız Released Modules listesinden (kesin); MLFB ailesinden türetilen yerine HW Config ismi."""
     from .mlfb_info import SRC_FAMILY
     desc, dsrc = describe(mlfb)
-    if desc:
-        return desc + (" (çıkarım)" if dsrc == SRC_FAMILY else "")
+    if desc and dsrc != SRC_FAMILY:
+        return desc
     return fallback
 
 
@@ -215,26 +223,21 @@ def _hardware(inv: Inventory) -> None:
     stale, _ = _stale_dirs(inv)
     sh = Sheet("Hardware", ["Station / Proje", "Tür", "MLFB", "Model / açıklama", "FW", "Adet"])
     order = {k: i for i, k in enumerate(HW_KINDS)}
-    exp_files, scan_files, methods = [], set(), set()
+    exp_files = []
     for st in sorted(inv.hw_stations, key=lambda s: s["name"].lower()):
         exp_files.append(Path(st["rel"]).name)
         for (kind, mlfb, model, fw), n in sorted(st["items"].items(), key=lambda x: (order.get(x[0][0], 99), x[0][1:])):
             sh.rows.append([st["name"], kind, mlfb, model, fw, n])
-    for proj, items in _scan_by_project(inv, stale).items():
-        for (kind, mlfb, fw), (n, rel, method) in sorted(items.items(), key=lambda x: (order.get(x[0][0], 99), x[0][1:])):
-            scan_files.add(Path(rel).name)
-            methods.add(method)
-            sh.rows.append([Path(proj).name or proj or "-", kind, mlfb, _model(mlfb), fw, "" if n is None else n])
-    note = ["Kaynak: " + (f"HW Config export (.cfg): {_short_list(sorted(set(exp_files)), 8)}" if exp_files else "")
-            + ("; " if exp_files and scan_files else "")
-            + (f"backup içi ham tarama ({', '.join(sorted(methods))}): {_short_list(sorted(scan_files), 8)}"
-               if scan_files else "") + "."]
-    if scan_files:
-        note.append("Ham tarama: MLFB doğru, FW her zaman okunamaz, rack/slot yok (çıkarım). CPU/CP adedi her .s7h dosyasında "
-                    "(= station) bir kez sayılır; aynı dosyada tekrar eden kayıt (H çifti mi, kayıt tekrarı mı ayrışmaz) "
-                    "veya hOmSave7 DBF taraması varsa 'Adet' boş bırakılır.")
-    note.append("Aynı isimli projenin eski kopyaları hariç. '(çıkarım)' = açıklama MLFB ailesinden.")
-    sh.note = " ".join(note)
+    # Export'u olmayan projeler: backup içi HW dosyaları tablo yapılmaz, tek teyit maddesi (HW Config export'u iste)
+    missing = [Path(p).name or p or "-" for p in _scan_by_project(inv, stale)]
+    if missing:
+        inv.add_confirm("Hardware", f"{len(missing)} projede HW Config export'u (.cfg) yok ({_short_list(sorted(missing), 8)}): "
+                        "CPU / CP / modül listesi için SIMATIC Manager'da HW Config > Station > Export ile .cfg alın", "HW Config")
+    elif not inv.hw_stations:
+        inv.add_confirm("Hardware", "HW Config export'u (.cfg) yok: CPU / CP / modül listesi için SIMATIC Manager'da "
+                        "HW Config > Station > Export ile .cfg alın", "HW Config")
+    sh.note = ((f"Kaynak: HW Config export (.cfg): {_short_list(sorted(set(exp_files)), 8)}. " if exp_files else "")
+               + "Aynı isimli projenin eski kopyaları hariç.")
     inv.sheets.append(sh)
 
 
@@ -293,11 +296,16 @@ def special_category(b, protected: bool = False, symbol: str = "") -> str | None
 
 
 def _link_label(lk) -> str:
-    """blockmap.ProgramLink -> 'AS02 (S7 program AS02_Prog, CPU 414-5H, S7-400H, rack/slot 0/3; ÇIKARIM)'."""
+    """blockmap.ProgramLink -> 'AS02 (S7 program AS02_Prog, CPU 414-5H, S7-400H, rack/slot 0/3)'."""
     det = [f"S7 program {lk.program_name}" if lk.station_name and lk.program_name else "", lk.cpu_name,
            lk.station_type, f"rack/slot {lk.rack}/{lk.slot}" if lk.rack is not None else ""]
     det = ", ".join(x for x in det if x)
-    return f"{lk.label} ({det + '; ' if det else ''}{lk.confidence})"
+    return f"{lk.label} ({det})" if det else lk.label
+
+
+def _verified(lk) -> bool:
+    """Block klasörü ↔ AS bağlantısı bağımsız çapraz kontrolle doğrulandı mı (blockmap KANIT)."""
+    return lk is not None and lk.confidence == "KANIT"
 
 
 def _resolve_blockmap(src: Source, d: DiscoveryResult, inv: Inventory):
@@ -316,9 +324,17 @@ def _resolve_blockmap(src: Source, d: DiscoveryResult, inv: Inventory):
     except Exception as e:  # noqa: BLE001
         inv.warnings.append(f"blockmap tanısı üretilemedi: {e}")
     inv.warnings += [f"S7 program ↔ AS: {u}" for u in bm.unknown]
+    unverified = []
     for lk in bm.links:
         if lk.block_folder:
-            inv.folder_as[lk.block_folder] = _link_label(lk)
+            if _verified(lk):
+                inv.folder_as[lk.block_folder] = _link_label(lk)
+            else:
+                unverified.append(lk.label)
+    if unverified:
+        inv.add_confirm("Block klasörü ↔ AS", f"{len(unverified)} block klasörünün hangi AS'e ait olduğu doğrulanamadı "
+                        f"({_short_list(sorted(set(unverified)), 8)}): HW Config export'u (.cfg) alın veya klasör ↔ AS "
+                        "eşlemesini proje sahibinden isteyin", "Block klasörleri")
     return bm
 
 
@@ -349,10 +365,32 @@ def _ver_key(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v)), v
 
 
-def _library_cell(bf) -> str:
+_THREE_DIGIT_AUTHOR = re.compile(r"\d{3}$")
+
+
+def _author_ver(author: str, unv: set | None = None) -> str:
+    """Author -> versiyon etiketi; 3 haneli sürüm kodları (AdvLb100 -> V10.0) dahili olarak doğrulanmadığı için ana
+    sayfada ham author kodu gösterilir ve teyit listesine girer (unv'ye eklenir)."""
+    from .analyze import author_version
+    v = author_version(author)
+    a = (author or "").strip()
+    if v and _THREE_DIGIT_AUTHOR.search(a) and not a.upper().startswith("F_SAFE"):
+        if unv is not None:
+            unv.add(a)
+        return a
+    return v
+
+
+def _confirm_author_versions(inv: Inventory, unv: set) -> None:
+    if unv:
+        inv.add_confirm("Library versiyonu", f"3 haneli author kodlarının ({', '.join(sorted(unv))}) library sürümü "
+                        "doğrulanmadı: ES'te kurulu APL / Basis Library sürümünü (Installed software veya library "
+                        "özellikleri) kontrol edin", "Block klasörleri")
+
+
+def _library_cell(bf, unv: set | None = None) -> str:
     """'APL V9.1 – 57 block tipi; Basis Library V8.1 – 4 block tipi; diğer Siemens: 12' (sıralı).
     custom hariç; ES_MAP / ELEMENTA / SIMATIC system / SFC system hücrede yok, sadece sonda 'diğer Siemens: N'."""
-    from .analyze import author_version
     parts, other = [], 0
     for lib, cnt in sorted(library_summary(bf).items()):
         if lib in ("custom", "custom/unknown"):
@@ -362,10 +400,10 @@ def _library_cell(bf) -> str:
             continue
         vers: Counter = Counter()
         for a, n in cnt.items():
-            vers[author_version(a)] += n
+            vers[_author_ver(a, unv)] += n
         for v, n in sorted(vers.items(), key=lambda kv: _ver_key(kv[0])):
             parts.append(f"{lib + ' ' + v if v and v not in lib else lib} – {n} block tipi")
-        if sum(1 for v in vers if v) > 1:
+        if sum(1 for v in vers if re.match(r"V\d", v)) > 1:
             parts.append(f"({lib}: karışık versiyon)")
     if other:
         parts.append(f"diğer Siemens: {other}")
@@ -441,12 +479,13 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
                          "add-on, haberleşme (PUT/GET/BSEND/TSEND/TCON…), Logic Matrix, PCS 7 Library V7.1, F-System "
                          "(author başına özet). Standart library'ler (APL, Basis, Industry Library, ELEMENTA, ES_MAP, "
                          "ES_SFC, SIMATIC/IEC) listelenmez: sayıları 'Block klasörleri' -> Library'ler. Header'sız "
-                         "block adı '(symbol)' = ID zincirinin bağladığı (yoksa projedeki tek) symbol table'dan "
-                         "(ÇIKARIM).")
+                         "block adı '(symbol)' = projenin symbol table'ından.")
     bm = _resolve_blockmap(src, d, inv)
     names = Counter(Path(i.project).name for i in d.block_folders)
     fb_sets: dict[str, set[int]] = {}
     n_empty = 0
+    unv_authors: set = set()
+    no_as: list[str] = []
     spans = []                                       # [(info, bf, ilk satır, son satır)] -> çağıran sütunu
     for i, info in enumerate(d.block_folders, 1):
         if info.is_empty:
@@ -456,7 +495,9 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
         proj = pname if names[pname] < 2 or info.project == "-" else info.project   # aynı isimli kopyalar ayrışsın
         as_lab = inv.folder_as.get(info.path, "-")
         lk = bm.for_folder(info.path)
-        label = lk.label if lk else info.label          # kısa etiket (station / S7 program adı)
+        label = lk.label if _verified(lk) else info.label          # kısa etiket (station / S7 program adı)
+        if lk is None:
+            no_as.append(proj)
         log(f"[{i}/{len(d.block_folders)}] {info.path} ({info.n_records} kayıt)")
         try:
             if info.dbt:
@@ -470,7 +511,7 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
         fb_sets[info.path] = {b.number for b in bf.blocks if b.kind == "FB"}
         rows, cats, unk = _special_rows(bf, proj, label, _folder_symbols(src, d, bm, info))
         unknown_auth |= unk
-        folders.rows.append([proj, as_lab, _count_cell(bf.counts), _library_cell(bf), _attention_cell(cats)])
+        folders.rows.append([proj, as_lab, _count_cell(bf.counts), _library_cell(bf, unv_authors), _attention_cell(cats)])
         folder_paths.append(info.path)
         spans.append((info, bf, len(special.rows), len(special.rows) + len(rows)))
         special.rows += rows
@@ -482,25 +523,29 @@ def _blocks(src: Source, d: DiscoveryResult, inv: Inventory, log) -> dict[str, s
             inv.warnings.append(f"{info.path}: {bf.bad_records} SUBBLK kaydı okunamadı (atlandı)")
         inv.block_data.append((info, bf))
     folders.note = ((f"{n_empty} boş block klasörü listelenmedi. " if n_empty else "")
-                    + "AS / S7 program: STEP 7 ID zinciri (S7RESOFF, linkhrs.lnk, HRELATI1), gerçek projede teyit "
-                      "edilmedi (ÇIKARIM); '-' = zincir bulunamadı. Library'ler: block header author -> library + "
-                      "versiyon (block tipi sayısı); ES_MAP / ELEMENTA / SIMATIC system 'diğer Siemens' sayısında. "
-                      "Dikkat edilecek block: 'Özel bloklar' sayfasındaki kategori sayıları. Klasörler (satır sırasıyla): "
-                      + _short_list(folder_paths, 25) + ".")
+                    + "AS / S7 program: yalnız doğrulanmış eşlemeler; '-' = son sayfadaki maddelere bakın. "
+                      "Library'ler: block header author -> library + versiyon (block tipi sayısı); ES_MAP / ELEMENTA / "
+                      "SIMATIC system 'diğer Siemens' sayısında. Dikkat edilecek block: 'Özel bloklar' sayfasındaki "
+                      "kategori sayıları. Klasörler (satır sırasıyla): " + _short_list(folder_paths, 25) + ".")
+    _confirm_author_versions(inv, unv_authors)
+    if no_as:
+        inv.add_confirm("Block klasörü ↔ AS", f"{len(no_as)} block klasörünün (proje: {_short_list(sorted(set(no_as)), 8)}) "
+                        "AS bağlantısı bulunamadı: HW Config export'u (.cfg) alın veya klasör ↔ AS eşlemesini proje "
+                        "sahibinden isteyin", "Block klasörleri")
     if unknown_auth:
-        special.note += (" Tanınmayan author'lar (Siemens kalıbı / bilinen integratör değil; ÇIKARIM, teyit edilmeli): "
-                         + ", ".join(sorted(unknown_auth)) + ".")
+        inv.add_confirm("Block author'ları", f"Tanınmayan author kodları ({', '.join(sorted(unknown_auth))}): Siemens "
+                        "library mi integratör kodu mu, proje sahibinden teyit alın", "Özel bloklar")
     try:
-        _caller_column(src, d, bm, special, spans, log)
-    except Exception as e:  # noqa: BLE001 - çağıran sütunu opsiyonel; envanter devam eder
-        inv.warnings.append(f"XUTILS çağrı ağacı okunamadı ({type(e).__name__}: {e}) -> 'Çağıran' sütunu yok")
+        _caller_column(src, d, bm, inv, spans, log)
+    except Exception as e:  # noqa: BLE001 - çağıran bilgisi opsiyonel; envanter devam eder
+        inv.warnings.append(f"XUTILS çağrı ağacı okunamadı ({type(e).__name__}: {e})")
     inv.special_blocks = special.rows
     inv.sheets += [folders, special]
     return fb_sets
 
 
-def _caller_column(src: Source, d: DiscoveryResult, bm, special: "Sheet", spans: list, log) -> None:
-    """XUTILS call tree (parsers.xutils) -> 'Özel bloklar'a "Çağıran (ÇIKARIM)" sütunu; sadece çağıran bilgisi varsa.
+def _caller_column(src: Source, d: DiscoveryResult, bm, inv: Inventory, spans: list, log) -> None:
+    """XUTILS call tree (parsers.xutils): çağıran bilgisi varsa tek teyit maddesi (sütun yok; bilgi kesin değil).
     Analizdeki eşlemenin aynısı (map_sets_to_folders: ID zinciri, yoksa FB seti benzerliği)."""
     from types import SimpleNamespace
     from .parsers import xutils
@@ -518,19 +563,9 @@ def _caller_column(src: Source, d: DiscoveryResult, bm, special: "Sheet", spans:
             xutils.attach(sh, xs)
     if not any(sh.callers or sh.fc_callers for sh in shims):
         return
-    special.headers.append("Çağıran (ÇIKARIM)")
-    owner = {}
-    for sh, (_i, _bf, a, b) in zip(shims, spans):
-        for k in range(a, b):
-            owner[k] = sh
-    for k, r in enumerate(special.rows):
-        sh, kind, nr = owner.get(k), r[3], r[4]
-        txt = ""
-        if sh is not None and isinstance(nr, int):
-            txt = (xutils.callers_text(sh, nr) if kind == "FB" else xutils.fc_callers_text(sh, nr) if kind == "FC" else "")
-        r.append(txt)
-    special.note += (" Çağıran: XUTILS cross-reference (CT kaydı), block klasörüyle eşleme ve 'runtime group?' / "
-                     "'multi-instance?' yorumu ÇIKARIM.")
+    # Çağıran bilgisi (XUTILS cross-reference) kesin değil: ana sayfada sütun yok, teyit listesinde aksiyon
+    inv.add_confirm("Çağıran block'lar", "Özel block'ları çağıran FC / OB bilgisi kesin okunamadı: SIMATIC Manager'da "
+                    "Cross-reference (Extras > Reference Data) ile çağıranları kontrol edin", "Özel bloklar")
 
 
 def _programs(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
@@ -541,7 +576,7 @@ def _programs(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
 
 def _symbols(src: Source, d: DiscoveryResult, inv: Inventory, fb_sets: dict[str, set[int]]) -> None:
     sh = Sheet("Semboller", ["Kaynak", "Proje", "Eşlenen block klasörü", "Sembol", "Operand", "Veri tipi", "Yorum"],
-               note="YDBs/SYMLIST.DBF (backup içi) ve .asc export'ları; block klasörü eşlemesi FB seti benzerliği (heuristic)")
+               note="YDBs/SYMLIST.DBF (backup içi) ve .asc export'ları; block klasörü eşlemesi FB seti benzerliğiyle")
     pdirs = _proj_dirs(d)
     chk = Sheet("Sembol kontrolleri", ["Kaynak", "Proje", "Kontrol", "Değer", "Detay", "Güven"],
                 note="Çift operand / çift sembol adı / alan bazında adres aralığı. Bit-word çakışması (M10.0 - MW10) "
@@ -592,8 +627,8 @@ def _os(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
     from .parsers.wincc import archive_files
     from .parsers.wincc import list_os_entries
     sh = Sheet("OS projeleri", ["OS", "Rol", "Yer", "Multiproject", "WinCC build", "Custom picture", "Son değişiklik"],
-               note="Rol OS proje adından (çıkarım); 'OS PC kopyası' = .s7p dışında bulunan OS projesi. 'build tespit "
-                    "edilemedi' = .mcp'de sadece 'Vxx.00.00.00' biçiminde (format dizisi olabilir) sürüm var. Klasör: "
+               note="'OS PC kopyası' = .s7p dışında bulunan OS projesi. Rol boş = son sayfadaki maddelere bakın. "
+                    "'build tespit edilemedi' = .mcp'den WinCC build okunamadı. Klasör: "
                     + ", ".join(sorted({o.path.rsplit("/wincproj/", 1)[0] for o in d.os_projects})[:10]))
     for o in d.os_projects:
         in_es = o.project != "-"
@@ -603,16 +638,20 @@ def _os(src: Source, d: DiscoveryResult, inv: Inventory) -> None:
             if arch.get("alg_tlg") or arch.get("segments"):
                 role = "server (arşiv var)"
             elif role == "?":
-                role = "client?"
+                role = ""                                # rol belirlenemedi -> teyit listesi (ana sayfada rol yok)
         yer = "ES" if in_es else "OS PC kopyası"
         inv.os_rows.append((o, role, yer))
-        if role in ("client", "client?"):
+        if role == "client":
             try:
                 inv.os_sigs[o.path] = client_signature(list_os_entries(src.entries, o.path))
             except Exception as e:  # noqa: BLE001 - imza yoksa grup 'yapı karşılaştırılamadı' der
                 inv.warnings.append(f"{o.path}: OS dosya listesi okunamadı ({e})")
         sh.rows.append([o.name, role, yer, _mp_of(d, o.project) if in_es else "", wincc_build_label(o.wincc_build),
                         o.custom_pictures, str(o.newest_mtime or "").replace("T", " ")])
+    noroll = [o.name for o, role, _y in inv.os_rows if role == ""]
+    if noroll:
+        inv.add_confirm("OS projeleri", f"{len(noroll)} OS projesinin rolü proje adından belirlenemedi "
+                        f"({_short_list(sorted(noroll), 8)}): rolü (server / client / standby) teyit edin", "OS projeleri")
     inv.sheets.append(sh)
 
 
@@ -806,7 +845,7 @@ def _hw_line(items: Counter, extra: list[str]) -> str:
     rest: Counter = Counter()
     for (kind, mlfb, model, fw), n in items.items():
         if kind in ("CPU", "CP"):
-            short = re.sub(r"\s*\(çıkarım\)$", "", model or "") or mlfb
+            short = model or mlfb
             main[(0 if kind == "CPU" else 1, f"{short} {fw}".strip())] += (1 if n is None else n)
         elif kind in ("IM", "modül", "GSD"):
             rest[kind] += n or 0
@@ -829,7 +868,9 @@ def _client_group_text(inv: Inventory, items: list) -> str:
     names = lambda lst: _short_list(sorted(o.name for o, _ in lst), 8)      # noqa: E731
     sigs = {o.path: inv.os_sigs.get(o.path) for o, _ in items}
     if any(s is None for s in sigs.values()):
-        return f"{len(items)} proje ({names(items)}) – yapı karşılaştırılamadı"
+        inv.add_confirm("OS client'lar", "Bazı OS client'ların dosya listesi okunamadı, yapıları karşılaştırılmadı "
+                        f"({names(items)}): client projelerini eksiksiz (tüm dosyalarıyla) backup'a alın", "OS projeleri")
+        return f"{len(items)} proje ({names(items)})"
     groups: dict = defaultdict(list)
     for it in items:
         groups[sigs[it[0].path]].append(it)
@@ -850,11 +891,11 @@ def _os_state_rows(inv: Inventory, stale: set) -> list[list]:
     """Mevcut durum OS satırları rol bazlı gruplu (proje başına satır yok)."""
     by_role: dict = defaultdict(list)
     for o, role, yer in inv.os_rows:
-        if o.project in stale:
+        if o.project in stale or not role:          # rolü belirlenemeyen: ana sayfada yok (teyit listesinde)
             continue
         by_role[role].append((o, yer))
     titles = {"server": "OS server", "server (arşiv var)": "OS server", "standby": "OS standby", "es": "OS ES",
-              "reference": "OS referans", "library": "OS library", "client": "OS client", "client?": "OS client?"}
+              "reference": "OS referans", "library": "OS library", "client": "OS client"}
     merged: dict = defaultdict(list)
     for role, items in by_role.items():
         merged[titles.get(role, f"OS {role}")] += [(o, yer, role) for o, yer in items]
@@ -863,8 +904,6 @@ def _os_state_rows(inv: Inventory, stale: set) -> list[list]:
         items = merged[title]
         if title.startswith("OS client"):
             val = _client_group_text(inv, [(o, y) for o, y, _ in items])
-            if title.endswith("?"):
-                val += " — rol isimden belirlenemedi (teyit edilmeli)"
         else:
             val = "; ".join(_os_detail(o, y) + (" [arşiv var]" if r == "server (arşiv var)" else "")
                             for o, y, r in sorted(items, key=lambda x: x[0].name))
@@ -879,7 +918,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
     from .analyze import STEP7_TO_PCS7, WINCC_TO_PCS7, author_version
     sh = Sheet("Mevcut durum", ["Bölüm", "Konu", "Değer", "Kaynak"],
                note="Backup'ta bulunanların özeti. Versiyonlar proje dosyalarından (analizi yapan PC'nin yazılımı değil). "
-                    "'aday' / 'çıkarım' = tek kaynaktan, teyit edilmeli. Detay: diğer sayfalar.")
+                    "Yalnız kesin okunanlar; doğrulanamayanlar son sayfada. Detay: diğer sayfalar.")
     rows = sh.rows
     stale, dup_notes = _stale_dirs(inv)
 
@@ -900,7 +939,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
         lab = step7_label(st["used_s7"])
         if lab:
             fam = STEP7_TO_PCS7.get(".".join(re.match(r"(\d+)\.(\d+)\.(\d+)", st["used_s7"]).groups()))
-            s7[lab + (f" (PCS 7 {fam} ailesi, aday)" if fam else "")].append(st["name"])
+            s7[lab + (f" (PCS 7 {fam} ailesi)" if fam else "")].append(st["name"])
     builds: dict = defaultdict(list)
     for o in d.os_projects:
         if o.wincc_build:
@@ -912,21 +951,25 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
         wn, fam, ok = WINCC_TO_PCS7.get(key, (f"WinCC {b}", None, False))
         wincc_src = wincc_src or f"{os_list[0].path}/{os_list[0].mcp}"
         if b.endswith(".00.00"):     # format dizisi olabilir (bkz. analyze._versions): aile için kullanılmaz
-            wincc_vals.append(f"build tespit edilemedi ('{b}' format dizisi olabilir, {wn} kesin değil; "
-                              f"{len(os_list)} OS projesi)")
+            wincc_vals.append(f"build okunamadı ({len(os_list)} OS projesi)")
+            inv.add_confirm("WinCC versiyonu", f"{len(os_list)} OS projesinde .mcp'den WinCC build okunamadı: WinCC "
+                            "sürümünü OS PC'de (Control Panel > Programs) veya proje sahibinden teyit edin", wincc_src)
             continue
-        if fam:
+        if fam and ok:
             fams.append((fam, ok))
-        wincc_vals.append(f"{wn} (build {b})" + (f" -> PCS 7 {fam}" + ("" if ok else ", aday") if fam else "")
-                          + f" — {len(os_list)} OS projesi")
+            wincc_vals.append(f"{wn} (build {b}) -> PCS 7 {fam} — {len(os_list)} OS projesi")
+        else:
+            wincc_vals.append(f"{wn} (build {b}) — {len(os_list)} OS projesi")
+            if fam:
+                inv.add_confirm("PCS 7 versiyonu", f"WinCC build {b} için PCS 7 sürümü doğrulanmadı ({len(os_list)} OS "
+                                "projesi): kurulu PCS 7 sürümünü ES'te (SIMATIC Manager > Help > About) teyit edin", wincc_src)
     if fams:
-        best = sorted(fams, key=lambda x: not x[1])[0]
-        val = best[0] + ("" if best[1] else " (aday, teyit edilmeli)")
+        val = fams[0][0]
         if len({f for f, _ in fams}) > 1:
             val += " — farklı WinCC build'leri var: " + ", ".join(sorted({f for f, _ in fams}))
         rows.append(["Yazılım", "PCS 7", val, "WinCC build (.mcp)"])
     else:
-        rows.append(["Yazılım", "PCS 7", "tespit edilemedi (WinCC build yok)", "-"])
+        rows.append(["Yazılım", "PCS 7", "tespit edilemedi", "-"])
     rows.append(["Yazılım", "STEP 7", "; ".join(f"{k} — {', '.join(sorted(v))}" for k, v in sorted(s7.items()))
                  or "tespit edilemedi (HW Config export yok)", "HW Config export (USED_S7_VERSIONS)" if s7 else "-"])
     if wincc_vals:
@@ -934,6 +977,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
 
     # 2) Library'ler (block header author'larından), eski kopyalar hariç
     libs: dict = defaultdict(lambda: defaultdict(lambda: [0, set()]))
+    unv: set = set()
     custom: dict = defaultdict(Counter)
     for info, bf in inv.block_data:
         if info.project in stale:
@@ -943,7 +987,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
             if lib in _LIB_SKIP:
                 continue
             for author, n in cnt.items():
-                v = author_version(author) or author or "-"
+                v = _author_ver(author, unv) or author or "-"
                 libs[lib][v][0] += n
                 libs[lib][v][1].add(lab)
         custom["custom"][lab] += sum(1 for b in bf.blocks if b.kind == "FB" and b.library == "custom"
@@ -951,6 +995,7 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
         custom["unknown"][lab] += sum(1 for b in bf.blocks if b.kind == "FB" and b.library == "custom"
                                       and not subblk.is_known_integrator(b.author))
         custom["headerless"][lab] += sum(1 for b in bf.blocks if b.kind == "FB" and b.library == "custom/unknown")
+    _confirm_author_versions(inv, unv)
     for lib in sorted(libs):
         val = "; ".join(f"{v}: {n} block ({', '.join(sorted(ps))})" for v, (n, ps) in sorted(libs[lib].items(), key=lambda kv: _ver_key(kv[0])))
         if len({v for v in libs[lib] if re.match(r"V\d", v)}) > 1:     # sadece gerçek sürümler (ELEMENTA/ELEM_400 değil)
@@ -962,8 +1007,8 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
     nc, nh, nu = (sum(custom[k].values()) for k in ("custom", "headerless", "unknown"))
     if nc or nh or nu:
         rows.append(["Library", "Custom FB", f"{nc} FB integratör author'lu ({per(custom['custom']) or '-'}); "
-                     + (f"{nu} FB tanınmayan author'lu, ÇIKARIM ({per(custom['unknown'])}); " if nu else "") + f"{nh} FB "
-                     f"header'sız — korumalı F-block veya custom ({per(custom['headerless']) or '-'}) -> 'Özel bloklar'",
+                     + (f"{nu} FB tanınmayan author'lu ({per(custom['unknown'])}); " if nu else "") + f"{nh} FB "
+                     f"header'sız ({per(custom['headerless']) or '-'}) -> 'Özel bloklar'",
                      "block header author (SUBBLK.DBF)"])
     special = getattr(inv, "special_blocks", None) or []
     if special:
@@ -975,17 +1020,8 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
     for st in sorted(inv.hw_stations, key=lambda s: s["name"].lower()):
         extra = (["F-capable"] if st["f_capable"] else []) + (["PDM kullanımı var"] if st["pdm"] else [])
         rows.append(["Hardware", st["name"], _hw_line(st["items"], extra), f"HW export ({Path(st['rel']).name})"])
-    scan = _scan_by_project(inv, stale)
-    for proj, items in scan.items():
-        c: dict = {}
-        method = ""
-        for (kind, mlfb, fw), (n, _rel, m) in items.items():
-            k = (kind, mlfb, _model(mlfb), fw)
-            c[k] = None if n is None else (c.get(k) or 0) + n          # None = adet güvenilmez
-            method = m
-        rows.append(["Hardware", plabel(proj), _hw_line(c, []) + " (backup taraması, çıkarım)", method])
-    if not inv.hw_stations and not scan:
-        rows.append(["Hardware", "-", "HW bilgisi bulunamadı: HW Config → Station → Export (.cfg) alınmalı", ""])
+    if not inv.hw_stations:      # export'u olmayan proje: backup içi HW dosyaları tablo yapılmaz (teyit: _hardware)
+        rows.append(["Hardware", "-", "HW Config export yok", "-"])
 
     # 4) OS: proje başına tek satır
     rows += _os_state_rows(inv, stale)
@@ -999,9 +1035,12 @@ def _current_state(inv: Inventory, d: DiscoveryResult) -> Sheet:
         rows.append(["Symbol table", f"{n_tab} tablo", f"{len(syms.rows) if syms else 0} sembol, {n_find} kontrol bulgusu "
                      "-> semboller.xlsx", "YDBs/SYMLIST.DBF, .asc"])
     for n in dup_notes:
-        rows.append(["Not", "Aynı proje birden fazla yerde", n + " — 'en yeni' dosya tarihine göre, teyit edilmeli", "*.s7p"])
+        rows.append(["Not", "Aynı proje birden fazla yerde", n + " — en yeni dosya tarihine göre", "*.s7p"])
+        inv.add_confirm("Aynı isimli projeler", f"{n}: güncel kopyanın hangisi olduğunu proje sahibinden teyit edin", "*.s7p")
     if inv.warnings:
         rows.append(["Not", "Uyarı", f"{len(inv.warnings)} uyarı -> 'Uyarılar' sayfası", ""])
+    if inv.confirm:
+        rows.append(["Not", confirm_mod.HEADING, f"{len(inv.confirm)} madde -> son sayfa", ""])
     return sh
 
 
@@ -1036,6 +1075,7 @@ def build_inventory_source(src: Source, log=None) -> Inventory:
     stage("Hardware", _hardware, inv)
     log("Yapı tanısı...")
     inv.diagnostics = stage("Yapı tanısı", diagnostics, src) or ""
+    _clean_warnings(inv)
 
     authors = Counter()
     for _info, bf in inv.block_data:
@@ -1068,12 +1108,36 @@ def build_inventory_source(src: Source, log=None) -> Inventory:
 
 
 # Envanter sayfa sırası; listede olmayan (yeni) sayfalar 'Özel bloklar'dan sonra gelir. Boş sayfa yazılmaz.
-SHEET_ORDER = ("Mevcut durum", "Hardware", "Block klasörleri", "Özel bloklar", None, "OS projeleri", "Projeler", "Uyarılar")
+# 'Teyit edilecekler' her zaman sonda.
+SHEET_ORDER = ("Mevcut durum", "Hardware", "Block klasörleri", "Özel bloklar", None, "OS projeleri", "Projeler", "Uyarılar",
+               confirm_mod.SHEET_INVENTORY)
+
+
+def _clean_warnings(inv: Inventory) -> None:
+    """Uyarılar sayfasında belirsizlik dili olmaz: yasak kalıplı uyarı teyit listesine aksiyon olarak taşınır;
+    export-yok uyarısı (yöntem açıklaması) HW teyit maddesinde zaten var."""
+    keep = []
+    for w in inv.warnings:
+        if "binary fallback" in w:
+            continue
+        if confirm_mod.is_clean(w):
+            keep.append(w)
+        else:
+            inv.add_confirm("Backup yapısı", f"{w} — kontrol edip teyit edin")
+    inv.warnings = keep
+
+
+def _confirm_sheet(inv: Inventory) -> Sheet:
+    return Sheet(confirm_mod.SHEET_INVENTORY, ["Konu", "Yapılacak", "Nerede"],
+                 [[c.topic, c.action, c.where] for c in inv.confirm],
+                 note="Backup'tan kesin okunamayan her şey burada; ana sayfalarda yalnız doğrulanmış bilgi var.")
 
 
 def _order_sheets(inv: Inventory) -> None:
     rest = SHEET_ORDER.index(None)
     rank = {n: i for i, n in enumerate(SHEET_ORDER) if n}
+    inv.sheets = [s for s in inv.sheets if s.name != confirm_mod.SHEET_INVENTORY]
+    inv.sheets.append(_confirm_sheet(inv))
     inv.sheets = sorted((s for s in inv.sheets if s.rows), key=lambda s: rank.get(s.name, rest))
 
 
@@ -1109,14 +1173,16 @@ def render_html(inv: Inventory) -> str:
     e = html.escape
     toc, body = [], []
     for i, s in enumerate(x for x in inv.sheets if x.rows):
-        toc.append(f'<a href="#t{i}">{e(s.name)} ({len(s.rows)})</a>')
+        title = confirm_mod.HEADING if s.name == confirm_mod.SHEET_INVENTORY else s.name
+        sid = "teyit" if title == confirm_mod.HEADING else f"t{i}"
+        toc.append(f'<a href="#{sid}">{e(title)} ({len(s.rows)})</a>')
         rows = [["Evet" if v is True else "Hayır" if v is False else v for v in r] for r in s.rows[:HTML_ROW_LIMIT]]
         more = (f'<div class="caption">İlk {HTML_ROW_LIMIT} / {len(s.rows)} satır gösteriliyor — tam liste envanter.xlsx içinde.</div>'
                 if len(s.rows) > HTML_ROW_LIMIT else "")
         table = ("<div class='tw'><table><thead><tr>" + "".join(f"<th>{e(h)}</th>" for h in s.headers) + "</tr></thead><tbody>"
                  + "".join("<tr>" + "".join(f"<td>{e(str(v))}</td>" for v in r) + "</tr>" for r in rows)
                  + "</tbody></table></div>")
-        body.append(f'<section id="t{i}"><h2>{e(s.name)}</h2>' + (f'<div class="note">{e(s.note)}</div>' if s.note else "")
+        body.append(f'<section id="{sid}"><h2>{e(title)}</h2>' + (f'<div class="note">{e(s.note)}</div>' if s.note else "")
                     + table + more + "</section>")
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>PCS 7 Envanter</title>

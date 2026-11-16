@@ -25,10 +25,8 @@ def test_s7h_repeated_cpu_in_one_file_is_unreliable_adet_blank():
     assert I._scan_by_project(inv, set())["P"][("CPU", MLFB_CPU, "V6.0")][0] is None     # H çifti mi, tekrar mı?
     inv.hw_stations = []
     I._hardware(inv)
-    sh = inv.sheet("Hardware")
-    cpu = next(r for r in sh.rows if r[1] == "CPU")
-    assert cpu[5] == "" and next(r for r in sh.rows if r[1] == "CP")[5] == 1
-    assert "'Adet' boş" in sh.note                              # neden notta
+    assert not inv.sheets or not inv.has("Hardware") or not inv.sheet("Hardware").rows   # tarama tablo yapılmaz
+    assert any(c.topic == "Hardware" and ".cfg" in c.action for c in inv.confirm)
 
 
 def test_dbf_scan_adet_blank():
@@ -78,11 +76,10 @@ def test_client_group_only_different_client_listed_separately():
 
 
 def test_server_and_unknown_role_grouped_by_role_and_build_label():
-    inv = _inv_os([], extra=[("SRV1", "server"), ("X1", "client?")])
-    inv.os_sigs[inv.os_rows[1][0].path] = frozenset({"a"})
+    inv = _inv_os([], extra=[("SRV1", "server"), ("X1", "")])       # rol "" = belirlenemedi
     rows = {r[1]: r[2] for r in I._os_state_rows(inv, set())}
     assert rows["OS server"].startswith("SRV1 (ES; WinCC build tespit edilemedi;")
-    assert rows["OS client?"].startswith("1 proje (X1)") and "teyit" in rows["OS client?"]
+    assert list(rows) == ["OS server"]                              # rolü belirsiz proje ana sayfada yok
 
 
 def test_client_signature_ignores_pc_folder():

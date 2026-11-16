@@ -46,8 +46,9 @@ def test_labels_in_analysis_and_confidence(tmp_path):
     _project(tmp_path, cfg_station="ST_NORTH")
     an = analyze(tmp_path)
     by = {b.info.path.rsplit("/", 1)[-1]: b for b in an.block_folders}
-    assert by["00000011"].as_label == "ST_NORTH" and "(KANIT)" in by["00000011"].mapping     # HW export ile çapraz kontrol
-    assert by["00000012"].as_label == "ST_SOUTH" and "(ÇIKARIM)" in by["00000012"].mapping   # çapraz kanıt yok
+    assert by["00000011"].as_label == "ST_NORTH" and by["00000011"].mapping_confidence == "high"     # HW export ile çapraz kontrol
+    assert by["00000012"].as_label == "ST_SOUTH" and by["00000012"].mapping_confidence == "low"      # çapraz kanıt yok
+    assert "KANIT" not in by["00000011"].mapping and "ÇIKARIM" not in by["00000012"].mapping
     assert "ID zinciri YLNKLIST" in by["00000011"].symbol_source
 
 

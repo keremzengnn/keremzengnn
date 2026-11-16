@@ -43,9 +43,10 @@ class Check:
 
 
 def _f(c: "Check", detail: str, sources=(), confidence=Confidence.HIGH, severity=None, scope="",
-       blocking=False) -> Finding:
+       blocking=False, confirm="") -> Finding:
     srcs = list(sources) + ([c.manual_ref] if c.manual_ref != "-" else [])
-    return Finding(c.id, c.topic, severity or c.severity, detail, srcs, confidence, scope, blocking)
+    return Finding(c.id, c.topic, severity or c.severity, detail, srcs, confidence, scope, blocking,
+                   confirm_action=confirm)
 
 
 def human_size(n: float) -> str:
@@ -82,12 +83,12 @@ def hw_released(c, an):
     acc = [m for m in bad if "aksesuar" in m.note]
     bad = [m for m in bad if m not in acc]
     if acc:
-        out.append(_f(c, "Aksesuar(lar) Released Modules listesinde yer almaz, teyit edilmeli: " + _short(
+        out.append(_f(c, "Aksesuar(lar) Released Modules listesinde yer almaz: " + _short(
             f"{m.order} ×{m.count} ({m.note.split(':')[0]}; {', '.join(m.stations)})" for m in acc),
             [an.released_list], severity=L))
     if bad:
         lines = [f"{m.order} {m.fw} ×{m.count} ({m.status}; {', '.join(m.stations)})".replace("  ", " ") for m in bad]
-        out.append(_f(c, f"{len(bad)} MLFB/FW Released Modules listesinde bulunamadı, teyit edilmeli: " + _short(lines, 6),
+        out.append(_f(c, f"{len(bad)} MLFB/FW Released Modules listesinde bulunamadı: " + _short(lines, 6),
                       [an.released_list]))
     return out
 
@@ -100,17 +101,19 @@ def hw_f_export_missing(c, an):
         sts = [s for s in an.stations if s.project == b.info.project]
         if not sts:
             out.append(_f(c, f"{b.as_label}: F-System var, HW Config bu AS ile eşlenemedi -> F-I/O kontrol edilemedi",
-                          [b.info.dbf], Confidence.LOW, scope=b.as_label))
+                          [b.info.dbf], Confidence.LOW, scope=b.as_label,
+                          confirm=f"{b.as_label} için HW Config export'unu (S7 F Configuration Pack kurulu PC'den) iste ve F-I/O modüllerini kontrol et."))
             continue
         for s in sts:
             if s.f_modules == 0:
                 where = (f"{s.name} HW export'unda F-I/O yok. Export S7 F Configuration Pack kurulu PC'den tekrar alınmalı."
                          if s.kind == "cfg" else
-                         f"{s.name} için HW Config export'u yok; backup içi .s7h taramasında F-I/O modülü görünmüyor "
-                         "(tarama F-I/O'yu kaçırabilir). HW Config export'u S7 F Configuration Pack kurulu PC'den alınmalı.")
+                         f"{s.name} için HW Config export'u yok; backup'ta F-I/O modülü görünmüyor. "
+                         "HW Config export'u S7 F Configuration Pack kurulu PC'den alınmalı.")
                 out.append(_f(c, f"{b.as_label}: F-block/F-driver var ({b.f_driver_instances} F-channel driver instance) "
                                  f"ama {where}", [b.info.dbf, s.source.split(", ")[0]], scope=b.as_label,
-                              confidence=Confidence.HIGH if s.kind == "cfg" else Confidence.LOW))
+                              confidence=Confidence.HIGH if s.kind == "cfg" else Confidence.LOW,
+                              confirm=f"{s.name} HW Config export'unu S7 F Configuration Pack kurulu PC'den al ve F-I/O modüllerini kontrol et."))
     return out
 
 
@@ -161,9 +164,9 @@ def lib_mixed(c, an):
             txt = f"{b.as_label}: karışık {lib} versiyonları: " + ", ".join(vs)
             old = [v for v in vs if not v.startswith("V10")]
             if lib == "APL" and old and len(old) < len(vs):
-                out.append(_f(c, txt + ". APL V10.0 block'ları ile ≤V9.x birlikte: proje kısmen V10'a geçmiş olabilir "
-                                       "(author kodundan çıkarım; hangi block'ların neden V10 olduğu teyit edilmeli).",
-                              [b.info.dbf], Confidence.LOW, scope=b.as_label))
+                out.append(_f(c, txt + ". APL V10.0 block'ları ile ≤V9.x birlikte.",
+                              [b.info.dbf], Confidence.LOW, scope=b.as_label,
+                              confirm=f"{b.as_label}: APL V10.0 block'larının neden projede olduğunu (kısmi V10 geçişi) müşteriden teyit et."))
             else:
                 out.append(_f(c, txt, [b.info.dbf], scope=b.as_label))
     return out
@@ -189,10 +192,10 @@ def lib_lm(c, an):
         if status.startswith("kurulu, kullanılmıyor"):
             out.append(_f(c, f"{b.as_label}: Logic Matrix kurulu, kullanılmıyor ({st.get('blocks', 0)} LM block tipi, instance "
                              f"{st.get('instances', 0)}, WinCC'de LM tag/mesajı 0). Kaldırılması veya library update ile "
-                             "taşınması kararı; tesis PC'lerinde ayrı Logic Matrix Viewer olup olmadığı teyit edilmeli.",
+                             "taşınması kararı gerekir; tesis PC'lerinde ayrı Logic Matrix Viewer olup olmadığı kontrol edilmeli.",
                           [b.info.dbf], scope=b.as_label, severity=L))
         else:
-            detail = (f"{b.as_label}: Logic Matrix {status or 'block''ları var'} (instance {st.get('instances', '?')}"
+            detail = (f"{b.as_label}: Logic Matrix {status or 'block''ları var'} (instance {st.get('instances', 0)}"
                       + (f", WinCC LM referansı {st.get('wincc')}" if an.wincc else "") + "); upgrade without new "
                       "functionality desteklenmez -> library update zorunlu.")
             out.append(_f(c, detail, [b.info.dbf], scope=b.as_label,
@@ -225,10 +228,10 @@ def lib_f(c, an):
         d = (f"{b.as_label}: F-program Failsafe Blocks " + ("/".join(vs) if vs else "(versiyon tespit edilemedi)")
              + " ile yazılmış. "
              + ("Manual: F-library V1.3 veya üzeri olmalı -> şart sağlanıyor [1, Bölüm 9.5.17]. " if ok13 and len(ok13) == len(vs)
-                else "Manual: F-library V1.3 veya üzeri olmalı [1, Bölüm 9.5.17] -> versiyon teyit edilmeli. ")
+                else "Manual: F-library V1.3 veya üzeri olmalı [1, Bölüm 9.5.17]. ")
              + "F-@ chart'lar silinmemeli; F block update / compile signature'ı değiştirirse safety acceptance (re-validation) "
                "gerekir. Update Block Types / compile'da F program şifresi sorulur -> müşteriden alınmalı (VERİ YOK). "
-               "S7 F Systems sürümü S7 F Systems Readme / Compatibility Tool'dan teyit edilmeli.")
+               "S7 F Systems sürümü S7 F Systems Readme / Compatibility Tool ile kontrol edilmeli.")
         if b.f_driver_instances:
             d += f" Block klasöründe {b.f_driver_instances} F-channel driver instance var, yani F-I/O mevcut."
         if b.f_blocks_from_symbols:
@@ -256,10 +259,12 @@ def proj_min_version(c, an):
     if (int(m.group(1)), int(m.group(2))) < (7, 1):
         return [_f(c, f"Proje PCS 7 {fam} ailesinde görünüyor: V7.1 SP4'ten eski proje doğrudan V10.0 SP2'ye update "
                       "edilemez (önce ara versiyona taşınmalı).", [], Confidence.LOW if an.pcs7_family_confidence != "high"
-                   else Confidence.HIGH, blocking=True)]
+                   else Confidence.HIGH, blocking=True,
+                   confirm="Olası engelleyici: PCS 7 sürümünü SIMATIC Manager proje özelliklerinden teyit et; "
+                           "V7.1'den eskiyse doğrudan update edilemez.")]
     if (int(m.group(1)), int(m.group(2))) == (7, 1):
-        return [_f(c, "Proje PCS 7 V7.1 ailesinde: SP4 veya üzeri olduğu teyit edilmeli (V7.1 SP4 altı doğrudan update "
-                      "edilemez).", [], Confidence.LOW)]
+        return [_f(c, "Proje PCS 7 V7.1 ailesinde: V7.1 SP4 altı doğrudan update edilemez.", [], Confidence.LOW,
+                   confirm="Projenin PCS 7 V7.1 SP4 veya üzeri olduğunu SIMATIC Manager'daki proje özelliklerinden teyit et.")]
     return []
 
 
@@ -275,7 +280,7 @@ FC_LIMIT = 65536            # S7-400: block başına 64 KB (MC7 kodu)
 
 def blk_fc_size(c, an):
     """Runtime group FC'leri (CFC'nin ürettiği) büyükse V10 APL'nin ek parametreleriyle 64 KB aşılıp compile durabilir
-    ("Code generator not called"). Boyut KANIT (SUBBLK MC5LEN), aşma riski ÇIKARIM."""
+    ("Code generator not called"). Boyut KANIT (SUBBLK MC5LEN), aşma riski doğrulanamaz (LOW)."""
     out = []
     any_data = False
     for b in an.as_folders:
@@ -288,8 +293,9 @@ def blk_fc_size(c, an):
         sev = Severity.HIGH if big[0][1] >= 0.85 * FC_LIMIT else Severity.MEDIUM
         out.append(_f(c, f"{b.as_label}: 64 KB sınırına yakın FC'ler: {top}. V10 APL block'ları daha fazla parametre "
                          "taşıdığından runtime group FC'si 64 KB'ı aşıp compile'ı durdurabilir; runtime group bölünmesi "
-                         "planlanmalı (Siemens kaynağıyla teyit).", [b.info.dbf], Confidence.LOW, severity=sev,
-                      scope=b.as_label))
+                         "planlanmalı.", [b.info.dbf], Confidence.LOW, severity=sev,
+                      scope=b.as_label,
+                      confirm=f"{b.as_label}: 64 KB'a yakın FC'ler ({', '.join(k for k, _ in big[:4])}) için V10 APL ile compile sonrası boyutu kontrol et."))
     if not any_data:
         raise NotChecked("SUBBLK.DBF'te MC5LEN yok / FC ana kaydı yok")
     return out
@@ -303,7 +309,8 @@ def blk_know_how(c, an):
                           + _short(b.protected, 8)
                           + ". Update / recompile için şifre veya üreticiden yeni sürüm gerekir "
                           "(şifreli Siemens library block'ları normaldir, listelenmedi).", [b.info.dbf],
-                          Confidence.LOW, scope=b.as_label))
+                          Confidence.LOW, scope=b.as_label,
+                          confirm=f"{b.as_label}: know-how protected block'ların ({_short(b.protected, 4)}) şifresini veya yeni sürümünü üreticiden iste."))
     return out
 
 
@@ -325,12 +332,12 @@ def comm_std(c, an):
         if hits:
             out.append(_f(c, f"{b.as_label}: haberleşme block'ları: " + _short(hits, 8) + ". Bağlantı parametreleri "
                              "(ID / R_ID / IP / port / unit ID) ve NetPro bağlantıları backup'tan okunmadı (VERİ YOK): "
-                             "R_ID çakışması ve karşı taraf teyit edilmeli.", [b.info.dbf], scope=b.as_label))
+                             "R_ID çakışması ve karşı taraf kontrol edilmeli.", [b.info.dbf], scope=b.as_label))
     return out
 
 
 def lib_modbus(c, an):
-    return _feature(c, an, "Modbus TCP / Siemens add-on", "Modbus TCP / Siemens add-on block'ları; hedef versiyonda lisans ve block versiyonu teyit edilmeli.")
+    return _feature(c, an, "Modbus TCP / Siemens add-on", "Modbus TCP / Siemens add-on block'ları; hedef versiyonda lisans ve block versiyonu kontrol edilmeli.")
 
 
 OLD_MASTERDATA_BLOCKS = ("OB_DIAG", "OR_M_16", "OR_M_32")   # tam isim; OB_DIAG1 / OR_M_16C güncel block'lardır, silinmez
@@ -346,7 +353,8 @@ def lib_masterdata(c, an):
                       "(OB_DIAG1, OR_M_16C güncel Basis block'larıdır, silinmez).",
                    sorted({b.info.dbf for b, _ in found}))]
     return [_f(c, "OB_DIAG / OR_M_16 / OR_M_32 backup'taki block klasörlerinde bulunamadı; master data library ayrı "
-                  "bir projedeyse orada kontrol edilmeli (OB_DIAG1, OR_M_16C silinmez).", [], Confidence.LOW)]
+                  "bir projedeyse orada kontrol edilmeli (OB_DIAG1, OR_M_16C silinmez).", [], Confidence.LOW,
+                   confirm="Master data library'de OB_DIAG / OR_M_16 / OR_M_32 block'larının olup olmadığını kontrol et.")]
 
 
 def blk_custom(c, an):
@@ -358,8 +366,7 @@ def blk_custom(c, an):
                  + f" [{x.instances} inst.]" for x in b.custom_blocks]
         d = f"{b.as_label}: {len(items)} custom FB: " + _short(items, 6)
         if b.unknown_authors:
-            d += (". Tanınmayan author (Siemens kalıbı değil, integratör listesinde yok; ÇIKARIM, teyit edilmeli): "
-                  + ", ".join(b.unknown_authors[:8]))
+            d += ". Sınıflandırılmamış author kodları: " + ", ".join(b.unknown_authors[:8])
         out.append(_f(c, d, [b.info.dbf], scope=b.as_label))
     return out
 
@@ -372,8 +379,9 @@ def blk_unused(c, an):
         unused = [f"FB{x.number} {x.name}" for x in b.custom_blocks if x.instances == 0]
         if unused or b.unused_library_fbs:
             out.append(_f(c, f"{b.as_label}: instance DB'si olmayan custom: {_short(unused, 5) or '-'}; library: "
-                             f"{_short(b.unused_library_fbs, 5) or '-'} (multi-instance olabilir, teyit)", [b.info.dbf],
-                          Confidence.LOW, scope=b.as_label))
+                             f"{_short(b.unused_library_fbs, 5) or '-'} (multi-instance kullanımı hariç)", [b.info.dbf],
+                          Confidence.LOW, scope=b.as_label,
+                          confirm=f"{b.as_label}: instance DB'si olmayan block'ların multi-instance olarak kullanılıp kullanılmadığını CFC / FB içinde kontrol et."))
     return out
 
 
@@ -394,8 +402,9 @@ def comm_as_as(c, an):
         if "PCS 7 Lib V7.1" in b.features:
             hits.append("COMM71 SEND_R/REC_R")
         if hits:
-            out.append(_f(c, f"{b.as_label}: " + _short(hits, 6) + " -> karşı taraf (AS / multiproject / 3rd party) teyit edilmeli",
-                          [b.info.dbf], Confidence.LOW, scope=b.as_label))
+            out.append(_f(c, f"{b.as_label}: " + _short(hits, 6) + " -> karşı taraf (AS / multiproject / 3rd party)",
+                          [b.info.dbf], Confidence.LOW, scope=b.as_label,
+                          confirm=f"{b.as_label}: AS-AS haberleşme block'larının ({_short(hits, 3)}) karşı tarafını NetPro'dan kontrol et."))
     return out
 
 
@@ -514,9 +523,10 @@ def cas_ph(c, an):
     hits = sorted({o.info.name for o in an.os_projects if pat.search(o.info.name)}
                   | {p.rsplit("/", 1)[-1] for p in an.discovery.projects if pat.search(Path(p).stem)})
     if hits:
-        out.append(_f(c, f"Arşiv/raporlama bileşeni olabilecek projeler: {_short(hits)}. CAS V10'da desteklenmiyor → Process "
+        out.append(_f(c, f"Adı CAS / PH / IS kalıbına uyan projeler: {_short(hits)}. CAS V10'da desteklenmiyor → Process "
                          "Historian; PH/IS 2024 SP1 Update 3'e yükseltmede OS değişirse Windows Server 2019/2022 gerekir.",
-                      confidence=Confidence.LOW))
+                      confidence=Confidence.LOW,
+                      confirm=f"{_short(hits, 3)} projelerinin CAS / Process Historian / Information Server olup olmadığını müşteriden teyit et."))
     return out
 
 
@@ -540,13 +550,13 @@ def os_opc(c, an):
     hits = [f"{o.info.name}: {', '.join(o.opc)}" for o in an.os_projects if o.opc]
     if not hits:
         return []
-    return [_f(c, "OPC konfigürasyonu: " + _short(hits, 5) + ". Harici OPC client'lar teyit edilmeli.")]
+    return [_f(c, "OPC konfigürasyonu: " + _short(hits, 5) + ". Harici OPC client'lar kontrol edilmeli.")]
 
 
 def os_po(c, an):
     if not an.os_projects:
         return []
-    return [_f(c, "Update sonrası OS RT PO sayısı artabilir; mevcut PO lisansı ve kullanımı teyit edilmeli.")]
+    return [_f(c, "Update sonrası OS RT PO sayısı artabilir; mevcut PO lisansı ve kullanımı kontrol edilmeli.")]
 
 
 def os_volume(c, an):
@@ -591,7 +601,8 @@ def wincc_diff(c, an):
                 out.append(_f(c, f"Sadece {side}'de olan area'sız modül/kanal diagnostic mesajları (@(n) chart'ları, #RawEvent): "
                                  f"{fmt_num(sum(cnt.values()))} — " + _short([f"{k} {fmt_num(v)}" for k, v in cnt.most_common()], 6)
                                  + ". Hangi OS'e gittiğini compile sırasındaki AS-OS seçimi belirler; operatör client'larında "
-                                   "modül arızası alarmı görünüyor mu teyit edilmeli.", confidence=Confidence.LOW, severity=L))
+                                   "modül arızası alarmı görünüyor mu kontrol edilmeli.", confidence=Confidence.LOW, severity=L,
+                              confirm=f"{side}: area'sız diagnostic mesajlarının hangi OS'e gittiğini compile AS-OS seçiminden ve operatör client'larından kontrol et."))
     return out
 
 
@@ -610,7 +621,7 @@ def opc_3rd_party(c, an):
         ob = {cn.name: cn for w in [an.wincc.get(d.b)] if w for cn in w.connections if cn.kind == "opc"}
         only += [f"{n} sadece {d.a}" for n in d.conn_only_a if n in oc] + [f"{n} sadece {d.b}" for n in d.conn_only_b if n in ob]
     return [_f(c, "3rd party OPC server bağlantıları: " + _short(rows, 8) + (". " + _short(only, 6) if only else "")
-               + ". Hedef versiyonda OPC DA (DCOM) desteği ve server'ların güncelliği teyit edilmeli.")]
+               + ". Hedef versiyonda OPC DA (DCOM) desteği ve server'ların güncelliği kontrol edilmeli.")]
 
 
 def os_conn_redundancy(c, an):
@@ -622,7 +633,8 @@ def os_conn_redundancy(c, an):
                 out.append(_f(c, f"{w.name}: connection '{cn.name}' named connection değil, tek IP'li TCP/IP ({cn.ip}; "
                                  f"{cn.tags + cn.struct_tags} tag)" + (". Projede H-system var: bu bağlantı bir H-system'e "
                                  "gidiyorsa redundant değildir -> named connection'a çevrilmeli." if has_h else "."),
-                              confidence=Confidence.LOW, severity=M if has_h else L))
+                              confidence=Confidence.LOW, severity=M if has_h else L,
+                              confirm=f"{w.name}: '{cn.name}' bağlantısının gittiği AS'in H-system olup olmadığını kontrol et."))
     return out
 
 
@@ -642,7 +654,7 @@ def sfc_visu(c, an):
                              + (f"; objects.dat {human_size(dat[0])}, {fmt_date(dat[1])}" if dat else "")
                              + (f"; WinCC @SFC_RTS struct tag {w.sfc_struct_tags}" if w and w.sfc_struct_tags else "")
                              + (f"; AS'te FB300 instance {fb300}" if fb300 else "")
-                             + "). OS compile'da 'SFC visualization' işaretlenmeli; SFC visualization lisansı teyit edilmeli.",
+                             + "). OS compile'da 'SFC visualization' işaretlenmeli; SFC visualization lisansı kontrol edilmeli.",
                           [f"{o.info.path}/SfcRtBase"]))
     return out
 
@@ -660,7 +672,7 @@ def archives(c, an):
             n_tlg = sum(1 for x in a["segments"] if "tlg" in x[0].lower())
             out.append(_f(c, f"{o.info.name}: arşiv segmentleri ALG {n_alg} / TLG {n_tlg}, Alg/Tlg dosyaları "
                              f"{len(a['alg_tlg'])}; en yeni {fmt_month(newest)}. Güncel runtime arşivi backup'ta "
-                             "olmayabilir; arşivin taşınıp taşınmayacağı teyit edilmeli.", [o.info.path], severity=L))
+                             "olmayabilir; arşivin taşınıp taşınmayacağı kararlaştırılmalı.", [o.info.path], severity=L))
         mdf, ldf = a.get("main_mdf"), a.get("main_ldf")
         if mdf and ldf and mdf[0] > 0 and ldf[0] / mdf[0] > 2:
             out.append(_f(c, f"{o.info.name}: SQL log dosyası büyük: {o.info.name}.ldf {human_size(ldf[0])}, .mdf "
@@ -695,12 +707,12 @@ def cons_es_server(c, an):
         if d.kind == "os_pair":
             # ENG ayrı ve tam bir OS'tir (farklı connection'lar); master/kopya değil -> online değişiklik yorumu yapılmaz
             text = (f"{a} ↔ {b}: iki OS projesi ayrışmış — " + "; ".join(parts)
-                    + f". {b} operatörlerin kullandığı proje; iki proje de taşınacak mı ve farklar teyit edilmeli.")
+                    + f". {b} operatörlerin kullandığı proje; iki proje de taşınacak mı ve farklar gözden geçirilmeli.")
             sev = M
         else:
             text = (f"{d.a.rsplit('/', 1)[-1]} (ES) ↔ {b} (OS PC kopyası): " + "; ".join(parts)
-                    + f". {b}'de daha yeni / sadece {b}'de olanlar ES'e alınmamış değişiklik olabilir; hangisinin güncel "
-                      "olduğu teyit edilmeli.")
+                    + f". {b}'de daha yeni / sadece {b}'de olanlar ES'e alınmamış değişiklik içerir; hangisinin güncel "
+                      "olduğu kontrol edilmeli.")
             sev = H if (nb or ob) else M
         out.append(_f(c, text, [d.a, d.b], severity=sev))
     return out
@@ -721,14 +733,14 @@ def cons_clients(c, an):
         lines.append(f"{_short(_base(g.members), 4)}: +{len(g.only_in_group)} / -{len(g.missing_in_group)} dosya "
                      f"(ör. {_short(_base(g.only_in_group), 3) or '-'})")
     return [_f(c, f"{len(an.client_groups)} farklı client içeriği. Referans: {_short(_base(ref.members), 4)}. " + " | ".join(lines),
-               confidence=Confidence.LOW)]
+               )]
 
 
 def cons_backups(c, an):
     out = []
     for b in an.backups:
         out.append(_f(c, f"{b.name}: {len(b.paths)} kopya ({', '.join(f'{p} [{t}]' for p, t in zip(b.paths, b.newest))}). "
-                         f"En güncel görünen: {b.newest_path}", b.paths, Confidence.LOW))
+                         f"Dosya tarihine göre en güncel: {b.newest_path}", b.paths))
     return out
 
 
@@ -812,8 +824,9 @@ def hw_cpu_int_pn(c, an):
         return []
     allh = [h for v in hits.values() for h in v]
     return [_f(c, "CPU 414-3EM05 / 416-3ER05: internal PROFINET interface PCS 7 ile kullanıma released değil: " + _fmt_hits(allh)
-                  + ". Internal PN interface'in kullanılıp kullanılmadığı backup'tan teyit edilmedi (kullanılıyorsa harici CP / "
-                    "CPU değişimi).", [allh[0][0].source], Confidence.LOW, scope=allh[0][0].name)]
+                  + ". Internal PN interface kullanılıyorsa harici CP / CPU değişimi gerekir.",
+               [allh[0][0].source], Confidence.LOW, scope=allh[0][0].name,
+               confirm=f"{allh[0][0].name}: CPU'nun internal PN interface'inin kullanılıp kullanılmadığını HW Config'ten kontrol et.")]
 
 
 ET200SP_IM_MLFB = {"6ES71346TD000CA1", "6ES71346JF000CA1", "6ES71936AP200AA0", "6ES71936AP400AA0"}
@@ -829,12 +842,13 @@ def hw_et200sp_im(c, an):
         allh = [h for v in h1.values() for h in v]
         out.append(_f(c, "ET 200SP modül / bus adapter IM FW şartı: AI HART HF / AI RTD/TC HF modülleri ve bus adapter "
                          "6ES7 193-6AP20/AP40 için IM155-6 PN HF FW >= V3.1 (bus adapter: HW >= V3) gerekir: " + _fmt_hits(allh)
-                         + ". IM tipi / FW'si backup'tan eşlenmedi, teyit edilmeli.", srcs, Confidence.LOW,
-                      scope=allh[0][0].name))
+                         + ".", srcs, Confidence.LOW, scope=allh[0][0].name,
+                      confirm=f"{allh[0][0].name}: ET 200SP modüllerinin bağlı olduğu IM155-6 PN HF tipini ve FW'sini HW Config'ten kontrol et."))
     if h2:
         allh = [h for v in h2.values() for h in v]
         out.append(_f(c, "6ES7 134-6PA00-0BD0 / 6ES7 132-6HD00-0BB0 IM155-6DP HF üzerinde released değildir: " + _fmt_hits(allh)
-                         + ". IM tipi teyit edilmeli.", srcs, Confidence.LOW, scope=allh[0][0].name))
+                         + ".", srcs, Confidence.LOW, scope=allh[0][0].name,
+                      confirm=f"{allh[0][0].name}: bu modüllerin bağlı olduğu IM tipini HW Config'ten kontrol et."))
     return out
 
 
@@ -845,8 +859,9 @@ def hw_unsupported_cp(c, an):
         hit = sorted({m.group(0).upper().replace("  ", " ") for m in pat.finditer(s.station_text or "")})
         if hit:
             out.append(_f(c, f"{s.name}: eski dönem (V8.1) dokümanında desteklenmeyen CP: {', '.join(hit)}. Hedef versiyon için "
-                             "Released Modules ile teyit edilmeli; PROFIBUS plant bus desteklenmez (sadece Industrial Ethernet).",
-                          [s.source], Confidence.LOW, scope=s.name))
+                             "Released Modules ile kontrol edilmeli; PROFIBUS plant bus desteklenmez (sadece Industrial Ethernet).",
+                          [s.source], Confidence.LOW, scope=s.name,
+                          confirm=f"{s.name}: {', '.join(hit)} için güncel Released Modules listesini kontrol et."))
     return out
 
 
@@ -870,7 +885,8 @@ def hw_cpu410_fw_tcir(c, an):
         out.append(_f(c, "CPU 410-5H FW < V8.2: Basis Library TCiR ile güncellenemez, AS STOP gerekir: " + _short(bad)
                          + ". FW >= V8.2'ye yükseltme veya AS STOP penceresi.", [BASIS_README + ", 5.2"], scope=bad[0].split(":")[0]))
     if unk:
-        out.append(_f(c, "CPU 410-5H FW okunamadı, TCiR için FW >= V8.2 teyit edilmeli: " + _short(unk), [], Confidence.LOW))
+        out.append(_f(c, "CPU 410-5H FW okunamadı: " + _short(unk), [], Confidence.LOW,
+                      confirm=f"CPU 410-5H FW'sini ({_short(unk, 3)}) HW Config'ten oku; TCiR için FW >= V8.2 olmalı."))
     return out
 
 
@@ -900,7 +916,8 @@ def hw_apl_s7400_only(c, an):
             if odd:
                 out.append(_f(c, f"{b.as_label}: APL / Basis block'ları sadece S7-400 AS için tasarlanmıştır; station {s.name} CPU: "
                                  + ", ".join(odd) + " (S7-400 değil). F uygulamaya uygun değildir.",
-                              [b.info.dbf, s.source], Confidence.LOW, scope=b.as_label))
+                              [b.info.dbf, s.source], Confidence.LOW, scope=b.as_label,
+                              confirm=f"{b.as_label}: APL / Basis block'ları S7-400 dışı CPU ({', '.join(odd)}) ile çalışıyor; CPU tipini HW Config'ten kontrol et."))
     return out
 
 
@@ -910,7 +927,8 @@ def hw_ff_ab7000(c, an):
         txt = (s.station_text or "") + " " + " ".join(s.gsd)
         if "AB7000" in txt.upper():
             out.append(_f(c, f"{s.name}: Profibus Slave AB7000 arkasında FF field device (ilk uygulama aşaması) V10 APL'de artık "
-                             "desteklenmiyor; isim eşleşmesi, teyit edilmeli.", [s.source], Confidence.LOW, scope=s.name))
+                             "desteklenmiyor.", [s.source], Confidence.LOW, scope=s.name,
+                          confirm=f"{s.name}: AB7000 slave arkasında FF field device olup olmadığını HW Config'ten kontrol et."))
     return out
 
 
@@ -931,8 +949,9 @@ def hw_as_rtx(c, an):
             continue
         out.append(_f(c, f"{s.name}: PC tabanlı AS (WinLC / WinAC RTX). Manual 9.3.4: HW Config'te AS versiyonu 3.3 veya eskiyse "
                          "WinLC RTX V4.6+'ya yükseltilir (PC'de WinAC RTX >= V4.6 şart). Bu station 'BOX RTX' mi (update edilemez) "
-                         "yoksa 'AS RTX' mi, manual açıkça eşlemiyor; teyit edilmeli.", [s.source, f"{SW_UPDATE}, 4.1"],
-                      Confidence.LOW, scope=s.name))
+                         "yoksa 'AS RTX' mi, manual açıkça eşlemiyor.", [s.source, f"{SW_UPDATE}, 4.1"],
+                      Confidence.LOW, scope=s.name,
+                      confirm=f"{s.name}: PC tabanlı AS'in 'BOX RTX' mi 'AS RTX' mi olduğunu müşteriden teyit et (BOX RTX update edilemez)."))
     return out
 
 
@@ -950,11 +969,13 @@ def lib_reserved_numbers(c, an):
             out.append(_f(c, f"{b.as_label}: SFC için ayrılmış numaralarda SFC system block'u olmayan block var: " + ", ".join(clash)
                              + ". FB245/246/300 ve FC240…250 yeniden adlandırılamaz; aynı numara/isimdeki user block'lar SFC "
                                "kullanılmadan önce rename edilmeli.", [b.info.dbf],
-                         Confidence.LOW if weak else Confidence.HIGH, scope=b.as_label))
+                         Confidence.LOW if weak else Confidence.HIGH, scope=b.as_label,
+                         confirm=f"{b.as_label}: {', '.join(clash)} block'larının Siemens standart mı custom mu olduğunu kontrol et."))
         fcs = sorted(k for k in b.code_len if k.startswith("FC") and k[2:].isdigit() and 240 <= int(k[2:]) <= 250)
         if fcs and "SFC" not in b.features:
             out.append(_f(c, f"{b.as_label}: {', '.join(fcs)} SFC için ayrılmış aralıkta (FC240…250) ama SFC system library "
-                             "tespit edilmedi: custom FC olabilir, teyit edilmeli.", [b.info.dbf], Confidence.LOW, scope=b.as_label))
+                             "bulunamadı.", [b.info.dbf], Confidence.LOW, scope=b.as_label,
+                         confirm=f"{b.as_label}: {', '.join(fcs)} block'larının custom FC mi SFC kalıntısı mı olduğunu kontrol et."))
     return out
 
 
@@ -965,8 +986,9 @@ def lib_legacy_author(c, an):
         hits = sorted({a for libs in b.libraries.values() for a in libs if pat.match(a)})
         if hits:
             out.append(_f(c, f"{b.as_label}: eski PCS 7 library author'ları ({', '.join(hits)}): master data library güncellenmeden "
-                             "önce APL / Basis karşılığına taşınmalı. Author soneki eşlemesi çıkarımdır.", [b.info.dbf],
-                          Confidence.LOW, scope=b.as_label))
+                             "önce APL / Basis karşılığına taşınmalı.", [b.info.dbf],
+                          Confidence.LOW, scope=b.as_label,
+                          confirm=f"{b.as_label}: {', '.join(hits)} author'lu block'ların hangi eski library'den geldiğini kontrol et."))
     return out
 
 
@@ -983,8 +1005,9 @@ def lib_apl_multi_as(c, an):
         return []
     return [_f(c, f"APL V8.x block'lı AS: {_short(sorted({x for a in v8.values() for x in a}))}; projede {n_as} AS ve "
                   f"{len(an.os_projects)} OS projesi var. Bir OS birden fazla AS'ye atanmışsa her AS için sadece APL V9.0.x ve "
-                  "üzeri block'lar konfigüre edilebilir. OS-AS ataması backup'tan kesin okunmadı, teyit edilmeli.", [],
-               Confidence.LOW)]
+                  "üzeri block'lar konfigüre edilebilir.", [],
+               Confidence.LOW,
+               confirm="OS-AS atamasını (bir OS'in birden fazla AS'e atanıp atanmadığını) OS compile wizard ayarlarından kontrol et.")]
 
 
 CHECKS: list[Check] = [

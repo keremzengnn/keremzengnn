@@ -30,7 +30,7 @@ INTERNAL = "genel prosedür (iç)"
 OWNER_SIEMENS, OWNER_CUSTOMER, OWNER_BOTH = "Siemens", "Müşteri", "Siemens + Müşteri"
 
 ROADMAP_COLUMNS = ["Faz", "ID", "Adım", "Detay", "Neden (Finding ID)", "Sorumlu", "BLOCKER", "Kapsam (AS)", "Kaynak",
-                   "Güven", "Tip"]
+                   "Tip"]
 
 
 @dataclass
@@ -76,7 +76,7 @@ def _fid_key(fid: str):
 
 def _findings(an, *check_ids):
     ids = set(check_ids)
-    return sorted((f for f in an.findings if f.check_id in ids), key=lambda f: _fid_key(f.fid))
+    return sorted((f for f in an.findings if f.check_id in ids and f.verified), key=lambda f: _fid_key(f.fid))
 
 
 def _join_owner(owners) -> str:
@@ -198,10 +198,10 @@ def _phase1(an) -> list:
                  "tamamlanmalı.", sources=[f"{SW_UPDATE}, 4.3"]),
         _generic("Proje backup'ı", "Update öncesi multiproject archive (backup) alınmalı.",
                  sources=[INTERNAL]),
-        _generic(f"Kademeli yol: {fam or '?'} → {' → '.join(path)}",
+        _generic(f"Kademeli yol: {fam or 'mevcut sürüm'} → {' → '.join(path)}",
                  "İç prosedürde ara versiyonlardan geçilir; manual V7.1 SP4 ve üzeri projenin V10.0 SP2'ye doğrudan "
                  "update edilmesine izin veriyor [1, Bölüm 4.3]."
-                 + ("" if fam else " Mevcut versiyon tespit edilemedi: yol varsayılan, teyit edilmeli."),
+                 + ("" if fam else " Mevcut versiyon okunamadı: tüm ara versiyonlar listelendi."),
                  sources=[INTERNAL, f"{SW_UPDATE}, 4.3"]),
     ]
     if v is None or v < (9, 1):
@@ -210,12 +210,12 @@ def _phase1(an) -> list:
                               "kurulur. Desteklenen OS: Windows 10 Enterprise LTSC 2019/2021, Windows 11 Enterprise LTSC "
                               "2024, Windows Server 2019/2022/2025; SQL Server 2019. OS server, BATCH, Route Control, Web "
                               "server, PH ve central ES için server OS."
-                              + (" Mevcut versiyon tespit edilemedi: teyit edilmeli." if v is None else ""),
+                              + (" Mevcut versiyon okunamadı: adım bu nedenle listelendi." if v is None else ""),
                               sources=[f"{SW_UPDATE}, 4.3"]))
     else:
         steps.append(_generic("ES / OS PC'ler: OS ve SQL Server gereksinimi",
                               "Desteklenen OS (Windows 10 Enterprise LTSC 2019/2021, Windows 11 Enterprise LTSC 2024, "
-                              "Windows Server 2019/2022/2025) ve SQL Server 2019 teyit edilmeli.",
+                              "Windows Server 2019/2022/2025) ve SQL Server 2019 gerekir.",
                               sources=[f"{SW_UPDATE}, 4.3"]))
     steps += [
         _from_checks(an, "Upgrade lisansları (kademeli paketler)", ["LICENSES"]),
@@ -229,12 +229,12 @@ def _phase1(an) -> list:
         _from_checks(an, "Discontinued modüller (lifecycle)", ["HW_DISCONTINUED"]),
         _from_checks(an, "3rd party GSD dosyaları", ["HW_GSD_3RD_PARTY"],
                      detail="GSD dosyaları V10 ES'e kurulmalı (HW Config → Options → Install GSD File → 'from the STEP 7 "
-                            "project'); üreticiden V10 uyumu teyit edilmeli."),
+                            "project'); üreticiden V10 uyumu alınmalı."),
     ]
     if "F-System" in feats:
         steps.append(_generic("S7 F Systems + F Configuration Pack kurulumu",
                               "F-block'lar var: hedef versiyonla uyumlu S7 F Systems / F Configuration Pack sürümü "
-                              "Compatibility Tool'dan teyit edilmeli.", sources=[INTERNAL],
+                              "Compatibility Tool ile kontrol edilmeli.", sources=[INTERNAL],
                               why_an=an, check_ids=["LIB_F_SYSTEM"]))
     steps.append(_from_checks(an, "PCS 7 Library V7.1 paketleri (ES + OS)", ["LIB_PCS7_V71", "LIB_STD_LIB"],
                               detail="Devam edilecekse ES'e PCS 7 Library V7.1 SP3 Upd4, ES ve tüm OS'lara Faceplates "
@@ -264,7 +264,7 @@ def _phase2(an) -> list:
     if v is not None and v >= (9, 0):
         steps.append(_generic("AS library update'siz geçiş seçeneği",
                               "Proje V9.0 SP3 ve üzeriyse AS library update'siz (AS STOP'suz) update mümkün; SP seviyesi "
-                              "teyit edilmeli.", sources=[f"{SW_UPDATE} (dokümantasyon tablosu)"]))
+                              "kontrol edilmeli.", sources=[f"{SW_UPDATE} (dokümantasyon tablosu)"]))
     steps.append(_from_checks(an, "OS projeleri: CCMigrator süresi", ["OS_MIGRATION_VOLUME"]))
     return steps
 
@@ -281,7 +281,7 @@ def _tcir_step(an) -> Step | None:
                 if m and (int(m.group(1)), int(m.group(2))) >= (8, 2):
                     parts.append(f"{label} → TCiR mümkün")
                 else:
-                    parts.append(f"{label} → FW >= V8.2 değil / tespit edilemedi: TCiR teyit edilmeli")
+                    parts.append(f"{label} → FW >= V8.2 değil veya okunamadı: TCiR için FW kontrol edilmeli")
             else:
                 parts.append(f"{label} → AS STOP")
             scope.append(s.name)
@@ -307,7 +307,7 @@ def _apl_procedure_step(an) -> Step | None:
                 "V9.1 SP2 >= Update 4 (Basis: V9.1.2.4) -> V10.0: Close Textual Interconnections = Yes, AS complete compilation "
                 "+ complete download, OS complete compilation; AS STOP gerekir (410-5H + TCiR + yeterli instance memory hariç). "
                 "V10.x ara adımlarda (SP1, SP1 Upd1, SP2): changes compile/download, AS STOP yok, OS complete compilation; "
-                "Basis ara adımlarında 'generate module drivers' ile complete compile. Mevcut sürüm teyit edilmeli.",
+                "Basis ara adımlarında 'generate module drivers' ile complete compile. Mevcut sürüm kontrol edilmeli.",
                 owner=OWNER_SIEMENS, sources=["APL Readme V10.0 SP2, 5.1.3 / 5.2.3 / 5.3.2 / 5.4.3",
                                               "Basis Library Readme V10.0 SP2, 6.1.3 / 6.2.3"],
                 confidence=KANIT, generic=True)
@@ -425,7 +425,7 @@ def roadmap_rows(an, phases: list[Phase] | None = None) -> list[list[str]]:
     """ROADMAP_COLUMNS sırasıyla satırlar (başlık hariç)."""
     phases = phases if phases is not None else build_roadmap(an)
     return [[f"{p.id} {p.title}", s.id, s.title, s.detail, ", ".join(s.why) or "-", s.owner,
-             "BLOCKER" if s.blocking else "-", ", ".join(s.scope) or "-", "; ".join(s.sources) or "-", s.confidence,
+             "BLOCKER" if s.blocking else "-", ", ".join(s.scope) or "-", "; ".join(s.sources) or "-",
              "genel" if s.generic else "bulgu"] for p in phases for s in p.steps]
 
 
@@ -434,7 +434,7 @@ def roadmap_rows(an, phases: list[Phase] | None = None) -> list[list[str]]:
 # ---------------------------------------------------------------------------
 
 def _title(an) -> str:
-    fam = an.pcs7_family or "?"
+    fam = an.pcs7_family or "mevcut sürüm"
     return f"Upgrade yol haritası {fam} → {an.target.replace('SP', ' SP')}"
 
 
@@ -445,16 +445,15 @@ def render_markdown(an, phases: list[Phase] | None = None) -> str:
              f"Proje: {an.project_name} · Kaynak: {an.source}",
              "",
              "Her adım bir bulgudan (Finding ID, ayrıntı: rapor / Excel 'Bulgular') veya manual kuralından gelir. "
-             f"'{INTERNAL}' kaynaklı adımlar ÇIKARIM: teyit edilmeli.", ""]
+             f"'{INTERNAL}' kaynaklı adımlar standart iş akışıdır.", ""]
     for p in phases:
         lines += [f"## {p.id} · {p.title}", "",
-                  "| ID | Adım | Detay | Neden | Sorumlu | Kapsam | Kaynak | Güven |",
-                  "|---|---|---|---|---|---|---|---|"]
+                  "| ID | Adım | Detay | Neden | Sorumlu | Kapsam | Kaynak |",
+                  "|---|---|---|---|---|---|---|"]
         for s in p.steps:
             t = ("**BLOCKER** " if s.blocking else "") + s.title + (" (genel)" if s.generic else "")
             lines.append("| " + " | ".join(cell(x) for x in (s.id, t, s.detail, ", ".join(s.why) or "-", s.owner,
-                                                               ", ".join(s.scope) or "-", "; ".join(s.sources),
-                                                               s.confidence)) + " |")
+                                                               ", ".join(s.scope) or "-", "; ".join(s.sources))) + " |")
         lines.append("")
     return "\n".join(lines)
 
@@ -504,20 +503,19 @@ def _badge(v: str) -> str:
 def render_html(an, phases: list[Phase] | None = None, meta=None) -> str:
     phases = phases if phases is not None else build_roadmap(an)
     e = html.escape
-    fam = an.pcs7_family or "?"
+    fam = an.pcs7_family or "mevcut sürüm"
     customer = (getattr(meta, "customer", "") or an.project_name)
     path = staged_path_from(an.pcs7_family)
     n_steps = sum(len(p.steps) for p in phases)
     n_block = sum(1 for p in phases for s in p.steps if s.blocking)
-    n_low = sum(1 for p in phases for s in p.steps if s.confidence != KANIT)
-    kpis = [(str(len(phases)), "Faz"), (str(n_steps), "Adım"), (str(n_block), "BLOCKER"), (str(n_low), "ÇIKARIM (teyit)")]
+    kpis = [(str(len(phases)), "Faz"), (str(n_steps), "Adım"), (str(n_block), "BLOCKER")]
     toc = "".join(f'<a href="#{p.id}">{e(p.id)} {e(p.title)}</a>' for p in phases)
     body = [
         '<section><div class="topline">YOL HARİTASI</div><h2>Özet</h2>'
         '<div class="kpis">' + "".join(f"<div class='kpi'><b>{e(v)}</b><span>{e(k)}</span></div>" for v, k in kpis) + "</div>"
         '<div class="path"><span>' + e(fam) + "</span>" + "".join(f"<i>→</i><span>{e(x)}</span>" for x in path) + "</div>"
         f'<div class="note"><b>Not:</b> Her adım bir bulgudan (Finding ID; ayrıntı rapor / Excel \'Bulgular\') veya manual '
-        f"kuralından gelir. '{e(INTERNAL)}' kaynaklı adımlar ÇIKARIM: teyit edilmeli.</div></section>"
+        f"kuralından gelir. '{e(INTERNAL)}' kaynaklı adımlar standart iş akışıdır.</div></section>"
     ]
     for p in phases:
         rows = []
@@ -527,10 +525,10 @@ def render_html(an, phases: list[Phase] | None = None, meta=None) -> str:
             rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in (
                 f'<span class="step-id">{e(s.id)}</span>', title, e(s.detail),
                 f'<span class="fid">{e(", ".join(s.why) or "-")}</span>', e(s.owner), e(", ".join(s.scope) or "-"),
-                e("; ".join(s.sources)), _badge(s.confidence))) + "</tr>")
-        widths = [6, 18, 34, 9, 9, 7, 11, 6]
+                e("; ".join(s.sources)))) + "</tr>")
+        widths = [6, 18, 36, 10, 10, 8, 12]
         cols = "".join(f'<col style="width:{w}%">' for w in widths)
-        head = "".join(f"<th>{h}</th>" for h in ("ID", "Adım", "Detay", "Neden", "Sorumlu", "Kapsam", "Kaynak", "Güven"))
+        head = "".join(f"<th>{h}</th>" for h in ("ID", "Adım", "Detay", "Neden", "Sorumlu", "Kapsam", "Kaynak"))
         body.append(f'<section id="{e(p.id)}"><div class="topline">FAZ {e(p.id[1:])}</div><h2>{e(p.title)}</h2>'
                     f'<div class="tw"><table><colgroup>{cols}</colgroup><thead><tr>{head}</tr></thead>'
                     f"<tbody>{''.join(rows)}</tbody></table></div></section>")
@@ -546,7 +544,7 @@ def render_html(an, phases: list[Phase] | None = None, meta=None) -> str:
 <div class="sub">Analiz sonucundan üretilen sıralı upgrade yolu · Kaynak: {e(an.source)}</div></header>
 <nav>{toc}</nav>
 <main>{''.join(body)}</main>
-<footer>{e(classification)} · pcs7_analyzer {e(getattr(an, 'tool_version', ''))} · Otomatik üretilmiştir; ÇIKARIM işaretli adımlar elle teyit edilmelidir.</footer>
+<footer>{e(classification)} · pcs7_analyzer {e(getattr(an, 'tool_version', ''))} · Otomatik üretilmiştir.</footer>
 </body></html>
 """
 

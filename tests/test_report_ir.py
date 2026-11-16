@@ -47,9 +47,11 @@ def test_parts_and_sections(ir):
 def test_every_finding_in_finding_ids(an, ir):
     fids = [f.fid for f in an.findings]
     assert all(fids) and len(set(fids)) == len(fids)
-    assert ir["finding_ids"] == sorted(fids)
-    assert ir["stats"]["findings"] == len(an.findings)
-    assert sum(ir["stats"]["by_status"].values()) == len(an.findings)
+    sure = sorted(f.fid for f in an.findings if f.verified)           # IR: yalnız doğrulanmış; kalanı confirm_count
+    assert ir["finding_ids"] == sure
+    assert ir["stats"]["findings"] == len(sure)
+    assert sum(ir["stats"]["by_status"].values()) == len(sure)
+    assert ir["stats"]["confirm_count"] >= len(fids) - len(sure)
 
 
 def _table(ir, title):
@@ -79,7 +81,10 @@ def test_omitted_has_no_blocker_and_covers_rest(an, ir):
                 shown.update(r["finding_ids"])
             for it in b.get("items", []):
                 shown.update(it["finding_ids"])
-    assert shown | omitted == set(ir["finding_ids"])
+    unsure = {f.fid for f in an.findings if not f.verified}
+    reasons = {o["finding_id"]: o["reason"] for o in ir["omitted"]}
+    assert (shown | omitted) - unsure == set(ir["finding_ids"])
+    assert all(reasons[x] == "teyit listesinde" for x in omitted & unsure)    # doğrulanmamış + engelleyici olmayan
     assert not shown & omitted
     for o in ir["omitted"]:
         assert {"finding_id", "check_id", "severity", "reason"} <= set(o)

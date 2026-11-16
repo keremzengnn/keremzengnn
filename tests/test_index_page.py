@@ -3,6 +3,8 @@ import json
 
 from pcs7_analyzer import index_page
 from pcs7_analyzer.cli import index_path, main, run
+from pcs7_analyzer import confirm
+from pcs7_analyzer.confirm import is_clean
 from pcs7_analyzer.demo import build_demo_project
 
 
@@ -12,7 +14,8 @@ def test_analysis_index_summary_and_links(tmp_path):
     assert index_path(p) == out / "index.html"
     html = (out / "index.html").read_text(encoding="utf-8")
     lines = index_page.summary_lines(out)
-    assert len(lines) == 5
+    assert len(lines) == 6 and lines[5].startswith("Teyit edilecek noktalar: ")      # 5 satır + teyit sayısı
+    assert 'href="envanter.html#teyit"' in html
     assert lines[0].startswith("PCS 7 versiyonu: V8.1")
     assert lines[1].startswith("AS: 2 station") and "414-5H" in lines[1]
     assert lines[2].startswith("OS projeleri: ") and "server" in lines[2]
@@ -33,7 +36,9 @@ def test_inventory_index_without_findings(tmp_path):
     assert main([str(build_demo_project(tmp_path / "d")), "--inventory", "-o", str(out)]) == 0
     lines = index_page.summary_lines(out)
     assert lines[0].startswith("PCS 7 versiyonu: V8.1")
-    assert lines[-1] == "Bulgular: değerlendirme yapılmadı (sadece envanter)"
+    assert lines[-2] == "Bulgular: değerlendirme yapılmadı (sadece envanter)"
+    assert lines[-1].startswith("Teyit edilecek noktalar: ")
+    assert all(confirm.is_clean(x) for x in lines)
     html = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="envanter.xlsx"' in html and 'href="rapor.html"' not in html
 
@@ -55,11 +60,27 @@ def test_summary_from_files_only(tmp_path):
         "os_projects": [{"role": "server"}, {"role": "client"}], "block_folders": [{"custom_blocks": [{}, {}]}],
         "discovery": {"n_files": 10, "total_bytes": 2048}}), encoding="utf-8")
     lines = index_page.summary_lines(tmp_path)
-    assert lines == ["PCS 7 versiyonu: V9.0 (çıkarım, teyit edilmeli) (proje dosyalarından)",
+    assert lines == ["PCS 7 versiyonu: tespit edilemedi (proje dosyalarından)",       # kesin değil -> gösterilmez
                      "AS: 1 station — CPU 410-5H V8.2", "OS projeleri: 2 (server 1, client 1)",
                      "Custom block: 2 (1 block klasörü)", "Bulgular: BLOCKER 1 · RİSK 2 · BİLGİ 0 · VERİ YOK 0"]
     p = index_page.write_index(tmp_path, "X.zip")
     assert "10 dosya, 2 KB" in p.read_text(encoding="utf-8")
+
+
+def test_confirm_count_and_unknown_role_not_in_summary(tmp_path):
+    (tmp_path / "findings.json").write_text(json.dumps([
+        {"status": "RİSK", "confidence": "low"}, {"status": "RİSK", "confidence": "high"},
+        {"status": "BİLGİ", "assumption": True}, {"status": "VERİ YOK", "confidence": "low"}]), encoding="utf-8")
+    (tmp_path / "envanter_ozet.json").write_text(json.dumps({"current_state": [
+        ["OS", "OS server", "SRV1 (ES)", ""], ["OS", "OS client", "3 proje (C1, C2, C3) – yapıları aynı", ""]],
+        "confirm_count": 2}), encoding="utf-8")
+    assert index_page.confirm_count(tmp_path) == 4
+    lines = index_page.summary_lines(tmp_path)
+    assert "OS projeleri: 4 (client 3, server 1)" in lines
+    assert lines[-1] == "Teyit edilecek noktalar: 4"
+    html = index_page.write_index(tmp_path).read_text(encoding="utf-8")
+    assert "envanter.html#teyit" not in html                     # envanter.html yok: bağlantı da yok
+    assert is_clean("\n".join(lines))
 
 
 def test_empty_folder_index(tmp_path):

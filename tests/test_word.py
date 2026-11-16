@@ -131,7 +131,23 @@ def test_assumption_runs_highlighted():
     from pcs7_analyzer.word import _runs, is_assumption
     assert is_assumption("Model (ÇIKARIM)") and is_assumption("teyit edilmeli")
     assert not is_assumption("CPU 410-5H")
-    xml = _runs("**Not:** eşleşme heuristic, teyit edilmeli\nCPU 410-5H")
-    assert xml.count('<w:highlight w:val="yellow"/>') == 1
+    # highlight otomatik değil: yalnız teyit bölümü `highlight=True` ile ister
+    assert "highlight" not in _runs("**Not:** eşleşme heuristic, teyit edilmeli\nCPU 410-5H")
+    xml = _runs("**Not:** kontrol et\nCPU 410-5H", highlight=True)
+    assert xml.count('<w:highlight w:val="yellow"/>') == 3
     assert "<w:b/>" in xml and "<w:br/>" in xml
     assert "highlight" not in _runs("teyit edilmeli", highlight=False)
+
+
+def test_highlight_only_in_confirm_section(tmp_path):
+    from pcs7_analyzer import confirm
+    from pcs7_analyzer.report import Bullets, Heading, Para, ReportMeta
+    from pcs7_analyzer.settings import find_template
+    from pcs7_analyzer.word import DocxBuilder
+    blocks = [Heading(1, "Ana"), Para("ana metin"), Heading(1, confirm.HEADING), Bullets(["**Konu:** aksiyon"])]
+    out = DocxBuilder(find_template()).render(blocks, ReportMeta(), ("k", ["a"], "b", "c"), tmp_path / "x.docx")
+    import zipfile
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
+    assert xml.count('<w:highlight w:val="yellow"/>') == 2           # sadece "Konu:" ve " aksiyon"
+    assert xml.index("ana metin") < xml.index(confirm.HEADING) < xml.index("aksiyon")
+    assert 'highlight' not in xml[:xml.index("aksiyon") - 200].split(confirm.HEADING)[0]

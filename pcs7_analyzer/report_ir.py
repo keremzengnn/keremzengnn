@@ -59,15 +59,18 @@ def _block(b) -> dict:
 
 
 def stats(an) -> dict:
-    from .readiness import finding_status
+    """Sayımlar yalnız doğrulanmış bulgulardan; doğrulanmamışlar `confirm_count` (teyit bölümü maddeleri) içinde."""
+    from .readiness import finding_status, verified_findings
+    from .report import confirm_items
+    sure = verified_findings(an)
     by_status: dict[str, int] = {}
-    for f in an.findings:
+    for f in sure:
         st = finding_status(f)
         by_status[st] = by_status.get(st, 0) + 1
-    return {"findings": len(an.findings), "by_status": dict(sorted(by_status.items())),
+    return {"findings": len(sure), "by_status": dict(sorted(by_status.items())),
             "not_checked": len(an.not_checked), "stations": len(an.stations),
             "os_projects": len(an.os_projects), "block_folders": len(an.block_folders),
-            "unknown": len(an.unknown)}
+            "unknown": len(an.unknown), "confirm_count": len(confirm_items(an))}
 
 
 def build_ir(an, doc: list, profile: str = "teklif", src_hash: str = "", project_meta: dict | None = None) -> dict:
@@ -97,11 +100,17 @@ def build_ir(an, doc: list, profile: str = "teklif", src_hash: str = "", project
             shown.update(b.get("finding_ids", []))
             for it in b.get("items", []):
                 shown.update(it["finding_ids"])
+    from .readiness import unverified_findings, verified_findings
     omitted = [{"finding_id": f.fid, "check_id": f.check_id, "severity": f.severity.value,
-                "reason": "profil dışı (detay Excel 'Bulgular')"} for f in an.findings if f.fid and f.fid not in shown]
+                "reason": "profil dışı (detay Excel 'Bulgular')"}
+               for f in verified_findings(an) if f.fid and f.fid not in shown]
+    # Doğrulanmamış bulgular ana tablolarda yok, teyit bölümünde aksiyon cümlesi olarak var. Engelleyici olanlar
+    # omitted'a girmez (QA omitted_blocker): teyit maddesi sayılır.
+    omitted += [{"finding_id": f.fid, "check_id": f.check_id, "severity": f.severity.value,
+                 "reason": "teyit listesinde"} for f in unverified_findings(an) if f.fid and not f.blocking]
     return {"schema_version": SCHEMA_VERSION, "profile": profile, "project_meta": project_meta or {},
             "generated_at": datetime.now().isoformat(timespec="seconds"), "input_hash": src_hash,
-            "sections": sections, "finding_ids": sorted(f.fid for f in an.findings if f.fid),
+            "sections": sections, "finding_ids": sorted(f.fid for f in verified_findings(an) if f.fid),
             "stats": stats(an), "omitted": omitted}
 
 

@@ -56,7 +56,7 @@ def test_reader_and_call_tree(tmp_path):
 def test_callers_text():
     b = SimpleNamespace(callers={10: [("FC", 7, 3), ("FC", 9, 1), ("FB", 30, 1), ("OB", 1, 1)]},
                         fc_callers={7: [("OB", 35, 1), ("OB", 100, 1)]})
-    assert callers_text(b, 10) == "FC7 (runtime group?, OB35/OB100) ×3, FC9, FB30 (multi-instance?), +1"
+    assert callers_text(b, 10) == "FC7 (runtime group, OB35/OB100) ×3, FC9, FB30 (multi-instance), +1"
     assert callers_text(b, 99) == ""
     assert callers_text(SimpleNamespace(), 10) == ""
 
@@ -122,8 +122,8 @@ def test_demo_and_zip(tmp_path):
     an = analyze(bk)
     as01 = next(b for b in an.block_folders if b.info.path.endswith("AS01/ombstx/offline/00000001"))
     as02 = next(b for b in an.block_folders if b.info.path.endswith("0000000A"))
-    assert callers_text(as01, 2501) == "FC1 (runtime group?, OB35)"
-    assert callers_text(as01, 1993) == "FB2501 (multi-instance?)"
+    assert callers_text(as01, 2501) == "FC1 (runtime group, OB35)"
+    assert callers_text(as01, 1993) == "FB2501 (multi-instance)"
     assert as01.callers[1827] == [("FC", 1, 5)]
     assert "TOI=7" in as02.callers_source and as02.callers[351] == [("FC", 5, 4)]
     assert all(x["project"].startswith("DEMO_MP/") for x in an.xutils)      # eski backup kopyası dışarıda

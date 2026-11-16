@@ -141,14 +141,15 @@ def test_counts_consistent(tmp_path):
     assert "COUNTS" not in checks(tmp_path)
 
 
-def test_highlight_missing(tmp_path):
-    write_docx(tmp_path / "rapor.docx", _p(_run("Station eşlemesi heuristic, teyit edilmeli.")))
+def test_highlight_in_main_section_is_error(tmp_path):
+    write_docx(tmp_path / "rapor.docx", _p(_run("Ana bölüm metni.", highlight=True)))
     c = checks(tmp_path)
     assert c["HIGHLIGHT"][0].level == HATA
 
 
-def test_highlight_ok(tmp_path):
-    write_docx(tmp_path / "rapor.docx", _p(_run("Station eşlemesi heuristic, teyit edilmeli.", highlight=True)))
+def test_highlight_ok_only_after_confirm_heading(tmp_path):
+    from pcs7_analyzer.confirm import HEADING
+    write_docx(tmp_path / "rapor.docx", _p(_run("Ana bölüm metni."), _run(HEADING), _run("Aksiyon cümlesi.", highlight=True)))
     assert "HIGHLIGHT" not in checks(tmp_path)
 
 
@@ -233,7 +234,7 @@ def test_unreadable_docx(tmp_path):
 def test_every_qa_check_has_a_firing_fixture():
     """Yeni QA kontrolü eklenirse bu dosyaya bozuk fixture eklenmeli."""
     covered = {"qa_unreadable", "qa_placeholders", "qa_actions", "qa_glossary", "qa_counts", "qa_highlight", "qa_direct_format",
-               "qa_excel_errors", "qa_empty_sections", "qa_omitted_blocker", "qa_mask", "qa_cell_words",
+               "qa_excel_errors", "qa_forbidden_words", "qa_empty_sections", "qa_omitted_blocker", "qa_mask", "qa_cell_words",
                "qa_table_layout", "qa_repeats"}
     assert {c.__name__ for c in QA_CHECKS} == covered
 

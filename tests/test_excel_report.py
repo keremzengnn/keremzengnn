@@ -25,7 +25,10 @@ def _sheet(files, name):
 
 def test_eight_sheets_in_order(xl):
     _, f = xl
-    assert re.findall(r'<sheet name="([^"]+)"', f["xl/workbook.xml"]) == SHEETS
+    from pcs7_analyzer.confirm import SHEET_ANALYSIS
+    names = re.findall(r'<sheet name="([^"]+)"', f["xl/workbook.xml"])
+    assert names[:len(SHEETS)] == SHEETS
+    assert names[len(SHEETS):] in ([], [SHEET_ANALYSIS])       # Teyit_Edilecekler en sonda, yalnız madde varsa
 
 
 def test_styles_petrol_arial_numfmt(xl):
@@ -106,16 +109,14 @@ def test_findings_status_colors(xl):
     from pcs7_analyzer.xlsx import STYLES, col_letter
     _, f = xl
     rows = _rows(_sheet(f, "Bulgular"))
-    c_st, c_conf, c_det = (col_letter(FINDINGS_COLUMNS.index(c)) for c in ("Durum", "Güven", "Detay"))
+    c_st = col_letter(FINDINGS_COLUMNS.index("Durum"))
+    assert "Güven" not in {v for _, cells in rows[:1] for _, v in cells.values()}      # güven sütunu kullanıcı sayfasında yok
     seen = set()
     for rn, cells in rows[1:]:
         status = cells[c_st][1]
         seen.add(status)
         assert cells[c_st][0] == STYLES[STATUS_STYLE.get(status, "")], (rn, status)
-        if cells[c_conf][1] == "ÇIKARIM":
-            assert cells[c_conf][0] == STYLES["yellow"] and cells[c_det][0] == STYLES["yellow"]
-        elif status in ("BİLGİ",) and cells[c_conf][1] == "KANIT":
-            assert cells[c_conf][0] == 0 and cells[c_det][0] == 0
+        assert all(v not in ("KANIT", "ÇIKARIM") for _, v in cells.values())
     assert "RİSK" in seen
 
 

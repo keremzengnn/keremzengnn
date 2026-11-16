@@ -365,9 +365,9 @@ def callers_text(bfr, fb_no: int, max_items: int = 3) -> str:
         if t == "FC":
             obs = [f"{a}{b}" for a, b, _ in fc_up.get(n, []) if a == "OB"]
             if obs:
-                s += f" (runtime group?, {'/'.join(obs[:2])}{'…' if len(obs) > 2 else ''})"
+                s += f" (runtime group, {'/'.join(obs[:2])}{'…' if len(obs) > 2 else ''})"
         elif t == "FB":
-            s += " (multi-instance?)"
+            s += " (multi-instance)"
         if c > 1:
             s += f" ×{c}"
         parts.append(s)
@@ -400,7 +400,7 @@ def fc_callers_text(bfr, fc_no: int, max_items: int = 3) -> str:
     parts = []
     if obs:
         shown = obs[:max_items]
-        parts.append("/".join(f"OB{n}" for n in shown) + f"'{_ablative(shown[-1])} çağrılıyor (runtime group?)")
+        parts.append("/".join(f"OB{n}" for n in shown) + f"'{_ablative(shown[-1])} çağrılıyor (runtime group)")
     room = max(max_items - (1 if obs else 0), 0)
     parts += [f"{t}{n}" + (f" ×{c}" if c > 1 else "") for t, n, c in rest[:room]]
     if len(rest) > room:

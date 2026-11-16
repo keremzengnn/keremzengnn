@@ -78,8 +78,8 @@ def fw_matches(actual: str, listed: str) -> bool:
 
 # Released Modules listesinde yer almayan aksesuarlar (kontrol edilmeli ama "uyumsuz" değil)
 ACCESSORIES = {
-    "6ES7960-1AA": "H-Sync modülü (aksesuar): Released Modules listesinde yer almaz; CPU / H-System manual'ından teyit edilmeli",
-    "6ES7960-1AB": "H-Sync modülü (aksesuar): Released Modules listesinde yer almaz; CPU / H-System manual'ından teyit edilmeli",
+    "6ES7960-1AA": "H-Sync modülü (aksesuar): Released Modules listesinde yer almaz; CPU / H-System manual'ına bakılmalı",
+    "6ES7960-1AB": "H-Sync modülü (aksesuar): Released Modules listesinde yer almaz; CPU / H-System manual'ına bakılmalı",
     "6ES7960-1BB": "Sync kablosu (aksesuar): Released Modules listesinde yer almaz",
 }
 

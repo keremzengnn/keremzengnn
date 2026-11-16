@@ -11,6 +11,7 @@ Metinde **kalın** işaretlemesi kullanılabilir; tablo hücresinde satır sonu 
 """
 from __future__ import annotations
 
+import copy
 import html
 import json
 import re
@@ -20,6 +21,8 @@ from datetime import date
 from enum import Enum
 from pathlib import Path
 
+from . import confirm
+from .confirm import ConfirmItem
 from .fmt import fmt_date, fmt_num
 from .analyze import Analysis, author_version, staged_path_from
 from .checks import CHECKS
@@ -191,7 +194,121 @@ def _worst(fs: list[Finding]) -> Severity:
 # Bölüm içerikleri
 # ---------------------------------------------------------------------------
 
+def verified_view(an: Analysis) -> Analysis:
+    """Ana tablolar için Analysis görünümü: yalnız doğrulanmış (HIGH) bulgular. Doğrulanmamışlar teyit bölümüne gider."""
+    if all(f.verified for f in an.findings):
+        return an
+    v = copy.copy(an)
+    v.findings = [f for f in an.findings if f.verified]
+    return v
+
+
+CONFIRM_HTML_MAX = 40      # HTML / MD / Word teyit bölümünde gösterilen madde; tamamı Excel 'Teyit_Edilecekler'
+
+
+def _clean_status(s: str) -> str:
+    """Eşleme durumundaki belirsizlik ekini atar ('bulunamadı, teyit edilmeli' -> 'bulunamadı')."""
+    return re.sub(r",?\s*teyit (edilmeli|gerekli)", "", str(s)).strip()
+
+
+def _extra_confirm(an: Analysis) -> list[ConfirmItem]:
+    """Rapor katmanında ana tablodan çıkarılan, doğrulanmamış bilgiler (tanınmayan author, belirsiz eşleme, çağıranlar …)."""
+    out: list[ConfirmItem] = []
+    for b in an.block_folders:
+        if b.unknown_authors:
+            out.append(ConfirmItem(f"{b.as_label} block author'ları",
+                                   f"Author kodlarının ({_fmt_list(b.unknown_authors, 5)}) integratör mi Siemens add-on mu "
+                                   "olduğunu müşteriden doğrula.", b.info.path))
+        from .parsers.xutils import callers_text, fc_callers_text
+        for c in b.custom_blocks:
+            txt = callers_text(b, c.number) if c.kind == "FB" else fc_callers_text(b, c.number) if c.kind == "FC" else ""
+            if txt:
+                out.append(ConfirmItem(f"{b.as_label} {c.kind}{c.number} {c.name or ''}".strip(),
+                                       f"Çağıran FC/OB'leri ({txt}) kaynak kodda kontrol et; recompile sonrası fonksiyon testi yap.",
+                                       b.info.path))
+    # (PCS 7 sürümü, block klasörü eşlemesi, OS rolü, açık konular, kontrol edilemeyenler: `confirm.collect` kapsar)
+    for v in an.versions:
+        if v.confidence == Confidence.LOW.value:
+            out.append(ConfirmItem(f"{v.item} sürümü", f"{v.value} değerini kaynak dosyada doğrula.", v.source))
+    for w in an.warnings:
+        if not confirm.is_clean(w):
+            out.append(ConfirmItem("Uyarı", _first_sentence(w, 40)))
+    for r in quote_rows(an)[1]:
+        out.append(ConfirmItem(f"Teklif girdisi: {r[0]}", f"{r[1]} değerini doğrula ({r[2]})."))
+    for r in coverage_rows(an)[1]:
+        out.append(ConfirmItem(f"Backup içeriği: {r[0]}", f"{r[3]}."))
+    if an.diag is not None:
+        for f in an.diag.findings:
+            if f.confidence != "KANIT":
+                out.append(ConfirmItem(f"Diagnostics: {f.title}", f"{f.detail} — log kaydını doğrula.", f.source))
+    if an.blockmap is not None:
+        for lk in an.blockmap.links:
+            if lk.confidence != "KANIT":
+                out.append(ConfirmItem(f"S7 program {lk.program_name or lk.program_id}",
+                                       f"CPU / station eşlemesini ({lk.cpu_name or '-'} / {lk.station_name or '-'}) HW Config'te doğrula.",
+                                       lk.block_folder or ""))
+    return out
+
+
+def confirm_items(an: Analysis) -> list[ConfirmItem]:
+    """Teyit bölümü maddeleri: confirm.collect + doğrulanmamış bulguların aksiyonları + rapor katmanı maddeleri (tekrarsız)."""
+    items: list[ConfirmItem] = list(confirm.collect(an))       # doğrulanmamış bulgular + açık konular + durum belirsizlikleri
+    items += _extra_confirm(an)
+    seen, out = set(), []
+    for it in items:
+        k = it.action.strip().lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(it)
+    return out
+
+
+def _strip_conf(s: str) -> str:
+    """Kullanıcıya görünen kaynak metninden güven etiketini (KANIT) atar."""
+    return re.sub(r"\s*\(?\bKANIT\b\)?", "", str(s)).strip(" ,;/") or "-"
+
+
+def _row_clean(r) -> bool:
+    return all(confirm.is_clean(str(c)) for c in r)
+
+
+def quote_rows(an: Analysis) -> tuple[list[list[str]], list[list[str]]]:
+    """Teklif girdileri: (ana tablo satırları [Girdi, Değer, Kaynak], belirsizlik içerenler -> teyit bölümü)."""
+    from .readiness import quote_inputs
+    ok, dirty = [], []
+    for r in quote_inputs(an):
+        r = [r[0], r[1], _strip_conf(r[2])] if len(r) > 2 else list(r)
+        (ok if _row_clean(r) else dirty).append(r)
+    return ok, dirty
+
+
+def coverage_rows(an: Analysis) -> tuple[list[list[str]], list[list[str]]]:
+    """Backup yeterliliği: (ana tablo satırları, belirsizlik içerenler -> teyit bölümü)."""
+    from .readiness import backup_coverage
+    ok, dirty = [], []
+    for r in backup_coverage(an):
+        (ok if _row_clean(r) else dirty).append(r)
+    return ok, dirty
+
+
+def _confirm_line(it: ConfirmItem) -> str:
+    return f"**{it.topic}:** {it.action}" + (f" ({it.where})" if it.where else "")
+
+
+def _confirm_section(an: Analysis, doc: list) -> None:
+    """Çıktının son bölümü. Boşsa yazılmaz. Numarasız madde listesi (Word Tablo numaralandırması bozulmaz)."""
+    items = confirm_items(an)
+    if not items:
+        return
+    doc.append(Heading(1, confirm.HEADING))
+    lines = [_confirm_line(i) for i in items[:CONFIRM_HTML_MAX]]
+    if len(items) > CONFIRM_HTML_MAX:
+        lines.append(_more(len(items) - CONFIRM_HTML_MAX, confirm.SHEET_ANALYSIS, "madde"))
+    doc.append(Bullets(lines))
+
+
 def group_findings(an: Analysis) -> list[tuple[str, list[Finding]]]:
+    an = verified_view(an)
     groups: dict[str, list[Finding]] = defaultdict(list)
     order: dict[str, tuple] = {}
     for f in an.findings:
@@ -266,20 +383,19 @@ def _finding_text(f: Finding, group: str, short: bool = False, words: int = WORD
         d = _first_sentence(d, words)
     if f.check_id in _CONS_PREFIX:
         d = f"**{_CONS_PREFIX[f.check_id]}:** {d}"
-    if f.confidence is Confidence.LOW and "teyit" not in d.lower():
-        d += " (teyit edilmeli)"
     return d
 
 
 def decision(an: Analysis) -> tuple[str, str]:
-    """(başlık, son cümle)"""
+    """(başlık, son cümle) — yalnız doğrulanmış bulgulardan."""
+    an = verified_view(an)
     blocking = [f for f in an.findings if f.blocking]
     if blocking:
         return ("Sonuç: Proje mevcut haliyle upgrade edilemez",
                 "Upgrade'i engelleyen konular: " + "; ".join(f.detail for f in blocking) + ".")
     if not an.pcs7_family:
         return ("Sonuç: Mevcut versiyon tespit edilemedi",
-                "Versiyon teyit edildikten sonra değerlendirme tamamlanmalı.")
+                "Versiyon belirlendikten sonra değerlendirme tamamlanmalı.")
     if any(f.severity is Severity.HIGH for f in an.findings):
         return ("Sonuç: Proje upgrade edilebilir, zorluklar var",
                 "Upgrade'i engelleyen bir blok, library veya hardware bulunmadı; yüksek etkili konular aşağıda listelenmiştir.")
@@ -296,7 +412,7 @@ def version_note(fam: str) -> str:
     if (major, minor) < (9, 1):
         notes.append("V9.1'den eski PCS 7 software'i doğrudan güncellenemez; PC'ler desteklenen OS ile sıfırdan kurulur [1, Bölüm 4.3].")
     if (major, minor) >= (9, 0):
-        notes.append("Proje V9.0 SP3 ve üzeriyse AS library update'siz (AS STOP'suz) update mümkün [1] (SP seviyesi teyit edilmeli).")
+        notes.append("Proje V9.0 SP3 ve üzeriyse AS library update'siz (AS STOP'suz) update mümkün [1].")
     return " ".join(notes)
 
 
@@ -320,7 +436,7 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
         note += "\n" + version_note(fam)
         low = an.pcs7_family_confidence != Confidence.HIGH.value
         rows.append(["Proje migration", STATUS_CONFIRM if low else STATUS_OK,
-                     note + (" Versiyon tek kaynaktan/heuristic tespit edildi, teyit edilmeli." if low else "")])
+                     note])
     else:
         rows.append(["Proje migration", STATUS_CONFIRM, f"Mevcut versiyon tespit edilemedi. Hedef: PCS 7 {tgt}."])
 
@@ -384,7 +500,7 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
             extra.append(f"tag farkı {fmt_num(d.n_tags_only_a)}/{fmt_num(d.n_tags_only_b)}, alarm farkı {fmt_num(d.n_alarms_only_a)}/{fmt_num(d.n_alarms_only_b)}")
         rows.append([f"{', '.join(names)} OS projeleri", STATUS_ATTN,
                      "İki ayrı OS projesi (ENG, ES üzerinde çalışan tam OS; master/kopya değil) ayrışmış"
-                     + (f" ({'; '.join(extra)})" if extra else "") + ". İkisinin de taşınıp taşınmayacağı teyit edilmeli."])
+                     + (f" ({'; '.join(extra)})" if extra else "") + ". Taşınacak OS projesi (ENG, SRV veya ikisi) belirlenmeli."])
     copies = [f for f in by_id.get("CONS_ES_SERVER", []) if "OS PC kopyası" in f.detail]
     if copies:
         rows.append(["ES ↔ OS PC kopyası", STATUS_ATTN, copies[0].detail.split(";")[0] + "."])
@@ -392,14 +508,14 @@ def _summary_rows(an: Analysis, by_group: list[tuple[str, list[Finding]]]) -> li
         rows.append(["ENG / SRV tutarlılığı", STATUS_NOT_CHECKED, nc["CONS_ES_SERVER"]])
     if "CONS_CLIENTS" in by_id:
         rows.append(["Client tutarlılığı", STATUS_ATTN,
-                     f"Client'lar isim setine göre {len(an.client_groups)} gruba ayrılıyor; farklı gruplar teyit edilmeli."])
+                     f"Client'lar isim setine göre {len(an.client_groups)} gruba ayrılıyor; fark listesi Excel 'ENG_SRV1_Farklar'."])
     if "OPC_3RD_PARTY" in by_id:
         vend = sorted({cn.opc_vendor or cn.name for w in an.wincc.values() for cn in w.connections if cn.kind == "opc"})
-        rows.append(["3rd party OPC", STATUS_ATTN, f"{_fmt_list(vend, 4)}; hedef versiyonda uyum ve kapsam teyit edilmeli."])
+        rows.append(["3rd party OPC", STATUS_ATTN, f"{_fmt_list(vend, 4)}; hedef versiyonda uyum ve kapsam kontrol edilmeli."])
     if "OS_CONN_REDUNDANCY" in by_id:
         rows.append(["OS bağlantısı", STATUS_ATTN, by_id["OS_CONN_REDUNDANCY"][0].detail.split(". ")[0] + "."])
     if "CAS_PH" in by_id:
-        rows.append(["Arşiv (CAS / PH)", STATUS_ATTN, "CAS desteklenmiyor → Process Historian (teyit edilmeli)."])
+        rows.append(["Arşiv (CAS / PH)", STATUS_ATTN, "CAS desteklenmiyor → Process Historian."])
     return rows
 
 
@@ -439,7 +555,7 @@ def _version_bullets(an: Analysis) -> list[str]:
         n_cpu = sum(len(s.cpus) for s in an.stations)
         if h and len(h) == len(an.stations):
             src_txt = "HW Config export" if all(s.kind == "cfg" for s in an.stations) else \
-                "backup içi .s7h taraması" if all(s.kind == "s7h" for s in an.stations) else "HW export + .s7h"
+                "backup içi .s7h" if all(s.kind == "s7h" for s in an.stations) else "HW export + .s7h"
             items.append(f"**Tüm AS'ler S7-400H** (redundant). Toplam {len(h)} H-system, {n_cpu} CPU ({src_txt}).")
         else:
             items.append(f"**AS:** {len(an.stations)} station ({len(h)} H-system), {n_cpu} CPU.")
@@ -502,9 +618,6 @@ def _os_rows(an: Analysis) -> list[list[str]]:
         if clients:
             groups = len(an.client_groups)
             parts.append(f"{len(clients)} OS client" + (f" ({groups} içerik grubu)" if groups > 1 else ""))
-        odd = [o.info.name for o in clients if o.role_note]
-        if odd:
-            parts.append(f"rolü teyit: {', '.join(odd)}")
         if eng:
             parts.append(", ".join(f"{o.info.name} (ES + tam OS)" for o in eng))
         else:
@@ -535,15 +648,15 @@ def _wincc_rows(an: Analysis) -> list[list[str]]:
 
 def prep_list(an: Analysis) -> list[str]:
     """Otomatik upgrade hazırlık listesi (dry-run öncesi ES'e kurulacak/hazırlanacaklar)."""
-    ids = {f.check_id for f in an.findings}
+    ids = {f.check_id for f in verified_view(an).findings}
     feats = {x for b in an.block_folders for x in b.features}
     items = []
     fam = an.pcs7_family
-    items.append(f"İç prosedür yolu: {fam or '?'} → {' → '.join(staged_path_from(fam))} "
+    items.append(f"İç prosedür yolu: {fam or '-'} → {' → '.join(staged_path_from(fam))} "
                  "(manual V7.1 SP4+ → V10.0 SP2 doğrudan geçişe izin veriyor [1, Bölüm 4.3]).")
     if "F-System" in feats:
         items.append("S7 F Systems + F Configuration Pack (F-block'lar var): hedef versiyonla uyumlu sürüm Compatibility Tool'dan "
-                     "teyit edilmeli; HW export F Configuration Pack kurulu PC'den alınmalı.")
+                     "kontrol edilmeli; HW export F Configuration Pack kurulu PC'den alınmalı.")
     if "PCS 7 Lib V7.1" in feats or "LIB_STD_LIB" in ids:
         items.append("PCS 7 Library V7.1 SP3 Upd4 (ES) + PCS 7 Faceplates V7.1 SP3 Upd1 (ES + tüm OS) [1, Bölüm 8.5] "
                      "(Siemens 'Downloadable previous versions of SIMATIC PCS 7 Libraries', ID 109480136).")
@@ -592,22 +705,22 @@ def manual_items(an: Analysis) -> list[list[str]]:
         ["Compile OS wizard ekranları (area→OS ataması, SFC visualization işareti)", "eksik (backup'tan okunamıyor)"],
         ["Tesis PC'lerinin 'Installed SIMATIC software' listesi (opsiyonel)", "eksik"],
     ]
-    q = ["İki OS projesi (ENG ve SRV) de taşınacak mı?" if any(d.kind == "os_pair" for d in an.os_diffs) else "",
-         "Modül arızası (diagnostic) alarmları operatör client'larında görünüyor mu?" if any(
+    q = ["ENG ve SRV OS projelerinden hangisinin (veya ikisinin) taşınacağını müşteriyle belirle."
+         if any(d.kind == "os_pair" for d in an.os_diffs) else "",
+         "Modül arızası (diagnostic) alarmlarının operatör client'larında görünüp görünmediğini müşteriyle belirle." if any(
              d.diag_only_a or d.diag_only_b for d in an.export_diffs) else "",
-         "Rolü belirsiz OS projeleri: " + ", ".join(o.info.name for o in an.os_projects if o.role_note)
-         if any(o.role_note for o in an.os_projects) else "",
-         "Arşiv (runtime ALG/TLG) taşınacak mı?" if any(o.archives.get("segments") for o in an.os_projects) else "",
-         "Logic Matrix kaldırılsın mı?" if any(s["status"].startswith("kurulu, kullanılmıyor")
-                                             for s in an.lm_status.values()) else "",
-         "3rd party OPC bağlantılarının durumu (hangi server hâlâ kullanılıyor)?" if any(
+         "Arşivin (runtime ALG/TLG) taşınıp taşınmayacağını müşteriyle belirle."
+         if any(o.archives.get("segments") for o in an.os_projects) else "",
+         "Logic Matrix'in kaldırılıp kaldırılmayacağına müşteriyle karar ver." if any(
+             s["status"].startswith("kurulu, kullanılmıyor") for s in an.lm_status.values()) else "",
+         "3rd party OPC bağlantılarından hangi server'ın hâlâ kullanıldığını müşteriden öğren." if any(
              c.kind == "opc" for w in an.wincc.values() for c in w.connections) else "",
-         "TCP/IP OS bağlantısı hangi AS'e gidiyor (redundans)?" if any(
+         "TCP/IP OS bağlantısının hangi AS'e gittiğini (redundans) müşteriden öğren." if any(
              c.kind == "tcpip" for w in an.wincc.values() for c in w.connections) else "",
          "AS bazında izin verilen duruş süreleri",
-         "Maintenance Station kullanılıyor mu? (kullanılıyorsa OS'lara 'Options/Maintenance functions for OS' paketi) [1, 4.3]",
-         "BATCH / Route Control / Process Historian / Information Server var mı? (kendi update bölümleri)",
-         "Redundant IO library kullanılıyor mu, sürümü?"]
+         "Maintenance Station kullanımı: kullanılıyorsa OS'lara 'Options/Maintenance functions for OS' paketi [1, 4.3]",
+         "BATCH / Route Control / Process Historian / Information Server varlığı: her biri kendi update bölümüne tabi.",
+         "Redundant IO library kullanımı ve sürümü."]
     rows += [["Müşteri sorusu", x] for x in q if x]
     return rows
 
@@ -642,8 +755,6 @@ def _software_rows(an: Analysis, full: bool = True) -> list[list[str]]:
         if b.protected:
             lines.append(f"Know-how protected (Siemens dışı): {_fmt_list(b.protected, 5)}")
         custom = []
-        if b.unknown_authors:
-            custom.append("Tanınmayan author (teyit edilmeli): " + _fmt_list(b.unknown_authors, 5))
         if b.custom_blocks:
             names = [c.name.replace(" (symbol)", "") or f"FB{c.number}" for c in b.custom_blocks]
             n_inst = sum(c.instances for c in b.custom_blocks)
@@ -675,6 +786,7 @@ def _software_rows(an: Analysis, full: bool = True) -> list[list[str]]:
 
 def build_document(an: Analysis, full: bool = True) -> list:
     doc: list = []
+    an_all, an = an, verified_view(an)        # ana bölümler: doğrulanmış bulgular; kalanı son bölüm (teyit)
     by_group = group_findings(an)
     fam = an.pcs7_family
     path = staged_path_from(fam)
@@ -752,7 +864,7 @@ def build_document(an: Analysis, full: bool = True) -> list:
         doc.append(Table(["Konu", "Etki", "Açıklama", "Aksiyon (sorumlu)"], rows, cap("Zorluklar ve etkileri"),
                          badge_cols=[1], widths=[16, 10, 50, 24], row_ids=row_ids))
         if full:
-            doc.append(Note("Açıklama: bulgunun ilk cümlesi. Tam metin, kaynak ve güven: Ek C ve Excel 'Bulgular'."))
+            doc.append(Note("Açıklama: bulgunun ilk cümlesi. Tam metin ve kaynak: Ek C ve Excel 'Bulgular'."))
     else:
         doc.append(Para("Bulgu yok."))
 
@@ -769,6 +881,7 @@ def build_document(an: Analysis, full: bool = True) -> list:
 
     if full:
         _appendix(an, doc)
+    _confirm_section(an_all, doc)
     return doc
 
 
@@ -785,19 +898,16 @@ def _open_section(an: Analysis, doc: list) -> None:
     if questions:
         doc.append(Bullets(questions))
     doc.append(Heading(1, "Teklif öncesi netleşmesi gerekenler"))
-    titles = {c.id: c.title for c in CHECKS}
     asked = {q.lower() for q in questions}
-    items = [_first_sentence(x, 40) for x in an.open_items] \
-        + [f"Kontrol edilemedi — {titles.get(i, i)}: {why}" for i, why in an.not_checked] \
-        + [x for x in GENERIC_OPEN_ITEMS if x.lower() not in asked]
+    # Analizden gelen açık konular / kontrol edilemeyenler son bölümde ('Teyit edilecek noktalar'); burada sadece genel liste
+    items = [x for x in GENERIC_OPEN_ITEMS if x.lower() not in asked]
     if len(items) > FULL_LIST_MAX + 5:
         items = items[:FULL_LIST_MAX + 5] + [_more(len(items) - FULL_LIST_MAX - 5, "Acik_Konular_Kaynak", "madde")]
     doc.append(Bullets(items))
 
 
 def _readiness_section(an: Analysis, doc: list) -> None:
-    from .readiness import backup_coverage, quote_inputs
-    cov = backup_coverage(an)
+    cov = coverage_rows(an)[0]
     gaps = [r for r in cov if r[1] != "Var" or str(r[3]).strip() not in ("", "-")]
     ok = [r[0] for r in cov if r not in gaps]
     doc.append(Heading(1, "Backup içeriği ve yeterlilik", fold=True))
@@ -808,7 +918,7 @@ def _readiness_section(an: Analysis, doc: list) -> None:
                          badge_cols=[1], widths=[24, 10, 30, 36]))
     doc.append(Heading(1, "Teklif için girdiler", fold=True))
     doc.append(Para("Sayılar backup'tan; süre / fiyat üretilmez. 'VERİ YOK' satırları müşteriden istenmeli."))
-    doc.append(Table(["Girdi", "Değer", "Kaynak / güven"], quote_inputs(an), widths=[28, 46, 26]))
+    doc.append(Table(["Girdi", "Değer", "Kaynak"], quote_rows(an)[0], widths=[28, 46, 26]))
 
 
 def _diag_section(an: Analysis, doc: list) -> None:
@@ -820,18 +930,18 @@ def _diag_section(an: Analysis, doc: list) -> None:
                         f"SQL Server: {sql.get('version') or '-'}" + (f" ({sql['bits']}-bit)" if sql.get("bits") else ""),
                         "Startup parametreleri: " + (", ".join(sql.get("startup_params") or []) or "-"),
                         "Olay sayıları: " + (", ".join(f"{k} {n}" for k, n in dg.category_counts.most_common()) or "-")]))
-    if dg.findings:
-        doc.append(Table(["Bulgu", "Önem", "Güven", "Detay", "Kaynak"],
-                         [[f.title, f.severity, f.confidence, f.detail, f.source] for f in dg.findings],
-                         badge_cols=[1, 2], widths=[18, 8, 9, 45, 20]))
+    sure = [f for f in dg.findings if f.confidence == "KANIT"]
+    if sure:
+        doc.append(Table(["Bulgu", "Önem", "Detay", "Kaynak"],
+                         [[f.title, f.severity, f.detail, f.source] for f in sure],
+                         badge_cols=[1], widths=[20, 8, 52, 20]))
     key = [e for e in dg.events if e.category in ("sql_error", "sql_memory", "redundancy", "eventlog")]
     if key:
         doc.append(Heading(2, f"Zaman çizelgesi (önemli olaylar, ilk {min(len(key), 20)} / {len(key)})"))
         doc.append(Table(["Zaman", "Kategori", "Olay", "Dosya"],
                          _cap_rows([[e.ts or "-", e.category, e.text, e.source] for e in key], "Diagnostics", 20),
                          widths=[16, 10, 54, 20]))
-    doc.append(Note("WinCC diagnose log formatları gerçek örnekle teyit edilmedi: sınıflandırma anahtar kelimeyle (ÇIKARIM). "
-                    ".evtx okunmaz; Event Viewer'dan CSV export alınmalı."))
+    doc.append(Note(".evtx okunmaz; Event Viewer'dan CSV export alınmalı."))
 
 
 def _appendix(an: Analysis, doc: list) -> None:
@@ -839,8 +949,8 @@ def _appendix(an: Analysis, doc: list) -> None:
     d = an.discovery
     doc.append(Heading(1, "Ek A: Detaylar", fold=True))
     doc.append(Heading(2, "Versiyon kaynakları"))
-    doc.append(Bullets([f"{v.item}: {v.value} — kaynak: {v.source}" + (" (teyit edilmeli)" if v.confidence == Confidence.LOW.value else "")
-                        for v in an.versions] or ["-"]))
+    doc.append(Bullets([f"{v.item}: {v.value} — kaynak: {v.source}"
+                        for v in an.versions if v.confidence != Confidence.LOW.value] or ["-"]))
     if an.stations:
         doc.append(Heading(2, "HW Config detayı"))
         rows = []
@@ -859,11 +969,11 @@ def _appendix(an: Analysis, doc: list) -> None:
         ok = [m for m in an.hw_matches if m.status == "listede"]
         bad = sorted((m for m in an.hw_matches if m.status != "listede"), key=lambda m: ("bulunamadı" not in m.status, m.order))
         doc.append(Para(f"{Path(an.released_list).name}: {len(an.hw_matches)} MLFB / GSD, **{len(ok)} listede**, "
-                        f"{len(bad)} listede değil / teyit gerekli. Tam liste: Excel 'HW_Moduller'."))
+                        f"{len(bad)} listede değil. Tam liste: Excel 'HW_Moduller'."))
         if bad:
             doc.append(Table(["MLFB", "Model", "FW", "Adet", "AS", "Durum"],
                              _cap_rows([[m.order, describe(m.order)[0] or "-", m.fw or "-", str(m.count), _fmt_list(m.stations, 4),
-                                         m.status] for m in bad], "HW_Moduller", 15), badge_cols=[5]))
+                                         _clean_status(m.status)] for m in bad], "HW_Moduller", 15), badge_cols=[5]))
     else:
         doc.append(Para(f"Released Modules listesi: {Path(an.released_list).name}; eşleştirilecek modül yok."))
     fc_rows = []
@@ -886,15 +996,13 @@ def _appendix(an: Analysis, doc: list) -> None:
         doc.append(Note("SUBBLK LOCDATALEN: block'un kendi local data'sı; iç içe çağrılarla priority class toplamı ve CPU "
                         "ayarı backup'tan hesaplanmadı (VERİ YOK). V10'da güncellenen block'lar daha fazla local data "
                         "isteyebilir -> download öncesi CPU local data ayarı kontrol edilmeli."))
-    if an.blockmap is not None and an.blockmap.links:
-        doc.append(Heading(2, "S7 program ↔ CPU ↔ station (ID zinciri)"))
-        doc.append(Table(["S7 program", "Block klasörü", "CPU", "Station", "Symbol table", "Güven"],
+    sure_links = [lk for lk in (an.blockmap.links if an.blockmap is not None else []) if lk.confidence == "KANIT"]
+    if sure_links:
+        doc.append(Heading(2, "S7 program ↔ CPU ↔ station"))
+        doc.append(Table(["S7 program", "Block klasörü", "CPU", "Station", "Symbol table"],
                          [[lk.program_name or str(lk.program_id), lk.block_folder or "-", lk.cpu_name or "-",
-                           f"{lk.station_name} ({lk.station_type})" if lk.station_name else "-", lk.symbol_table or "-",
-                           lk.confidence] for lk in an.blockmap.links], badge_cols=[5]))
-        doc.append(Note("Zincir: hrs/S7RESOFF.DBF → hrs/linkhrs.lnk → ombstx/offline/<ID>; hOmSave7/*/HRELATI1.DBF (CPU, "
-                        "station); YDBs/YLNKLIST.DBF. Gerçek projede teyit edilene kadar: KANIT sadece HW export / symbol "
-                        "table ile çapraz kontrol tutarsa."))
+                           f"{lk.station_name} ({lk.station_type})" if lk.station_name else "-", lk.symbol_table or "-"]
+                          for lk in sure_links]))
     doc.append(Heading(2, "Block klasörleri"))
     rows, empty = [], []
     for b in an.block_folders:
@@ -903,13 +1011,13 @@ def _appendix(an: Analysis, doc: list) -> None:
             continue
         c = b.counts
         cnt = f"{c.get('FB', 0)}/{c.get('FC', 0)}/{c.get('DB', 0)}/{c.get('OB', 0)}" if c else "-"
-        rows.append([b.as_label, cnt, _fmt_list(b.features), f"{b.info.path} — eşleme: {b.mapping}"
+        sure = b.mapping_confidence == Confidence.HIGH.value
+        rows.append([b.as_label, cnt, _fmt_list(b.features), b.info.path + (f" — {b.mapping}" if sure and b.mapping != "-" else "")
                      + (f" — HATA: {b.error}" if b.error else "")])
     if rows:
-        doc.append(Table(["AS", "FB/FC/DB/OB", "İçerik", "Klasör / eşleme"], rows))
+        doc.append(Table(["AS", "FB/FC/DB/OB", "İçerik", "Klasör"], rows))
     if empty:
         doc.append(Para(f"Boş block klasörü (kullanılmayan program, normal): {len(empty)} — {_fmt_list(empty, 4)}"))
-    doc.append(Note("Block klasörü ↔ AS eşlemesi proje adı ve symbol table FB seti benzerliği ile yapıldı (heuristic, teyit edilmeli)."))
     lib_rows, cust_rows, n_cust, extra = [], [], 0, []
     for b in an.block_folders:
         if not b.counts:
@@ -919,8 +1027,7 @@ def _appendix(an: Analysis, doc: list) -> None:
         n_cust += len(b.custom_blocks)
         from .parsers.xutils import callers_text
         cust_rows += [[b.as_label, f"{x.kind}{x.number}", x.name or "(header yok)", x.family or "-", x.author or "-",
-                       lang_name(x.lang), x.version, str(x.instances) if b.memo_available else "-",
-                       (callers_text(b, x.number) + " (çıkarım)") if x.kind == "FB" and callers_text(b, x.number) else "-"]
+                       lang_name(x.lang), x.version, str(x.instances) if b.memo_available else "-"]
                       for x in b.custom_blocks]
         inst = ", ".join(f"{k} {n}" for k, n in b.top_instances[:5])
         notes = ([f"en çok instance: {inst}"] if inst else []) \
@@ -935,18 +1042,17 @@ def _appendix(an: Analysis, doc: list) -> None:
         doc.append(Table(["AS", "Library", "Author (FB/FC sayısı)"], lib_rows, widths=[14, 30, 56]))
     if cust_rows:
         doc.append(Heading(2, f"Custom block'lar ({n_cust})"))
-        doc.append(Table(["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance", "Çağıran (XUTILS)"],
+        doc.append(Table(["AS", "Block", "İsim", "Family", "Author", "Dil", "Versiyon", "Instance"],
                          _cap_rows(cust_rows, "Custom_Blocklar")))
     if extra:
         doc.append(Bullets(extra + ["Tüm FB instance sayıları: Excel 'Instance_Sayilari'."]))
     if an.os_projects:
         doc.append(Heading(2, "OS projeleri"))
         doc.append(Table(["OS projesi", "Rol", "Yer", "WinCC", "Custom picture", "Faceplate", "Script", "Custom typicals", "OPC", "Klasör"],
-                         [[o.info.name, o.role, "ES" if o.in_es else "OS PC kopyası", o.info.wincc_build or "?",
+                         [[o.info.name, o.role, "ES" if o.in_es else "OS PC kopyası", o.info.wincc_build or "-",
                            str(o.pictures.get("custom", 0)), str(o.pictures.get("faceplate", 0) + o.pictures.get("f_faceplate", 0)),
                            str(len(o.scripts)), _fmt_list(o.custom_typicals, 3), _fmt_list(o.opc, 3), o.info.path]
                           for o in an.os_projects]))
-        doc.append(Note("OS rolü proje adından tahmin edilir (heuristic)."))
     for df in an.os_diffs:
         name = df.a.rsplit("/", 1)[-1]
         doc.append(Heading(2, f"{name}: ES ↔ {df.b_label}"))
@@ -982,10 +1088,11 @@ def _appendix(an: Analysis, doc: list) -> None:
     doc.append(Bullets(items))
 
     from .readiness import findings_rows
-    doc.append(Heading(1, "Ek C: Bulgular (kaynak + güven)", fold=True))
-    doc.append(Para("KANIT = dosyada birebir görüldü; ÇIKARIM = heuristic / isimden yorum, teyit edilmeli (sarı)."))
+    doc.append(Heading(1, "Ek C: Bulgular (kaynak)", fold=True))
     from .readiness import FINDINGS_COLUMNS
-    doc.append(Table(FINDINGS_COLUMNS, findings_rows(an), badge_cols=[2, 3, 4], widths=[5, 11, 7, 6, 7, 34, 16, 14]))
+    keep = [i for i, c in enumerate(FINDINGS_COLUMNS) if c != "Güven"]     # güven etiketi kullanıcı çıktısında yok
+    doc.append(Table([FINDINGS_COLUMNS[i] for i in keep], [[r[i] for i in keep] for r in findings_rows(an)],
+                     badge_cols=[2, 3], widths=[5, 12, 8, 7, 38, 16, 14]))
 
     doc.append(Heading(1, f"Ek D: Analiz edilemeyenler ({len(an.unknown)})", fold=True))
     if len(an.unknown):
@@ -1015,7 +1122,7 @@ def _md_cell(s: str) -> str:
 def render_markdown(an: Analysis, doc: list | None = None, meta: ReportMeta | None = None) -> str:
     doc = doc if doc is not None else build_document(an)
     meta = meta or ReportMeta()
-    fam = an.pcs7_family or "?"
+    fam = an.pcs7_family or "-"
     out = [f"# {meta.customer or tr_upper(an.project_name)} | SIMATIC PCS 7 — Upgrade Ön Değerlendirmesi "
            f"{fam} → {an.target.replace('SP', ' SP')}", "",
            " | ".join(x for x in (meta.author, meta.department, fmt_date(meta.date)) if x), ""]
@@ -1085,7 +1192,7 @@ def badge_class(v: str) -> str | None:
         return "ok"
     if v in (STATUS_NOT_CHECKED,):
         return "neutral"
-    if v in (STATUS_CHANGE, "bulunamadı, teyit edilmeli") or v.endswith(Severity.HIGH.value):
+    if v in (STATUS_CHANGE, "bulunamadı") or v.endswith(Severity.HIGH.value):
         return "high"
     if v in (STATUS_ATTN, "listede, FW listede yok") or v.endswith(Severity.MEDIUM.value):
         return "medium"
@@ -1171,10 +1278,10 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
     doc = doc if doc is not None else build_document(an)
     meta = meta or ReportMeta()
     e = html.escape
-    n_high = sum(1 for f in an.findings if f.severity is Severity.HIGH)
-    n_med = sum(1 for f in an.findings if f.severity is Severity.MEDIUM)
+    n_high = sum(1 for f in an.findings if f.verified and f.severity is Severity.HIGH)
+    n_med = sum(1 for f in an.findings if f.verified and f.severity is Severity.MEDIUM)
     d = an.discovery
-    kpis = [(an.pcs7_family or "?", "PCS 7 (tespit)"), (str(len(an.stations)), "AS (HW Config)"),
+    kpis = [(an.pcs7_family or "-", "PCS 7"), (str(len(an.stations)), "AS (HW Config)"),
             (str(sum(1 for b in an.block_folders if b.counts)), "Dolu block klasörü"),
             (str(len(d.os_projects)), "OS projesi"), (str(n_high), "Yüksek etki"), (str(n_med), "Orta etki")]
     body, toc, open_, n, pending_topline = [], [], "", 0, ""
@@ -1217,7 +1324,7 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
                         f"<tbody>{rows}</tbody></table></div>" + (f'<div class="caption">{e(b.caption)}</div>' if b.caption else ""))
     if open_:
         body.append(open_)
-    fam = an.pcs7_family or "?"
+    fam = an.pcs7_family or "-"
     who = " | ".join(x for x in (meta.author, meta.department, fmt_date(meta.date)) if x)
     customer = meta.customer or tr_upper(an.project_name)
     return f"""<!DOCTYPE html>
@@ -1235,7 +1342,7 @@ def render_html(an: Analysis, doc: list | None = None, meta: ReportMeta | None =
 function _o(){{var s=location.hash&&document.querySelector(location.hash+' details');if(s)s.open=true;}}
 addEventListener('hashchange',_o);_o();
 addEventListener('beforeprint',function(){{document.querySelectorAll('details').forEach(function(d){{d.open=true;}});}});</script>
-<footer>{e(meta.classification)} · pcs7_analyzer {e(an.tool_version)} · Otomatik üretilmiştir; "teyit edilmeli" işaretli maddeler elle kontrol edilmelidir.</footer>
+<footer>{e(meta.classification)} · pcs7_analyzer {e(an.tool_version)} · Otomatik üretilmiştir.</footer>
 </body></html>
 """
 

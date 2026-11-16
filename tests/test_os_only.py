@@ -59,7 +59,7 @@ def test_unmatched_copy_is_partial_not_var(tmp_path):
     assert an.unmatched_os_copies and not an.os_diffs
     assert any("eşleşmedi" in w for w in an.warnings)
     row = next(r for r in backup_coverage(an) if r[0].startswith("OS PC'den"))
-    assert row[1] == KISMEN and "tahmin edilmez" in row[3]
+    assert row[1] == KISMEN and "eşlenmedi" in row[3]
 
 
 def test_probe_counts_and_mask(tmp_path):

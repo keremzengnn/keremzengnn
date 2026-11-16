@@ -39,8 +39,9 @@ def test_folders_compact(inv):
     assert as01[1] == "-"                                                # demo AS01: ID zinciri yok
     assert re.fullmatch(r"(FB \d+)( · FC \d+)?( · DB \d+)?( · OB \d+)?", as01[2])    # tek 'Block sayısı'
     assert "APL V8.0 – 1 block tipi; APL V8.1 – 2 block tipi; APL V8.2 – 1 block tipi" in as01[3]
-    pos = [as01[3].index(f"APL V{v} –") for v in ("8.0", "8.1", "8.2", "9.1", "10.0")]
-    assert pos == sorted(pos)                                            # sürümler sayısal sıralı (V10.0 sonda)
+    pos = [as01[3].index(f"APL V{v} –") for v in ("8.0", "8.1", "8.2", "9.1")]
+    assert pos == sorted(pos)                                            # sürümler sayısal sıralı
+    assert "V10.0" not in as01[3]                                        # 3 haneli author sürümü doğrulanmadı: ham kod
     assert "(APL: karışık versiyon)" in as01[3] and "Basis Library V8.1 – 1 block tipi" in as01[3]
     assert "CFC ELEMENTA" not in as01[3] and "ES_MAP" not in as01[3] and "CFC generated" not in as01[3]
     assert as01[3].split("; ")[-1].startswith("diğer Siemens: ")       # en sonda tek 'diğer Siemens: N'
@@ -49,8 +50,9 @@ def test_folders_compact(inv):
     as02 = next(r for r in sh.rows if r[0] == "AS02")
     assert "F-System 4" in as02[4]
     assert "Custom 0 · şifreli-Siemens dışı 0 · tanınmayan author 0" in as02[4]     # risk kategorileri hep görünür
-    assert as02[1].startswith("AS02 (S7 program AS02_Prog, CPU 414-5H, S7-400H")   # eski 'S7 program ↔ AS' bilgisi
-    assert inv.folder_as["DEMO_MP/AS02/ombstx/offline/0000000A"] == as02[1]
+    # demo'da çapraz kontrol (KANIT) yok: eşleme ana sayfada değil, teyit listesinde
+    assert as02[1] == "-" and "DEMO_MP/AS02/ombstx/offline/0000000A" not in inv.folder_as
+    assert any(c.topic == "Block klasörü ↔ AS" for c in inv.confirm)
 
 
 def test_special_blocks_custom_and_comm(inv):
@@ -109,7 +111,7 @@ def test_special_category(name, author, protected, symbol, cat):
 
 
 def test_unknown_authors_one_line_in_note(inv):
-    note = inv.sheet("Özel bloklar").note
     unk = {r[6] for r in inv.sheet("Özel bloklar").rows if r[2] == "Tanınmayan author"}
-    assert unk and "Tanınmayan author'lar" in note and all(a in note for a in unk)
-    assert note.count("Tanınmayan author'lar") == 1                       # tek satır
+    items = [c for c in inv.confirm if c.topic == "Block author'ları"]
+    assert unk and len(items) == 1 and all(a in items[0].action for a in unk)      # tek madde, notta yok
+    assert "Tanınmayan author'lar" not in inv.sheet("Özel bloklar").note

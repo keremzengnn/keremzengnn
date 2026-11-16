@@ -140,7 +140,8 @@ def test_demo_report(tmp_path):
     r = extract_style(out)
     assert r["outline"][0]["level"] == 0 and r["outline"][0]["style"] == "Titel"
     texts = [h["text_masked"] for h in r["outline"] if h["level"] == 1]
-    assert texts == ["Sonuç: Proje upgrade edilebilir, zorluklar var", "Proje bilgileri", "Zorluklar", "Referans dokümanlar"]
+    assert texts == ["Sonuç: Proje upgrade edilebilir, zorluklar var", "Proje bilgileri", "Zorluklar", "Referans dokümanlar",
+                     "Teyit edilecek noktalar"]                   # son bölüm: numarasız madde listesi (tablo değil)
     assert r["paragraph_styles"]["Topline"] == 3                     # ÖZET / PROJE ENVANTERİ / RİSKLER etiketleri
     assert len(r["tables"]) == 7 and all(t["n_cols"] >= 2 for t in r["tables"])
     assert all(t["rows_repeat_header"] for t in r["tables"])

@@ -124,3 +124,11 @@ Master prompt'taki [DANIŞ] maddeleri ve diğer mimari kararlar. Her karar: tari
 - **Referanslar:** [4] Software update V9.1, [5] APL Readme V10.0 SP2, [6] Software update V8.1 dönemi (A5E32786218-AB). Yeni
   check'ler bu numaralara bağlı (`checks.APL_README`, `OLD_UPD`).
 - **LIB_RESERVED_NUMBERS:** header'sız / author'sız FB245/246/300 = ÇIKARIM (Siemens standart block yanlış pozitifi riski).
+
+## FAZ 1A (2026-11-16): belirsizlik dili yok
+- Kullanıcıya görünen çıktıda (rapor html/md/docx/xlsx, envanter, index, yol haritası) "çıkarım / aday / teyit edilmeli / heuristic /
+  ham tarama / ?" yok. Doğrulanmış bulgu (`Finding.verified`, confidence HIGH) ana tablolara girer; diğerleri `confirm.collect(an)` ile
+  sonda tek "Teyit edilecek noktalar" bölümüne (xlsx: `Teyit_Edilecekler`, envanter: `Teyit edilecekler`) aksiyon cümlesiyle gider.
+- Dahili model (`Confidence`, findings.json `confidence`, yapi_tanisi, unknown.log) kalır. `qa.forbidden_words` yasak kalıbı denetler
+  (`confirm.FORBIDDEN`, teyit bölümü hariç). HANDOFF kural 5'teki KANIT/ÇIKARIM ifadesi yalnız dahili modeli anlatır.
+- LOW + blocking bulgu (örn. sürüm belirsiz) ana karar cümlesinden düşer; teyit maddesi "Olası engelleyici: …" diye başlar.

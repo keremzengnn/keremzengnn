@@ -46,11 +46,12 @@ def test_word_structure_unchanged(an):
 def test_no_finding_lost(big):
     doc = build_document(big, full=True)
     risk = next(b for b in doc if isinstance(b, Table) and b.caption.startswith("Tablo 6"))
-    assert sorted(x for ids in risk.row_ids for x in ids) == sorted(f.fid for f in big.findings)
+    sure = [f for f in big.findings if f.verified]                          # doğrulanmamışlar teyit bölümünde
+    assert sorted(x for ids in risk.row_ids for x in ids) == sorted(f.fid for f in sure)
     assert all(r[3] for r in risk.rows)                                     # aksiyon sütunu dolu
     md = render_markdown(big, doc)
     ekc = md[md.index("## Ek C"):md.index("## Ek D")]
-    assert all(f"| {f.fid} |" in ekc for f in big.findings)                 # tam metin Ek C'de
+    assert all(f"| {f.fid} |" in ekc for f in sure)                         # tam metin Ek C'de
 
 
 def test_long_lists_capped(big):

@@ -17,6 +17,7 @@ from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from . import confirm
 from .fmt import fmt_date
 from .report import Bullets, Heading, Note, Para, ReportMeta, Table, Topline, badge_class, tr_upper
 
@@ -75,7 +76,8 @@ def _t(text: str) -> str:
     return f'<w:t xml:space="preserve">{escape(_BAD_XML.sub("", text))}</w:t>'
 
 
-# Varsayım / teyit gerektiren metin Word'de sarı highlight (run seviyesinde) alır.
+# Sarı highlight (run seviyesinde) YALNIZ "Teyit edilecek noktalar" bölümünde. Ana tablolarda belirsizlik dili yoktur
+# (confirm.FORBIDDEN, qa.forbidden_words); `is_assumption` IR'da bir cümlenin belirsizlik içerip içermediğini işaretler.
 ASSUMPTION_MARKERS = ("teyit edilmeli", "teyit gerek", "çıkarım", "varsayım", "heuristic")
 
 
@@ -86,7 +88,7 @@ def is_assumption(text: str) -> bool:
 
 def _runs(text: str, bold_all: bool = False, bold_style: str | None = None,
           highlight: bool | None = None) -> str:
-    """'**kalın**' işaretlemesini run'lara çevirir; varsayım satırları sarı highlight."""
+    """'**kalın**' işaretlemesini run'lara çevirir; `highlight=True` ise (teyit bölümü) sarı highlight."""
     out = []
     for i, part in enumerate(re.split(r"\*\*(.+?)\*\*", text)):
         if not part:
@@ -100,8 +102,7 @@ def _runs(text: str, bold_all: bool = False, bold_style: str | None = None,
                 out.append("<w:r><w:br/></w:r>")
             if not seg:
                 continue
-            hl = is_assumption(seg) if highlight is None else highlight
-            rp = props + ('<w:highlight w:val="yellow"/>' if hl else "")
+            rp = props + ('<w:highlight w:val="yellow"/>' if highlight else "")
             out.append(f"<w:r>{'<w:rPr>' + rp + '</w:rPr>' if rp else ''}{_t(seg)}</w:r>")
     return "".join(out)
 
@@ -132,12 +133,13 @@ class DocxBuilder:
                 return s
         return None
 
-    def p(self, text: str, style: str | None = None, *, bold: bool = False, align: str | None = None) -> str:
+    def p(self, text: str, style: str | None = None, *, bold: bool = False, align: str | None = None,
+          highlight: bool = False) -> str:
         ppr = ""
         if style or align:
             ppr = "<w:pPr>" + (f'<w:pStyle w:val="{style}"/>' if style else "") + \
                   (f'<w:jc w:val="{align}"/>' if align else "") + "</w:pPr>"
-        return f"<w:p>{ppr}{_runs(text, bold_all=bold)}</w:p>"
+        return f"<w:p>{ppr}{_runs(text, bold_all=bold, highlight=highlight)}</w:p>"
 
     def _sample_table_pr(self) -> str:
         for c in self.children:
@@ -238,7 +240,10 @@ class DocxBuilder:
         s_h1 = self.sid("heading 1")
         s_h2 = self.sid("heading 2")
         s_list = self.sid("list paragraph", "bullets")
+        in_confirm = False       # "Teyit edilecek noktalar" bölümünden sonrası: sarı highlight
         for i, b in enumerate(blocks):
+            if isinstance(b, Heading) and b.level == 1:
+                in_confirm = b.text == confirm.HEADING
             if isinstance(b, Topline):
                 if i:
                     body.append(self.p(""))
@@ -246,11 +251,11 @@ class DocxBuilder:
             elif isinstance(b, Heading):
                 body.append(self.p(b.text, s_h1 if b.level == 1 else s_h2))
             elif isinstance(b, Para):
-                body.append(self.p(b.text))
+                body.append(self.p(b.text, highlight=in_confirm))
             elif isinstance(b, Note):
-                body.append(self.p(f"Not: {b.text}"))
+                body.append(self.p(f"Not: {b.text}", highlight=in_confirm))
             elif isinstance(b, Bullets):
-                body.extend(self.p(i, s_list) for i in b.items)
+                body.extend(self.p(i, s_list, highlight=in_confirm) for i in b.items)
             elif isinstance(b, Table):
                 body.append(self.table(b))
         body.append(self.main_sectpr())

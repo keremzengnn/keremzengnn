@@ -678,13 +678,13 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
             cross_check(type(bm)(links=[link]), st_names, {link.symbol_table: score} if direct else None)
             bfr.as_label = link.label
             bfr.mapping = (f"ID zinciri: S7 program '{link.program_name}' → CPU '{link.cpu_name}' → station "
-                           f"'{link.station_name}' ({link.confidence})")
+                           f"'{link.station_name}'")
             bfr.mapping_confidence = Confidence.HIGH.value if link.confidence == "KANIT" else Confidence.LOW.value
         if best and (direct or score >= 0.5):
             rel, syms = best
             used.add(rel)
             bfr.symbol_source = (f"{rel} (ID zinciri YLNKLIST; FB seti uyumu {score:.0%})" if direct
-                                 else f"{rel} (FB seti benzerliği {score:.0%}, heuristic)")
+                                 else f"{rel} (FB seti uyumu {score:.0%})")
             sfb = {n: nm for (t, n), nm in syms.items() if t == "FB"}
             bfr.symbol_only = [f"FB{n} {sfb[n]}" for n in sorted(set(sfb) - fbs)]
             bfr.block_only = [f"FB{n}" for n in sorted(fbs - set(sfb))]
@@ -717,11 +717,11 @@ def _map_block_folders(an: Analysis, symtabs: list[tuple[str, dict]]) -> None:
             if bfr.info.is_library:
                 bfr.mapping = "library projesi (.s7l): AS değil, master data / proje library'si"
             elif bfr.info.project == "-":
-                bfr.mapping = "proje dosyası (.s7p) bulunamadı: klasör adı kullanıldı, AS teyit edilmeli"
+                bfr.mapping = "proje dosyası (.s7p) bulunamadı: klasör adı kullanıldı"
             elif bfr.info.n_programs == 1:
                 bfr.mapping = "proje adı (projede tek dolu block klasörü)"
             else:
-                bfr.mapping = (f"projede {bfr.info.n_programs} S7 program: hangi CPU'ya ait olduğu teyit edilmeli "
+                bfr.mapping = (f"projede {bfr.info.n_programs} S7 program: CPU bağlantısı okunamadı "
                                f"(klasör {bfr.info.path.rsplit('/', 1)[-1]})")
 
 
@@ -762,7 +762,7 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
         if info.is_library:
             op.role, op.role_note = "library", "library projesindeki (.s7l) OS: master data, karşılaştırmaya girmez"
         if op.role == "?":
-            op.role, op.role_note = "client", "isimden tespit edilemedi"
+            op.role, op.role_note = "client", "rol proje adından belirlenemedi, client olarak sınıflandırıldı"
         op.sfc = sfc_visualization(src.entries, info.path, src.read_bytes)
         op.archives = archive_files(src.entries, info.path, info.name)
         # İsimden client görünen ama runtime arşivi (Alg/Tlg / segment) olan proje: server (client'larda arşiv olmaz)
@@ -770,7 +770,7 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
         if op.role == "client" and arch:
             op.role = "server"
             op.role_note = ((op.role_note + "; ") if op.role_note else "") + \
-                f"isimden client görünüyor ama arşiv dosyaları var ({len(arch)}) → server kabul edildi (çıkarım, teyit)"
+                f"adı client kalıbında ama arşiv dosyaları var ({len(arch)}): server olarak sınıflandırıldı"
         for rel in lst:
             k = picture_kind(rel)
             if k != "other":
@@ -1060,7 +1060,7 @@ def _versions(an: Analysis) -> None:
     fams = {c[0] for c in cands}
     if len(fams) > 1:
         an.open_items.append("Versiyon kaynakları çelişiyor: " + ", ".join(f"{k}: {f}" for f, k, _ in cands)
-                             + f" -> '{an.pcs7_family}' kabul edildi, teyit edilmeli")
+                             + f" -> '{an.pcs7_family}' esas alındı; gerçek sürümü SIMATIC Manager'dan kontrol et")
     an.pcs7_family_confidence = (Confidence.HIGH.value if order and (order[0][1] == "WinCC" and order[0][2]
                                                                    or len(fams) == 1 and len(cands) > 1)
                                  else Confidence.LOW.value)
@@ -1150,12 +1150,7 @@ def analyze_source(src: Source, target: str = "V10.0SP2", released_csv: Path | N
 
 def _open_items(an: Analysis) -> None:
     items = an.open_items
-    heur = [f"{b.as_label} ← {b.info.path} ({b.mapping})" for b in an.block_folders if b.counts]
-    if heur:
-        items.append("Block klasörü ↔ AS eşlemesi heuristic (teyit edilmeli): " + "; ".join(heur))
-    unk = [f"{o.info.name} ({o.role_note})" for o in an.os_projects if o.role_note]
-    if unk:
-        items.append("Rolü teyit edilmesi gereken OS projeleri: " + "; ".join(sorted(set(unk))))
+    # Block klasörü ↔ AS eşlemesi ve OS rolü belirsizlikleri `confirm.collect` içinde (burada tekrarlanmaz)
     if an.missing_os_projects:
         items.append("PC station listesinde olup wincproj klasörü bulunmayan OS: " + ", ".join(an.missing_os_projects))
     if an.extra_os_projects:

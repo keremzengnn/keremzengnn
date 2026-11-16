@@ -273,7 +273,7 @@ def discover_source(src: Source) -> DiscoveryResult:
         if dbt is None:
             res.warnings.append(f"{d}: SUBBLK.DBT yok -> instance eşlemesi yapılamaz")
         elif abs(dbt.mtime - dbf.mtime) > 24 * 3600:
-            res.warnings.append(f"{d}: SUBBLK.DBF ve .DBT tarihleri >1 gün farklı -> eşleşme teyit edilmeli")
+            res.warnings.append(f"{d}: SUBBLK.DBF ve .DBT tarihleri >1 gün farklı -> memo eşleşmesi kontrol edilmeli")
 
     # Projedeki S7 program sırası (dolu block klasörleri, path sırasıyla)
     by_owner: dict = defaultdict(list)
@@ -311,7 +311,7 @@ def discover_source(src: Source) -> DiscoveryResult:
         names[p.rsplit("/", 1)[-1].lower()].append(p)
     for n, paths in names.items():
         if len(paths) > 1:
-            res.warnings.append(f"Aynı proje dosyası birden fazla yerde ({n}): {', '.join(paths)} -> farklı tarihli backup?")
+            res.warnings.append(f"Aynı proje dosyası birden fazla yerde ({n}): {', '.join(paths)} -> farklı tarihli backup kopyaları")
     expanded = set(getattr(src, "expanded", []))
     if expanded:
         res.warnings.append(f"İç içe arşivler açılıp tarandı: {', '.join(sorted(expanded))}")
