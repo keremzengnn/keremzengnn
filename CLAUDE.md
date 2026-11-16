@@ -33,6 +33,7 @@ pcs7_analyzer/
   _vendor/dbfread gömülü bağımlılık (MIT)
 tests/            pytest; test_analyze.py demo projesiyle uçtan uca (klasör + zip)
 ```
+Devir teslim / çalışma şekli: `docs/HANDOFF.md` (yeni oturumda önce onu oku). Agent tanımları: `.claude/agents/`.
 Test: `pytest`
 Test: `pip install -e .[test] && pytest`
 
@@ -58,7 +59,7 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
 - **`encoding='latin1'` zorunlu.** dbfread language driver 0x00'da 'ascii' seçer; `char_decode_errors='ignore'` ile
   SSBPART memo'sundaki ≥0x80 byte'lar silinir ve FB numaraları bozulur (FB1990 -> FB7). Test ile korunuyor.
 - Alanlar: `SUBBLKTYP, BLKNUMBER, BLOCKFNAME (family), BLOCKNAME, VERSION, USERNAME (author), BLKLANG, MC5CODE, SSBPART, ADDINFO`
-- `SUBBLKTYP` (gerçek proje MP_PDCS kayıt sayıları + açık kaynak STEP 7 V5 okuyucusu ile güncellendi, 2026-10-24):
+- `SUBBLKTYP` (gerçek proje A kayıt sayıları + açık kaynak STEP 7 V5 okuyucusu ile güncellendi, 2026-10-24):
   ana (MC7/header) kayıtlar = S7 block tipi kodu: 00008 OB, 00010 DB, **00012 FC**, 00013 SFC, **00014 FB**, 00015 SFB.
   00004 / 00005 = FB / FC'nin **plaintext interface** kaydı (sadece offline oluşturulan block'larda; PLC'den yüklenen /
   korumalı block'ta yok). Sayım ana + interface kaydının birleşimi; isim/author önce interface kaydından, yoksa ana kayıttan.
@@ -197,7 +198,7 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 ## Readiness / güven / diagnostics
 - `readiness.py`: `backup_coverage` (ne var / ne yok + analize etkisi; Var / Kısmen / Yok / VERİ YOK), `quote_inputs`
   (teklif girdileri, süre/fiyat yok), `findings_rows` (güven: high -> KANIT, low -> ÇIKARIM; ÇIKARIM sarı). HTML/MD full
-  raporda + Excel `Backup_Yeterlilik`, `Teklif_Girdileri`, `Bulgular`. Word (müşteri raporu) Polisan yapısında kalır;
+  raporda + Excel `Backup_Yeterlilik`, `Teklif_Girdileri`, `Bulgular`. Word (müşteri raporu) referans müşteri raporu yapısında kalır;
   full rapordaki ek tablolar numarasız (Tablo 1-6 numaralandırması bozulmasın).
 - `parsers/diag.py` (DIAGNOSTICS: SQL ERRORLOG, WinCC diagnose, event log CSV, evtx listesi, segment sayısı) ->
   `analyze._analyze_diag` (sadece ERRORLOG / diagnose / evtx varsa) -> rapor "Diagnostics (server fail)" + Excel `Diagnostics`.
@@ -210,10 +211,10 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
   desteklenen OS / SQL 2019 / Maintenance functions (4.3), sadece WinCC 3D design (9.6.1).
 
 ## Master prompt (PROMPT_BACKUP_ANALYZER_TEK_PARCA) karşılıkları
-- MP_PDCS gerçek proje turu (2026-10-24): zincir 15/15 program -> block klasörü; station yoksa CPU HOBJECT1.UNITID
+- Gerçek proje A turu (2026-10-24): zincir 15/15 program -> block klasörü; station yoksa CPU HOBJECT1.UNITID
   (H yedek CPU); SUBBLK MC5LEN = kod boyutu -> `BLK_FC_SIZE` (64 KB); ek alt kayıt kodları 24-26/64-67/70/71 bilinen;
   `parse_subblk` çalışma başına önbellek (`clear_cache`), analiz + envanter iki kez okumaz.
-- AKSA turu (2026-10-24): `.mcp`'de 'V08.00.00.00' format dizisi + gerçek build 'V07.03.20.04' -> `discovery.pick_wincc_build`
+- Gerçek proje B turu (2026-10-24): `.mcp`'de 'V08.00.00.00' format dizisi + gerçek build 'V07.03.20.04' -> `discovery.pick_wincc_build`
   sıfır build'li diziyi ancak tek adaysa kullanır (yoksa PCS 7 V10.x diye yanlış tespit). `.s7l` içindeki OS = role
   "library" (OS PC kopyası değil). Karışık versiyon sadece gerçek sürümlerle (ELEMENTA/ELEM_400 değil). OS-only projede
   S7RESOFF yok uyarısı verilmez. yapi_tanisi'nde block author dağılımı (eski PCS 7 Library author'larını eşlemek için).
