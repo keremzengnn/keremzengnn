@@ -109,7 +109,12 @@ Kullanıcı hız istiyor ve **paralel agent** kullanılmasını açıkça istedi
 | Büyük refactor / mimari analiz | Sonnet ile başla; gerekirse **Opus** (`pcs7-architect`) | odaklı dosyalar |
 | Zor debug (gerçek backup'ta anlaşılmaz sonuç, format çözme) | Sonnet; kök neden zorsa Opus | odaklı log/hata; her faz sonrası `/compact` |
 
-Agent tanımları: `.claude/agents/*.md` (model frontmatter'da). Ana oturum (sen) **koordinatördür**: işi böler, agent'ları
+Agent tanımları: `.claude/agents/*.md` (model frontmatter'da). Claude Code modeli **kendiliğinden** göreve göre seçmez;
+yönlendirme senin işin: her Agent çağrısında işe uygun agent'ı seç, gerekirse Agent aracının `model` parametresiyle
+(haiku / sonnet / opus) üzerine yaz (öncelik: çağrıdaki model > frontmatter > `CLAUDE_CODE_SUBAGENT_MODEL` > ana model).
+Ana oturum tipik olarak `opusplan` (plan modunda Opus, uygulamada Sonnet) veya `sonnet`. Ortamda genel web erişimi yok
+(şirket API'si): web araçlarını deneme; bilgi için yerel doküman arşivi (`kb search`) ve kullanıcıdan doküman iste.
+Her faz sonunda `/compact`, alakasız işe geçerken `/clear`. Ana oturum (sen) **koordinatördür**: işi böler, agent'ları
 paralel başlatır, sonuçları birleştirir, test eder, commit eder.
 
 **Paralel çalışmada öğrenilen dersler (önemli):**
