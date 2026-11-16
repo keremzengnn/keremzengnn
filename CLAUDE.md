@@ -17,25 +17,7 @@ Dağıtım: `Baslat.bat` (Python 3.11+, ek paket yok: dbfread `_vendor/` altınd
 Kullanıcı: PCS 7 otomasyon mühendisi. Raporda Türkçe metin, İngilizce teknik terimler
 (firewall, block, library, faceplate…) **çevrilmeden** kalır. Kısa, madde madde, gereksiz metin yok.
 
-## Kod yapısı
-```
-pcs7_analyzer/
-  source.py       klasör / zip kaynağı: dosya indeksi + gerektiğinde temp'e çıkarma (kaynağa yazmaz)
-  discovery.py    indeksten keşif (proje, block klasörü, cfg/s7h, symbol, OS projesi)
-  parsers/        subblk.py, hwconfig.py, symbols.py (ASC + SYMLIST.DBF), wincc.py
-  analyze.py      Analysis modeli: versiyon, AS envanteri, released eşleşme, block klasörleri, OS, tutarlılık
-  checks.py       TÜM kontrollerin tek tanım yeri (CHECKS)
-  report.py       doküman modeli -> Markdown / HTML / JSON; SIEMENS_TOKENS renkleri
-  gui.py, cli.py  pencere ve komut satırı
-  demo.py         sahte ama gerçekçi PCS 7 backup üreticisi (test ortamı)
-  released_extract.py  Released Modules manual -> CSV taslağı
-  data/           released_modules_<ver>.csv (müşteriden bağımsız)
-  _vendor/dbfread gömülü bağımlılık (MIT)
-tests/            pytest; test_analyze.py demo projesiyle uçtan uca (klasör + zip)
-```
 Devir teslim / çalışma şekli: `docs/HANDOFF.md` (yeni oturumda önce onu oku). Agent tanımları: `.claude/agents/`.
-Test: `pytest`
-Test: `pip install -e .[test] && pytest`
 
 ## Proje klasör yapısı (STEP 7 V5.x)
 ```

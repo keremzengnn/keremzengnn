@@ -394,6 +394,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):   # cp1252 pipe/dosya: Türkçe karakterde çökme yok
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] in SUBCOMMANDS:
         return _sub_main(argv)
