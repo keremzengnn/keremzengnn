@@ -55,7 +55,7 @@ def test_no_finding_lost(big):
 
 def test_long_lists_capped(big):
     md = render_markdown(big, build_document(big, full=True))
-    assert "CUST_5 |" in md and "CUST_59" not in md and "Excel 'Custom_Blocklar'" in md
+    assert "CUST_3 |" in md and "CUST_59" not in md and "Excel 'Custom_Blocklar'" in md
     hw = md[md.index("### Hardware uyumluluk"):]
     hw = hw[:hw.index("\n### ")]
     assert "6ES7 131-7RF05" not in hw                                       # 'listede' satırları sayı olarak

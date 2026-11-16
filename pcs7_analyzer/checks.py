@@ -158,8 +158,14 @@ def lib_mixed(c, an):
     out = []
     for b in an.block_folders:
         for lib, vs in b.mixed_versions.items():
-            out.append(_f(c, f"{b.as_label}: karışık {lib} versiyonları: " + ", ".join(vs), [b.info.dbf],
-                          scope=b.as_label))
+            txt = f"{b.as_label}: karışık {lib} versiyonları: " + ", ".join(vs)
+            old = [v for v in vs if not v.startswith("V10")]
+            if lib == "APL" and old and len(old) < len(vs):
+                out.append(_f(c, txt + ". APL V10.0 block'ları ile ≤V9.x birlikte: proje kısmen V10'a geçmiş olabilir "
+                                       "(author kodundan çıkarım; hangi block'ların neden V10 olduğu teyit edilmeli).",
+                              [b.info.dbf], Confidence.LOW, scope=b.as_label))
+            else:
+                out.append(_f(c, txt, [b.info.dbf], scope=b.as_label))
     return out
 
 
@@ -293,8 +299,10 @@ def blk_know_how(c, an):
     out = []
     for b in an.as_folders:
         if b.protected:
-            out.append(_f(c, f"{b.as_label}: {len(b.protected)} know-how protected block: " + _short(b.protected, 8)
-                          + ". Update / recompile için şifre veya üreticiden yeni sürüm gerekir.", [b.info.dbf],
+            out.append(_f(c, f"{b.as_label}: {len(b.protected)} Siemens dışı know-how protected block: "
+                          + _short(b.protected, 8)
+                          + ". Update / recompile için şifre veya üreticiden yeni sürüm gerekir "
+                          "(şifreli Siemens library block'ları normaldir, listelenmedi).", [b.info.dbf],
                           Confidence.LOW, scope=b.as_label))
     return out
 
@@ -348,7 +356,11 @@ def blk_custom(c, an):
             continue
         items = [f"FB{x.number} {x.name or '(header yok)'}" + (" STL" if lang_name(x.lang) == "STL" else "")
                  + f" [{x.instances} inst.]" for x in b.custom_blocks]
-        out.append(_f(c, f"{b.as_label}: {len(items)} custom FB: " + _short(items, 6), [b.info.dbf], scope=b.as_label))
+        d = f"{b.as_label}: {len(items)} custom FB: " + _short(items, 6)
+        if b.unknown_authors:
+            d += (". Tanınmayan author (Siemens kalıbı değil, integratör listesinde yok; ÇIKARIM, teyit edilmeli): "
+                  + ", ".join(b.unknown_authors[:8]))
+        out.append(_f(c, d, [b.info.dbf], scope=b.as_label))
     return out
 
 

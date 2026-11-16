@@ -56,6 +56,13 @@ Aynı isimli dosyalar (SUBBLK.DBF vb.) her block klasöründe tekrar eder: **her
   `ELEMENTA/ELEM_300/ELEM_400`=CFC ELEMENTA, `ES_MAP`=CFC'nin ürettiği FC/DB, `ES_SFC`=SFC system block,
   `COMM71`=eski PCS 7 Library V7.1, `F_SAFE13`=S7 F Failsafe Blocks V1_3, `SIEMENS`=Siemens add-on (Modbus TCP vb.).
   Diğer author'lar (ör. `BM`, `MANAR`, `UK`) = integratör/custom.
+- **Author kalıpları genel (2026-11-16, `subblk.classify_author` regex):** `AdvLi?b\d{2,3}` (`AdvLib81/91`, **`AdvLb100`** = APL V10.0),
+  `DRIV(ER|R)\d{2,3}` (`DRIVER81`, **`DRIVR100`**). Versiyon: 2 hane `91`→V9.1, 3 hane `100`→V10.0 (ÇIKARIM, gerçek projeyle teyit
+  edilmedi). Tek kategori tanımı `subblk.block_category` (envanter, rapor, Excel, checks hepsi bunu kullanır): Siemens library block'u
+  şifreli olsa da NORMAL, listelenmez (Modbus / haberleşme / Logic Matrix / SFC / F-System / V7.1 hariç); listelenenler: Custom
+  (`data/known_integrators.json`: BM, MANAR, UK), **Şifreli, Siemens dışı** (asıl risk), **Tanınmayan author** (ÇIKARIM, kullanıcı
+  teyit eder), Header'sız. Siemens sayılmayan / teyitsiz kodlar: `BTECN100`, `LibBCM`, `S7LibIL`, `IK_RTSYS`, `AdvLibMK`, `TEAMPA`.
+  Aynı projede APL ≤V9.x + V10.0 → karışık versiyon + "proje kısmen V10'a geçmiş olabilir" ÇIKARIM.
 - F-block'ların header'ı boştur (korumalı) → numara aralığı ve symbol table ile tanınır.
 - **Instance → FB eşlemesi:** DB kaydının `SSBPART` memo'su: byte0 `0x0A`=FB instance / `0x0B`=SFB instance,
   byte1-2 little-endian FB numarası. DBT gerektirir. Saçma numaralar (≥ 8192) filtrelenir ve `unresolved_instances`'ta sayılır.
@@ -172,10 +179,15 @@ sayfalardan özet, aynı isimli projenin eski kopyaları özet dışı (en yeni 
 (`read_symlist_all`), HW backup içinden ham tarama (`.s7h` + `hOmSave7/*.DBF` içindeki MLFB/FW). hOmSave7 DBF formatı
 (rack/slot/adres) henüz çözülmedi: kullanıcıdan `yapi_tanisi.txt` (sadece şema, `mask_path` ile müşteri adı maskeli) istenir.
 - **Kompakt envanter (kullanıcı isteği, 2026-10-24):** sayfalar `SHEET_ORDER`: Mevcut durum (≤ ~30 satır, station başına tek
-  HW satırı), Hardware (export + .s7h taraması tek tablo), Block klasörleri (dolu klasörler, library'ler tek hücre, AS sütunu),
-  Özel bloklar (`special_category`: Custom / Header'sız / Modbus / Haberleşme / Logic Matrix / F-System özeti / V7.1;
-  APL / Basis / ES_MAP / ELEMENTA listelenmez), OS projeleri (dosya listesi yok), Projeler, Uyarılar (varsa).
-  Boş sayfa yazılmaz. Semboller ayrı `semboller.xlsx`.
+  HW satırı; OS satırları rol bazlı gruplu, client'lar dosya isim seti imzasıyla), Hardware (export + .s7h taraması tek tablo;
+  Kaynak / Dosya sütunu yok, .s7h adedi güvenilmezse boş), Block klasörleri (Proje | AS | Block sayısı "FB 45 · FC 32 · DB 3" |
+  Library'ler "APL V9.1 – 57 block tipi" | Dikkat edilecek block; klasör yolu sheet notunda), Özel bloklar (`special_category` →
+  `subblk.block_category`; Siemens library listelenmez; tanınmayan author'lar notta tek satır), OS projeleri (7 sütun: OS, Rol, Yer,
+  Multiproject, WinCC build, Custom picture, Son değişiklik), Projeler, Uyarılar (varsa). `Vxx.00.00.00` tek aday = "build tespit
+  edilemedi" (her yerde). Boş sayfa yazılmaz. xlsx: `Sheet.widths`, not satırı üstte. Semboller ayrı `semboller.xlsx`.
+- **WinCC-only / Duplicator girdisi (2026-11-16):** kökte .mcp olan girdi (klasörün kendisi WinCC projesi) desteklenir
+  (`OsProjectInfo.root_name`); ES ile eşleşmeyen OS kopyası "eşleşmedi, karşılaştırma yapılmadı" (`Analysis.unmatched_os_copies`,
+  tam isim eşleşmesi, tahmin yok). Duplicator dosya yapısı bilinmiyor: `probes.wincc_probe` yapı prob'u `yapi_tanisi.txt`'ye girer.
 
 ## Readiness / güven / diagnostics
 - `readiness.py`: `backup_coverage` (ne var / ne yok + analize etkisi; Var / Kısmen / Yok / VERİ YOK), `quote_inputs`

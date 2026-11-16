@@ -396,7 +396,7 @@ def _os_files(s: _Side, os_dir: str) -> tuple[dict, dict]:
     """(picture/script listesi {normalize rel: (size, mtime)}, {normalize rel: orijinal rel})."""
     lst = list_os_entries(s.entries.values(), os_dir)
     disp = {}
-    pre = os_dir + "/"
+    pre = os_dir + "/" if os_dir else ""
     for rel in s.entries:
         if rel.startswith(pre):
             disp.setdefault(normalize_os_rel(rel[len(pre):]), rel[len(pre):])

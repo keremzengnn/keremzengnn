@@ -94,7 +94,7 @@ def normalize_os_rel(rel: str) -> str:
 
 def list_os_entries(entries, os_dir: str) -> dict[str, tuple[int, float]]:
     """Kaynak indeksinden (source.Entry listesi) OS projesi listesi; list_os_project ile aynı kurallar."""
-    prefix = os_dir + "/"
+    prefix = os_dir + "/" if os_dir else ""
     out = {}
     for e in entries:
         if not e.rel.startswith(prefix):
@@ -162,7 +162,7 @@ def sfc_visualization(entries, os_dir: str, read_bytes=None) -> dict:
     SfcRtBase kanıtı. {'present', 'filled', 'charts', 'groups', 'first', 'last', 'files': {ad: (boyut, mtime)}}.
     read_bytes(rel) -> bytes: ChartLst'i okumak için (verilmezse sadece boyutlar).
     """
-    prefix = os_dir + "/"
+    prefix = os_dir + "/" if os_dir else ""
     files = {}
     chartlst_rel = None
     for e in entries:
@@ -200,7 +200,7 @@ def archive_files(entries, os_dir: str, os_name: str) -> dict:
     ana veritabanı <proje>.mdf/.ldf. {'segments': [(dosya, boyut, mtime)], 'alg_tlg': [...], 'archive_manager': [...],
     'main_mdf': (boyut, mtime) | None, 'main_ldf': ...}
     """
-    prefix = os_dir + "/"
+    prefix = os_dir + "/" if os_dir else ""
     n = os_name.lower()
     out = {"segments": [], "alg_tlg": [], "archive_manager": [], "main_mdf": None, "main_ldf": None}
     for e in entries:

@@ -640,8 +640,10 @@ def _software_rows(an: Analysis, full: bool = True) -> list[list[str]]:
         if b.standard_blocks:
             lines.append("Siemens standart (isimden): " + _fmt_list(sorted({x.split(" ", 1)[-1] for x in b.standard_blocks}), 6))
         if b.protected:
-            lines.append(f"Know-how protected: {_fmt_list(b.protected, 5)}")
+            lines.append(f"Know-how protected (Siemens dışı): {_fmt_list(b.protected, 5)}")
         custom = []
+        if b.unknown_authors:
+            custom.append("Tanınmayan author (teyit edilmeli): " + _fmt_list(b.unknown_authors, 5))
         if b.custom_blocks:
             names = [c.name.replace(" (symbol)", "") or f"FB{c.number}" for c in b.custom_blocks]
             n_inst = sum(c.instances for c in b.custom_blocks)

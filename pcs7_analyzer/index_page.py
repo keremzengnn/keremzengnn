@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -135,7 +136,9 @@ def summary_lines(out_dir: Path) -> list[str]:
     if isinstance(rep, dict) and rep.get("os_projects"):
         roles = Counter(str(o.get("role") or "?") for o in rep["os_projects"])
     elif _state_rows(inv, "OS"):
-        roles = Counter(r[2].split(",")[0].strip() or "?" for r in _state_rows(inv, "OS"))
+        for r in _state_rows(inv, "OS"):   # 'OS server' / 'OS client?' ... ; değer 'N proje …' ile başlayabilir
+            m = re.match(r"\s*(\d+) proje", r[2] if len(r) > 2 else "")
+            roles[(r[1].replace("OS ", "", 1).strip() or "?")] += int(m.group(1)) if m else 1
     if roles:
         lines.append(f"OS projeleri: {sum(roles.values())} ({', '.join(f'{k} {n}' for k, n in roles.most_common())})")
     elif rep or inv:

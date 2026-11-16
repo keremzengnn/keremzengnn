@@ -1,0 +1,4 @@
+{
+  "_comment": "Bilinen integratör / custom block author kodları (SUBBLK USERNAME). Kullanıcı genişletir; Siemens library kodları buraya yazılmaz.",
+  "integrators": ["BM", "MANAR", "UK"]
+}

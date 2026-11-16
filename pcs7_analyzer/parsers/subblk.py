@@ -6,7 +6,9 @@ Gerçek bir PCS 7 V8.1 projesiyle (6 adet S7-400H) test edilmiş referans implem
 from __future__ import annotations
 
 import collections
+import json
 import os
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,18 +86,122 @@ STANDARD_BLOCK_NAMES = {"TCON", "TDISCON", "TSEND", "TRCV", "TUSEND", "TURCV", "
 STANDARD_LIBRARY = "Siemens Standard Library (isimden)"
 
 
+# Siemens author kalıpları (sırayla denenir; ilk eşleşen library'yi verir). Sürüm hane sayısı değişir:
+# AdvLib91 (V9.1) / AdvLb100 (V10.0, ÇIKARIM), DRIVER81 / DRIVR100. Teyitsiz kodlar (BTECN100, LibBCM, S7LibIL,
+# IK_RTSYS, AdvLibMK …) BİLEREK yok: Siemens sayılmaz -> "Tanınmayan author".
+_AUTHOR_PATTERNS = [
+    (re.compile(r"^AdvLibLM\w*$", re.I), "Logic Matrix"),
+    (re.compile(r"^AdvLibIL\w*$", re.I), "PCS 7 Industry Library"),
+    (re.compile(r"^AdvLi?b\d{2,3}$", re.I), "APL"),
+    (re.compile(r"^DRIV(ER|R)\d{2,3}$", re.I), "Basis Library"),
+    (re.compile(r"^(ELEMENTA|ELEM_[34]00)$", re.I), "CFC ELEMENTA"),
+    (re.compile(r"^ES_MAP\w*$", re.I), "CFC generated"),
+    (re.compile(r"^ES_SFC\w*$", re.I), "SFC system"),
+    (re.compile(r"^(COMM71|BASIS7\w*|CHN71)\w*$", re.I), "PCS 7 Library V7.1 COMM"),
+    (re.compile(r"^F_SAFE\w*$", re.I), "S7 F Systems Failsafe Blocks"),
+    (re.compile(r"^SIMATIC\w*$", re.I), "SIMATIC system / Standard Library"),
+    (re.compile(r"^SIEMENS\w*$", re.I), "Siemens add-on (ör. Modbus TCP)"),
+]
+
+
 def classify_author(author: str, name: str = "") -> str:
-    """Author string'inden library adını döndür. En uzun prefix kazanır. Author boşsa standart block adı denenir."""
+    """Author string'inden library adını döndür (kalıp eşleşmesi). Author boşsa standart block adı denenir."""
     a = author.strip()
     if not a:
         if name.strip().upper() in STANDARD_BLOCK_NAMES:
             return STANDARD_LIBRARY
         return "custom/unknown"
-    best = ""
-    for prefix in AUTHOR_LIBRARY:
-        if a.startswith(prefix) and len(prefix) > len(best):
-            best = prefix
-    return AUTHOR_LIBRARY[best] if best else "custom"
+    for pat, lib in _AUTHOR_PATTERNS:
+        if pat.match(a):
+            return lib
+    return "custom"
+
+
+def is_siemens_author(author: str) -> bool:
+    """Author Siemens library kalıbına uyuyor mu (teyitli kalıplar; teyitsiz kodlar False)."""
+    a = (author or "").strip()
+    return bool(a) and any(p.match(a) for p, _ in _AUTHOR_PATTERNS)
+
+
+_INTEGRATORS: set | None = None
+
+
+def known_integrators() -> set:
+    """data/known_integrators.json -> {BÜYÜK HARF author kodları} (kullanıcı genişletir)."""
+    global _INTEGRATORS
+    if _INTEGRATORS is None:
+        try:
+            p = Path(__file__).resolve().parent.parent / "data" / "known_integrators.json"
+            data = json.loads(p.read_text(encoding="utf-8"))
+            items = data.get("integrators", []) if isinstance(data, dict) else data
+            _INTEGRATORS = {str(x).strip().upper() for x in items if str(x).strip()}
+        except (OSError, ValueError):
+            _INTEGRATORS = {"BM", "MANAR", "UK"}
+    return _INTEGRATORS
+
+
+def is_known_integrator(author: str) -> bool:
+    return (author or "").strip().upper() in known_integrators()
+
+
+# Block kategorileri (envanter, rapor, Excel, checks tek tanım)
+CAT_CUSTOM = "Custom"
+CAT_PROTECTED_NON_SIEMENS = "Şifreli, Siemens dışı"
+CAT_UNKNOWN_AUTHOR = "Tanınmayan author"
+CAT_MODBUS = "Modbus"
+CAT_ADDON = "Siemens add-on"
+CAT_COMM = "Haberleşme"
+CAT_LM = "Logic Matrix"
+CAT_SFC = "SFC"
+CAT_FSYS = "F-System"
+CAT_V71 = "PCS 7 Library V7.1"
+CAT_HEADERLESS = "Header'sız"
+# Custom kod sayılan (kendi yazılmış / üçüncü taraf) kategoriler
+CUSTOM_LIKE = (CAT_CUSTOM, CAT_PROTECTED_NON_SIEMENS, CAT_UNKNOWN_AUTHOR, CAT_HEADERLESS)
+
+_STD_LIBS = {"APL", "Basis Library", "PCS 7 Industry Library", "CFC ELEMENTA", "CFC generated",
+             "SIMATIC system / Standard Library"}
+
+
+def block_category(header, protected: bool, symbol: str = "") -> str | None:
+    """Block 'özel' listede hangi kategoride? None = normal Siemens library block'u (şifreli olsa da listelenmez).
+    Header'sız block'ta isim yoksa ``symbol`` (symbol table adı) kullanılır."""
+    from ..analyze import is_f_block_name        # lazy: analyze/checks bu modülü import eder
+    from ..checks import STD_COMM
+    author = (header.author or "").strip()
+    name = (header.name or symbol or "").strip().upper()
+    lib = classify_author(author, name)
+    unknown = lib in ("custom", "custom/unknown")
+    if name in STD_COMM and (name.startswith("MB_") or name.startswith("MODBUS")):
+        return CAT_MODBUS
+    if lib.startswith("Siemens add-on"):
+        return CAT_ADDON
+    if lib == "Logic Matrix":
+        return CAT_LM
+    if lib == "S7 F Systems Failsafe Blocks" or (unknown and is_f_block_name(name)):
+        return CAT_FSYS
+    if lib == "PCS 7 Library V7.1 COMM":
+        return CAT_V71
+    if lib == "SFC system":
+        return CAT_SFC
+    if name in STD_COMM:
+        return CAT_COMM
+    if lib in _STD_LIBS or lib == STANDARD_LIBRARY or name in STANDARD_BLOCK_NAMES:
+        return None
+    if unknown:
+        if not author:
+            return CAT_HEADERLESS
+        if is_known_integrator(author):
+            return CAT_CUSTOM
+        return CAT_PROTECTED_NON_SIEMENS if protected else CAT_UNKNOWN_AUTHOR
+    return None
+
+
+def unknown_authors(bf_or_headers) -> list[str]:
+    """Siemens kalıbına uymayan, bilinen integratör olmayan author'lar (sıralı, tekil)."""
+    headers = getattr(bf_or_headers, "blocks", bf_or_headers)
+    out = {(h.author or "").strip() for h in headers}
+    return sorted(a for a in out if a and not is_siemens_author(a) and not is_known_integrator(a))
 
 
 # BLKLANG kodu -> dil (S7 block header dil kodları; 4 = SCL, APL/Basis block'ları SCL ile yazılmıştır)

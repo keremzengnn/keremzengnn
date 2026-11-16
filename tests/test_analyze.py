@@ -48,12 +48,16 @@ def test_stations_and_hsync_not_found(an):
 
 def test_block_folders(an):
     as01 = next(b for b in an.block_folders if b.as_label == "AS01")
-    assert as01.counts == {"FB": 12, "FC": 3, "DB": 23, "OB": 3}
+    assert as01.counts == {"FB": 16, "FC": 4, "DB": 23, "OB": 4}
     assert as01.fb_instances[1827] == 5
     assert as01.fb_instances[1990] == 1           # >= 0x80 byte'lı FB numarası
-    assert set(as01.mixed_versions["APL"]) == {"V8.0 (1)", "V8.1 (2)", "V8.2 (1)"}
+    assert set(as01.mixed_versions["APL"]) == {"V8.0 (1)", "V8.1 (2)", "V8.2 (1)", "V9.1 (1)", "V10.0 (1)"}
     assert {"Logic Matrix", "SFC", "PCS 7 Lib V7.1"} <= set(as01.features)
-    assert {c.number for c in as01.custom_blocks} == {1990, 1993, 2500, 2501}
+    # Siemens library block'ları (AdvLib91 / AdvLb100 / DRIVR100, şifreli olsa da) custom değil
+    assert {c.number for c in as01.custom_blocks} == {1990, 1993, 2500, 2501, 2502, 2503}
+    assert as01.protected == ["FB2502"] and as01.protected_siemens == 2      # FB1861 + FC257 (OB40 header'sız kayıt)
+    assert as01.unknown_authors == ["ZZINTEG"]
+    assert {c.number: c.category for c in as01.custom_blocks}[2503] == "Tanınmayan author"
     assert as01.symbol_only == ["FB1994 E_AS_PUT"]
     assert "(symbol)" in next(c.name for c in as01.custom_blocks if c.number == 2500)
     assert any(b.info.is_empty for b in an.block_folders)

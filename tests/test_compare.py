@@ -108,13 +108,13 @@ def test_block_and_library_rows(mutated):
         ("Block", "AS01", "FB1800 Pcs7DiIn", DIFF, "Pcs7DiIn, AdvLib81, 1.0", "Pcs7DiIn, AdvLib82, 1.0", KANIT),
         ("Block", "AS01", "FB1990 SINAMICS_G120", DIFF, "SINAMICS_G120, BM, 1.1", "SINAMICS_G120, BM, 1.2", KANIT),
         ("Block", "AS01", "FB2600 NEW_FB", ONLY_B, "", "NEW_FB, UK, 1.0", KANIT),
-        ("Block", "AS01", "FB sayısı", DIFF, "12", "13", KANIT),
-        ("Library", "AS01", "APL", DIFF, "AdvLib80: 1, AdvLib81: 2, AdvLib82: 1",
-         "AdvLib80: 1, AdvLib81: 1, AdvLib82: 2", KANIT),
+        ("Block", "AS01", "FB sayısı", DIFF, "16", "17", KANIT),
+        ("Library", "AS01", "APL", DIFF, "AdvLb100: 1, AdvLib80: 1, AdvLib81: 2, AdvLib82: 1, AdvLib91: 1",
+         "AdvLb100: 1, AdvLib80: 1, AdvLib81: 1, AdvLib82: 2, AdvLib91: 1", KANIT),
     }
     r = next(r for r in res.rows if r.item == "FB2600 NEW_FB")
     assert r.source_b == AS01_DBF and r.source_a == ""
-    assert ("Block sayıları: AS01", "A: FB 12, FC 3, DB 23, OB 3 | B: FB 13, FC 3, DB 23, OB 3") in res.summary
+    assert ("Block sayıları: AS01", "A: FB 16, FC 4, DB 23, OB 4 | B: FB 17, FC 4, DB 23, OB 4") in res.summary
 
 
 def test_hw_rows(mutated):

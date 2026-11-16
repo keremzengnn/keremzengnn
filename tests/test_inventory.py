@@ -32,9 +32,10 @@ def test_current_state(inv_out):
     assert rows[("Yazılım", "PCS 7")] == "V8.1"
     assert "V5.5 SP4" in rows[("Yazılım", "STEP 7")] and "AS01" in rows[("Yazılım", "STEP 7")]
     # eski kopya (ESKI_BACKUP) özete katılmaz: APL sayıları çift sayılmaz
-    assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and "ESKI_BACKUP" not in rows[("Library", "APL")]
+    assert rows[("Library", "APL")].startswith("V8.0: 1 block (AS01)") and rows[("Library", "APL")].index("V9.1") < rows[("Library", "APL")].index("V10.0") and "ESKI_BACKUP" not in rows[("Library", "APL")]
     assert "karışık versiyon" in rows[("Library", "APL")]
-    assert rows[("Library", "Custom FB")].startswith("3 FB") and "(AS01 1, AS02 3)" in rows[("Library", "Custom FB")]
+    assert rows[("Library", "Custom FB")].startswith("4 FB integratör") and "(AS01 1, AS02 3)" in rows[("Library", "Custom FB")]
+    assert "1 FB tanınmayan author'lu, ÇIKARIM (AS01 1)" in rows[("Library", "Custom FB")]
     assert rows[("Hardware", "AS01")].startswith("CPU 414-5H PN/DP V6.0, CP 443-1 V3.0")
     assert "F-capable" in rows[("Hardware", "AS02")] and "F-capable" not in rows[("Hardware", "AS01")]
     assert any(k[0] == "Not" and "ESKI_BACKUP" in v for k, v in rows.items())
@@ -65,15 +66,19 @@ def test_hw_from_backup_and_export(inv_out):
     assert any(r[3] == "6ES7 414-5HM06-0AB0" and r[4] == "V6.0" for r in inv.hw_scan)
     hw = inv.sheet("Hardware").rows
     assert any(r[0] == "AS01" and r[1] == "CPU" and r[2] == "6ES7 414-5HM06-0AB0" and r[3] == "CPU 414-5H PN/DP"
-               and r[4] == "V6.0" and r[6] == "HW export" for r in hw)
-    assert not any(r[6] != "HW export" for r in hw)
+               and r[4] == "V6.0" and r[5] == 1 for r in hw)
+    assert "HW Config export (.cfg)" in inv.sheet("Hardware").note        # Kaynak/Dosya sütunu yok: bilgi notta
+    assert "ham tarama" not in inv.sheet("Hardware").note                # export'u olmayan proje yok
 
 
 def test_os_projects_one_row(inv_out):
     inv, _ = inv_out
-    rows = {(r[0], r[2]): r for r in inv.sheet("OS projeleri").rows}
+    sh = inv.sheet("OS projeleri")
+    assert sh.headers == ["OS", "Rol", "Yer", "Multiproject", "WinCC build", "Custom picture", "Son değişiklik"]
+    rows = {(r[0], r[2]): r for r in sh.rows}
     assert rows[("OS_SRV1", "ES")][1] == "server" and rows[("OS_SRV1", "OS PC kopyası")][5] == 5
     assert rows[("OS_SRV1_StBy", "ES")][1] == "standby"
+    assert rows[("OS_SRV1", "ES")][4] == "V07.03.20.04"
 
 
 def test_outputs_and_xlsx(inv_out):

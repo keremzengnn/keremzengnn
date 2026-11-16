@@ -97,10 +97,11 @@ class OsProjectInfo:
     newest_mtime: str
     build_candidates: list = field(default_factory=list)   # .mcp'deki tüm versiyon dizileri
     is_library: bool = False                               # .s7l library projesinin içindeki OS (gerçek OS değil)
+    root_name: str = ""                                    # .mcp kökte (path == ''): klasör / zip adı
 
     @property
     def name(self) -> str:
-        return self.path.rsplit("/", 1)[-1]
+        return self.path.rsplit("/", 1)[-1] or self.root_name or "?"
 
 
 @dataclass
@@ -173,11 +174,18 @@ def owner_project(rel_dir: str, project_dirs: list[str]) -> str:
     return best if best is not None else "-"
 
 
+def _root_label(label: str) -> str:
+    """Kaynak etiketinden (klasör yolu veya zip yolu) OS adı: klasör adı / zip dosya adı (uzantısız)."""
+    p = Path(str(label).replace("\\", "/"))
+    return (p.stem if p.suffix.lower() == ".zip" else p.name) or "?"
+
+
 def _summarize_os(files: list[Entry], os_dir: str) -> Counter:
     c = Counter()
     newest = 0.0
+    skip = len(os_dir) + 1 if os_dir else 0
     for e in files:
-        parts = [p.lower() for p in e.rel[len(os_dir) + 1:].split("/")]
+        parts = [p.lower() for p in e.rel[skip:].split("/")]
         low = parts[-1]
         c["n_files"] += 1
         newest = max(newest, e.mtime)
@@ -280,7 +288,9 @@ def discover_source(src: Source) -> DiscoveryResult:
     os_dirs = sorted(d for d, files in by_dir.items() if any(f.name.lower().endswith(".mcp") for f in files))
     os_dirs = [d for d in os_dirs if not any(d != o and d.startswith(o + "/") for o in os_dirs)]
     for d in os_dirs:
-        files = [e for e in src.entries if e.rel.startswith(d + "/")]
+        # d == "": girdi klasörün / zip'in kendisi WinCC projesi (.mcp kökte)
+        pre = d + "/" if d else ""
+        files = [e for e in src.entries if e.rel.startswith(pre)]
         mcp = next(f for f in sorted(by_dir[d], key=lambda x: x.name) if f.name.lower().endswith(".mcp"))
         raw = whole(mcp.rel) if mcp.size < 50_000_000 else b""
         build, cands = pick_wincc_build(raw)
@@ -293,6 +303,7 @@ def discover_source(src: Source) -> DiscoveryResult:
             custom_pictures=s["custom_pictures"], faceplates_and_templates=s["faceplates_and_templates"],
             vbs_modules=s["vbs_modules"], vbs_actions=s["vbs_actions"], c_actions=s["c_actions"],
             newest_mtime=_iso(s["newest"]),
+            root_name=_root_label(src.label) if d == "" else "",
         ))
 
     names = defaultdict(list)

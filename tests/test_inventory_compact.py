@@ -34,10 +34,10 @@ def test_removed_sheets(inv_out):
 def test_hardware_single_table(inv_out):
     inv, _ = inv_out
     hw = inv.sheet("Hardware")
-    assert hw.headers == ["Station / Proje", "Tür", "MLFB", "Model / açıklama", "FW", "Adet", "Kaynak", "Dosya"]
+    assert hw.headers == ["Station / Proje", "Tür", "MLFB", "Model / açıklama", "FW", "Adet"]
+    assert "AS01.cfg" in hw.note and "AS02.cfg" in hw.note        # Kaynak / Dosya sütunu yok: bilgi sheet notunda
     as01 = [r for r in hw.rows if r[0] == "AS01"]
     assert as01[0][1] == "CPU"                                  # station içinde CPU önce
-    assert all("/" not in str(r[7]) for r in hw.rows)          # tam path yok, sadece dosya adı
     assert any(r[1] == "GSD" and r[5] == 2 for r in as01)       # aynı GSD cihaz -> Adet
     assert any(r[3].endswith("(çıkarım)") for r in hw.rows)     # MLFB ailesinden açıklama işaretli
 
@@ -65,8 +65,10 @@ def test_hardware_without_export_uses_s7h_scan(tmp_path):
     shutil.rmtree(bk / "exports")
     inv = build_inventory(bk)
     hw = inv.sheet("Hardware").rows
-    assert hw and all(r[6].startswith(".s7h taraması") for r in hw)
+    sheet = inv.sheet("Hardware")
+    assert hw and ".s7h taraması" in sheet.note and "S00001.s7h" in sheet.note
     assert {r[0] for r in hw} == {"AS01"}                       # ESKI_BACKUP kopyası hariç
+    assert next(r for r in hw if r[1] == "CPU")[5] == 1        # tek .s7h dosyası, tek kayıt -> güvenilir adet
     cur = {(r[0], r[1]): r[2] for r in inv.sheet("Mevcut durum").rows}
     assert "(backup taraması, çıkarım)" in cur[("Hardware", "AS01")]
     assert cur[("Yazılım", "STEP 7")].startswith("tespit edilemedi")

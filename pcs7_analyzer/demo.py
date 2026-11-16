@@ -96,6 +96,14 @@ def _as01(root: Path, base: str, mtime: float) -> None:
         # FC1 ana (MC7) kaydı: runtime group FC'si, kod boyutu 41 KB (64 KB sınırının %64'ü)
         dict(block("00012", 1, "", "", 0x10, "ES_MAP"), MC5LEN=42000, LOCDATALEN=200),
         block(FC, 256, "CONVERT", "SEL_R", 0x10, "DRIVER81"),
+        # Siemens library block'ları: APL V9.1 / V10.0 (AdvLb100), Basis V10.0 (DRIVR100); biri şifreli (PASSWORD ana kayıtta)
+        dict(block("00014", 1861, "AdvLib91", "Intlk91", 0x10, "AdvLib91"), PASSWORD=3),
+        block(FB, 1862, "AdvLb100", "MotL100", 0x10, "AdvLb100"),
+        dict(block("00012", 257, "CONVERT", "SEL_R100", 0x10, "DRIVR100"), PASSWORD=3),
+        dict(block("00008", 40, "", "", None, "AdvLb100"), PASSWORD=3),
+        # integratör şifreli (custom), tanınmayan author
+        dict(block("00014", 2502, "ESA", "MOTOR_CTRL", 0x10, "MANAR"), PASSWORD=3),
+        block(FB, 2503, "DOS", "DOSER_CTRL", 0x10, "ZZINTEG"),
         block(OB, 1, "", "CYC_INT", None, ""), block(OB, 35, "", "", None, ""), block(OB, 100, "", "", None, ""),
     ]
     dbn = 100

@@ -74,8 +74,15 @@ def backup_coverage(an) -> list[list[str]]:
     row("Configuration Studio export (tag / alarm)", bool(d.wincc_exports), f"{len(d.wincc_exports)}",
         "Tag / alarm / connection sayıları ve 3rd party OPC VERİ YOK (.mdf export'suz okunamıyor)")
     copies = [o for o in an.os_projects if not o.in_es]
-    row("OS PC'den alınmış wincproj kopyası", bool(copies), f"{len(copies)}: {_ex(o.info.path for o in copies)}",
-        "ES ↔ OS server karşılaştırması yapılamaz (sadece ES içindeki OS projeleri karşılaştırıldı)")
+    n_cmp = sum(1 for x in an.os_diffs if x.kind == "copy")
+    unm = getattr(an, "unmatched_os_copies", [])
+    row("OS PC'den alınmış wincproj kopyası", bool(copies), f"{len(copies)}: {_ex(o.info.path or o.info.name for o in copies)}",
+        "ES ↔ OS server karşılaştırması yapılamaz (sadece ES içindeki OS projeleri karşılaştırıldı)",
+        partial=bool(copies) and (not n_cmp or bool(unm)),
+        impact_partial=(("Kopya var ama karşılaştırma koşmadı" if not n_cmp else "Bazı kopyalar karşılaştırılamadı")
+                        + ": aynı adlı ES OS projesi yok"
+                        + (f" ({len(unm)} kopya eşleşmedi)" if unm else "")
+                        + "; farklı adlı eşleme tahmin edilmez, ES↔OS farkı VERİ YOK"))
     row("Aynı projenin farklı tarihli backup'ı", bool(an.backups), f"{len(an.backups)}",
         "Tek backup: güncellik karşılaştırması yok (normal)")
     diag_n = mk.get("sql_errorlog", 0) + mk.get("evtx", 0) + mk.get("diagnose", 0)
@@ -139,15 +146,18 @@ def quote_inputs(an) -> list[list[str]]:
         rows.append(["CPU tipleri", ", ".join(f"{k} ×{n}" for k, n in sorted(cpus.items())), KANIT])
     progs = [b for b in an.as_folders if b.counts]
     rows.append(["S7 program (dolu block klasörü)", str(len(progs)), f"ombstx ({KANIT})"])
-    roles = Counter(o.role for o in an.os_projects if o.in_es)
-    rows.append(["OS projeleri (ES içinde)", ", ".join(f"{r}: {n}" for r, n in sorted(roles.items())) or "-",
+    es_any = any(o.in_es for o in an.os_projects)
+    os_pool = [o for o in an.os_projects if o.in_es or not es_any]       # sadece-OS girdide hepsi
+    roles = Counter(o.role for o in os_pool)
+    rows.append(["OS projeleri (ES içinde)" if es_any or not an.os_projects else "OS projeleri (.s7p yok: sadece WinCC)",
+                 ", ".join(f"{r}: {n}" for r, n in sorted(roles.items())) or "-",
                  f"wincproj, rol proje adından ({CIKARIM})"])
     m = an.manual
     rows.append(["AS RT PO / OS PO / archive tag",
                  " / ".join(x or "eksik" for x in (m.as_rt_po, m.os_po, m.archive_tags)),
                  "manuel giriş" if any((m.as_rt_po, m.os_po, m.archive_tags)) else VERI_YOK])
     fb300 = sum(b.fb_instances.get(300, 0) for b in an.as_folders if "SFC" in b.features)
-    charts = sum(o.sfc.get("charts", 0) for o in an.os_projects if o.in_es and o.role in ("server", "es"))
+    charts = sum(o.sfc.get("charts", 0) for o in os_pool if o.role in ("server", "es"))
     rows.append(["SFC", f"FB300 instance {fb300}; OS'te görselleştirilen chart {charts}" if fb300 or charts else "yok",
                  f"SUBBLK + SfcRtBase/ChartLst ({KANIT})"])
     rows.append(["SFC visualization lisansı", "runtime station başına (chart başına değil); chart'lar OS RT PO'ya sayılır"

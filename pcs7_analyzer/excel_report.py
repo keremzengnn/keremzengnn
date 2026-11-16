@@ -252,7 +252,10 @@ def build_workbook(an: Analysis, meta=None) -> Workbook:
         for c in sorted(b.custom_blocks, key=lambda c: (c.kind, c.number)):
             row = [b.as_label, f"{c.kind}{c.number}", c.name or "(header yok)", c.family, c.author,
                    lang_name(c.lang), c.version,
-                   c.instances if b.memo_available else "", "header'sız" if c.headerless else ""]
+                   c.instances if b.memo_available else "",
+                   "header'sız" if c.headerless else
+                   ("Tanınmayan author (ÇIKARIM)" if c.category == "Tanınmayan author" else
+                    "Şifreli, Siemens dışı" if c.category == "Şifreli, Siemens dışı" else "")]
             if with_callers:
                 txt = (callers_text(b, c.number) if c.kind == "FB" else
                        fc_callers_text(b, c.number) if c.kind == "FC" else "")

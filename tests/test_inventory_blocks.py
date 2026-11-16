@@ -1,4 +1,6 @@
 """Envanter: kompakt block sayfaları ('Block klasörleri' + 'Özel bloklar'); standart library'ler tek tek listelenmez."""
+import re
+
 import pytest
 
 from pcs7_analyzer import inventory as I
@@ -29,15 +31,24 @@ def test_only_two_block_sheets(inv):
 
 def test_folders_compact(inv):
     sh = inv.sheet("Block klasörleri")
-    assert sh.headers == ["Proje", "AS / S7 program", "Klasör", "FB", "FC", "DB", "OB", "Library'ler", "Özel block",
-                          "Custom"]
+    assert sh.headers == ["Proje", "AS / S7 program", "Block sayısı", "Library'ler", "Dikkat edilecek block"]
     assert "2 boş block klasörü listelenmedi" in sh.note
-    assert not any(r[2].endswith("00000002") for r in sh.rows)          # boş klasör satırı yok
-    as01 = next(r for r in sh.rows if r[2] == "DEMO_MP/AS01/ombstx/offline/00000001")
+    assert "DEMO_MP/AS01/ombstx/offline/00000001" in sh.note             # Klasör sütunu yok: yollar notta
+    assert not any("00000002" in str(r) for r in sh.rows)                # boş klasör satırı yok
+    as01 = next(r for r in sh.rows if r[0] == "DEMO_MP/AS01")
     assert as01[1] == "-"                                                # demo AS01: ID zinciri yok
-    assert "APL V8.0: 1, V8.1: 2, V8.2: 1 (karışık versiyon)" in as01[7] and "Basis Library V8.1: 1" in as01[7]
-    assert as01[9] == 4 and as01[8] == 8                                 # 3 custom + 1 header'sız; + GET, LM×2, SEND_R
-    as02 = next(r for r in sh.rows if r[2] == "DEMO_MP/AS02/ombstx/offline/0000000A")
+    assert re.fullmatch(r"(FB \d+)( · FC \d+)?( · DB \d+)?( · OB \d+)?", as01[2])    # tek 'Block sayısı'
+    assert "APL V8.0 – 1 block tipi; APL V8.1 – 2 block tipi; APL V8.2 – 1 block tipi" in as01[3]
+    pos = [as01[3].index(f"APL V{v} –") for v in ("8.0", "8.1", "8.2", "9.1", "10.0")]
+    assert pos == sorted(pos)                                            # sürümler sayısal sıralı (V10.0 sonda)
+    assert "(APL: karışık versiyon)" in as01[3] and "Basis Library V8.1 – 1 block tipi" in as01[3]
+    assert "CFC ELEMENTA" not in as01[3] and "ES_MAP" not in as01[3] and "CFC generated" not in as01[3]
+    assert as01[3].split("; ")[-1].startswith("diğer Siemens: ")       # en sonda tek 'diğer Siemens: N'
+    assert as01[4].startswith("Custom ") and " · şifreli-Siemens dışı " in as01[4] and " · tanınmayan author " in as01[4]
+    assert "Logic Matrix 2" in as01[4]
+    as02 = next(r for r in sh.rows if r[0] == "AS02")
+    assert "F-System 4" in as02[4]
+    assert "Custom 0 · şifreli-Siemens dışı 0 · tanınmayan author 0" in as02[4]     # risk kategorileri hep görünür
     assert as02[1].startswith("AS02 (S7 program AS02_Prog, CPU 414-5H, S7-400H")   # eski 'S7 program ↔ AS' bilgisi
     assert inv.folder_as["DEMO_MP/AS02/ombstx/offline/0000000A"] == as02[1]
 
@@ -56,9 +67,9 @@ def test_special_blocks_custom_and_comm(inv):
 def test_standard_libraries_not_listed(inv):
     rows = inv.sheet("Özel bloklar").rows
     authors = {r[6] for r in rows}
-    assert not authors & {"AdvLib80", "AdvLib81", "AdvLib82", "DRIVER81", "ES_MAP", "ES_SFC"}
+    assert not authors & {"AdvLib80", "AdvLib81", "AdvLib82", "DRIVER81", "ES_MAP"}     # ES_SFC = SFC kategorisi (WP1)
     s = _special(inv, "DEMO_MP/AS01")
-    for key in (("FB", 1827), ("FB", 1851), ("FB", 300), ("FC", 256), ("FC", 1)):
+    for key in (("FB", 1827), ("FB", 1851), ("FC", 256), ("FC", 1)):
         assert key not in s
 
 
@@ -77,7 +88,7 @@ def _b(name="", author="", kind="FB", nr=1):
     ("MotL", "AdvLib91", False, "", None),
     ("IL_BS", "AdvLibIL", False, "", None),
     ("SEL_R", "DRIVER91", False, "", None),
-    ("SFC_FB", "ES_SFC", False, "", None),
+    ("SFC_FB", "ES_SFC", False, "", "SFC"),
     ("R_TRIG", "", False, "", None),
     ("TSEND", "", False, "", "Haberleşme"),
     ("PUT", "SIMATIC", False, "", "Haberleşme"),
@@ -88,8 +99,17 @@ def _b(name="", author="", kind="FB", nr=1):
     ("", "", False, "TCON", "Haberleşme"),
     ("", "", False, "", "Header'sız"),
     ("PUMP_CTRL", "BM", False, "", "Custom"),
-    ("PUMP_CTRL", "BM", True, "", "Know-how protected custom"),
+    ("PUMP_CTRL", "BM", True, "", "Custom"),
+    ("PUMP_CTRL", "ZZZ", True, "", "Şifreli, Siemens dışı"),
+    ("PUMP_CTRL", "ZZZ", False, "", "Tanınmayan author"),
     ("F_TRIG", "", False, "", None),
 ])
 def test_special_category(name, author, protected, symbol, cat):
     assert I.special_category(_b(name, author), protected, symbol) == cat
+
+
+def test_unknown_authors_one_line_in_note(inv):
+    note = inv.sheet("Özel bloklar").note
+    unk = {r[6] for r in inv.sheet("Özel bloklar").rows if r[2] == "Tanınmayan author"}
+    assert unk and "Tanınmayan author'lar" in note and all(a in note for a in unk)
+    assert note.count("Tanınmayan author'lar") == 1                       # tek satır

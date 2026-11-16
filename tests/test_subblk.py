@@ -132,7 +132,7 @@ def test_main_records_know_how_local_data(tmp_path):
     PASSWORD = 3 know-how protection, LOCDATALEN, bilinen alt kayıtlar (00019) Unknown'a gitmez."""
     from dbfwriter import SUBBLK_FIELDS, block, write_dbf
     from pcs7_analyzer.parsers.subblk import parse_subblk
-    fields = SUBBLK_FIELDS + [("PASSWORD", "N", 11), ("LOCDATALEN", "N", 5)]
+    fields = SUBBLK_FIELDS          # PASSWORD / LOCDATALEN / MC5LEN zaten içinde
     recs = [dict(block("00014", 909, "MODBUS", "MB_RED", author="SIEMENS"), PASSWORD=3, LOCDATALEN=120),
             dict(block("00012", 18, "", "", author="ES_MAP"), PASSWORD=0, LOCDATALEN=0),
             dict(block("00004", 1800, "Drv", "Pcs7DiIn", author="AdvLib81")),
@@ -160,10 +160,40 @@ def test_real_project_false_positives():
     assert classify_author("", "TCON") == STANDARD_LIBRARY and classify_author("", "MYBLOCK") == "custom/unknown"
 
 
+def test_author_patterns_and_versions():
+    from pcs7_analyzer.analyze import author_version
+    from pcs7_analyzer.parsers.subblk import classify_author, is_siemens_author
+    assert author_version("AdvLib91") == "V9.1" and author_version("AdvLb100") == "V10.0"
+    assert author_version("DRIVR100") == "V10.0" and author_version("DRIVER81") == "V8.1"
+    assert classify_author("AdvLb100") == "APL" and classify_author("DRIVR100") == "Basis Library"
+    assert all(is_siemens_author(a) for a in ("AdvLib81", "AdvLb100", "DRIVER81", "DRIVR100", "COMM71", "ES_MAP",
+                                              "F_SAFE13", "ELEM_400", "AdvLibLM", "AdvLibIL", "SIEMENS"))
+    for a in ("BTECN100", "LibBCM", "S7LibIL", "IK_RTSYS", "AdvLibMK", "ELEMENTS_CO", "ES_ABC", "MANAR", "BM", ""):
+        assert not is_siemens_author(a)
+    assert classify_author("AdvLibMK") == "custom"
+
+
+def test_block_category_siemens_protected_not_listed():
+    from pcs7_analyzer.parsers import subblk as sb
+    H = lambda author, name="X", kind="FB": sb.BlockHeader(kind, 1, "", name, "1.0", author, "00004")  # noqa: E731
+    assert sb.block_category(H("AdvLb100"), True) is None and sb.block_category(H("DRIVR100"), True) is None
+    assert sb.block_category(H("MANAR"), True) == sb.CAT_CUSTOM and sb.block_category(H("BM"), False) == sb.CAT_CUSTOM
+    assert sb.block_category(H("ZZINTEG"), True) == sb.CAT_PROTECTED_NON_SIEMENS
+    assert sb.block_category(H("ZZINTEG"), False) == sb.CAT_UNKNOWN_AUTHOR
+    assert sb.block_category(H("", ""), False) == sb.CAT_HEADERLESS
+    assert sb.block_category(H("", "TON"), False) is None and sb.block_category(H("", "F_TRIG"), False) is None
+    assert sb.block_category(H("", "TCON"), False) == sb.CAT_COMM
+    assert sb.block_category(H("", "", "FB"), False, "F_CH_DI") == sb.CAT_FSYS
+    assert sb.block_category(H("AdvLibLM"), False) == sb.CAT_LM and sb.block_category(H("ES_SFC"), False) == sb.CAT_SFC
+    assert sb.block_category(H("COMM71"), False) == sb.CAT_V71
+    assert sb.block_category(H("", "", "FB"), False, "MB_CPCLI") == sb.CAT_MODBUS
+    assert sb.unknown_authors([H("ZZINTEG"), H("MANAR"), H("AdvLib81"), H("AdvLibMK"), H("")]) == ["AdvLibMK", "ZZINTEG"]
+
+
 def test_fc_code_length_and_64kb_check(tmp_path):
     from dbfwriter import SUBBLK_FIELDS, block, write_dbf
     from pcs7_analyzer.analyze import analyze
-    fields = SUBBLK_FIELDS + [("MC5LEN", "N", 11)]
+    fields = SUBBLK_FIELDS
     d = tmp_path / "P" / "ombstx" / "offline" / "00000001"
     d.mkdir(parents=True)
     (tmp_path / "P" / "P.s7p").write_bytes(b"x")

@@ -16,7 +16,8 @@ from pathlib import Path
 
 from . import __version__
 from .discovery import BlockFolderInfo, DiscoveryResult, OsProjectInfo, discover_source, owner_project
-from .parsers.subblk import STANDARD_LIBRARY, record_instance_issues
+from .parsers.subblk import (CUSTOM_LIKE, STANDARD_LIBRARY, block_category, is_siemens_author, record_instance_issues,
+                             unknown_authors)
 from .unknown import UnknownRecorder
 from .model import Confidence, Finding
 from .parsers import (
@@ -80,16 +81,19 @@ def staged_path_from(pcs7: str | None) -> list[str]:
 
 
 # Sürüm taşıyan author önekleri (AdvLib81, DRIVER81, F_SAFE13, COMM71 …). ELEM_400 / ELEM_300 = CPU ailesi, sürüm değil.
-_VERSIONED_AUTHOR = re.compile(r"^(AdvLib|DRIVER|F_SAFE|COMM|SFC|LIB)\D*(\d)(\d)$", re.I)
+_VERSIONED_AUTHOR = re.compile(r"^(AdvLi?b|DRIV(?:ER|R)|F_SAFE|COMM|SFC|LIB)\D*(\d{2,3})$", re.I)
 
 
 def author_version(author: str) -> str:
-    """'AdvLib81' -> 'V8.1', 'DRIVER81' -> 'V8.1', 'F_SAFE13' -> 'V1_3'; 'ELEM_400' / 'AdvLibIL' -> ''."""
-    m = _VERSIONED_AUTHOR.match(author.strip())
+    """'AdvLib81' -> 'V8.1', 'AdvLib91' -> 'V9.1', 'AdvLb100' / 'DRIVR100' -> 'V10.0' (3 hane, ÇIKARIM),
+    'F_SAFE13' -> 'V1_3'; 'ELEM_400' / 'AdvLibIL' -> ''."""
+    a = author.strip()
+    m = _VERSIONED_AUTHOR.match(a)
     if not m:
         return ""
-    m = re.search(r"(\d)(\d)$", author.strip())
-    return f"V{m.group(1)}_{m.group(2)}" if author.startswith("F_SAFE") else f"V{m.group(1)}.{m.group(2)}"
+    d = m.group(2)
+    major, minor = (d[:-1], d[-1])          # 81 -> 8.1, 100 -> 10.0
+    return f"V{major}_{minor}" if a.upper().startswith("F_SAFE") else f"V{major}.{minor}"
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +152,7 @@ class CustomBlock:
     version: str
     instances: int
     headerless: bool
+    category: str = ""              # subblk.block_category (Custom / Şifreli, Siemens dışı / Tanınmayan author / Header'sız)
 
 
 @dataclass
@@ -175,7 +180,9 @@ class BlockFolderResult:
     sfb_instances: dict = field(default_factory=dict)     # {SFB no: instance DB sayısı}
     other_types: dict = field(default_factory=dict)       # {SUBBLKTYP kodu: kayıt sayısı} (bilinmeyen alt kayıt)
     standard_blocks: list = field(default_factory=list)  # header'sız, isimden Siemens standart block (ÇIKARIM)
-    protected: list = field(default_factory=list)        # know-how protected block'lar ["FB909", …] (ÇIKARIM)
+    protected: list = field(default_factory=list)        # Siemens DIŞI know-how protected block'lar ["FB909", …] (ÇIKARIM)
+    protected_siemens: int = 0                           # şifreli Siemens library block sayısı (normal, listelenmez)
+    unknown_authors: list = field(default_factory=list)  # Siemens kalıbına uymayan, integratör olmayan author'lar
     local_data: dict = field(default_factory=dict)       # {"OB35": 2048, …} block'un kendi local data'sı (byte)
     code_len: dict = field(default_factory=dict)         # {"FC18": 51234, …} derlenmiş kod boyutu (MC5LEN, byte)
     memo_available: bool = False
@@ -322,6 +329,7 @@ class Analysis:
     manual: ManualInputs = field(default_factory=ManualInputs)
     missing_os_projects: list[str] = field(default_factory=list)   # PC station'ı olup wincproj'u olmayan
     extra_os_projects: list[str] = field(default_factory=list)     # wincproj'u olup PC station listesinde olmayan
+    unmatched_os_copies: list[str] = field(default_factory=list)   # OS PC kopyası (.s7p dışı), aynı adlı ES OS projesi yok
     unknown: UnknownRecorder = field(default_factory=UnknownRecorder)   # analiz edilemeyenler
     kb_refs: dict = field(default_factory=dict)                    # {check_id: [kb.KbRef]} (doküman KB varsa)
     blockmap: object = None                                          # blockmap.BlockMap (ID zinciri)
@@ -575,15 +583,28 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
     res.memo_issues = dict(bf.memo_issues)
     res.bad_records = bf.bad_records
     res.other_types = dict(bf.other_types)
-    res.protected = [f"{k}{n}" for k, n in sorted(bf.protected)]
+    # Know-how protected: Siemens library block'ı şifreli olması normal (listelenmez, sadece sayılır); asıl risk
+    # Siemens dışı şifreli block (integratör / tanınmayan author / header'sız; F-System ve standart hariç)
+    hdr = {(b.kind, b.number): b for b in bf.blocks}
+    for k, n in sorted(bf.protected):
+        h = hdr.get((k, n))
+        if h is None:
+            continue                       # header yok (OB/DB/SFC): Siemens mi değil mi belirlenemez
+        cat = block_category(h, True)
+        if cat in CUSTOM_LIKE:
+            res.protected.append(f"{k}{n}")
+        elif is_siemens_author(h.author):
+            res.protected_siemens += 1
     res.local_data = {f"{k}{n}": v for (k, n), v in sorted(bf.local_data.items())}
     res.code_len = {f"{k}{n}": v for (k, n), v in sorted(bf.code_len.items())}
     summary = library_summary(bf)
+    res.unknown_authors = unknown_authors(bf)
     res.libraries = {lib: dict(c) for lib, c in sorted(summary.items())}
     for lib, c in summary.items():
         if lib in ("custom", "custom/unknown", "CFC generated"):
             continue
-        versions = sorted({author_version(a) for a in c if author_version(a)})   # sadece gerçek sürümler
+        versions = sorted({author_version(a) for a in c if author_version(a)},
+                          key=lambda v: [int(x) for x in re.findall(r"\d+", v)])   # sadece gerçek sürümler
         if len(versions) > 1:                                                     # (ELEMENTA / ELEM_400 sürüm değil)
             res.mixed_versions[lib] = [f"{v} ({sum(n for a, n in c.items() if author_version(a) == v)})"
                                        for v in versions]
@@ -599,7 +620,8 @@ def _analyze_block_folder(src: Source, info: BlockFolderInfo, log) -> BlockFolde
             res.standard_blocks.append(f"FB{b.number} {b.name}")
         if b.library in ("custom", "custom/unknown"):
             res.custom_blocks.append(CustomBlock(b.kind, b.number, b.name, b.family, b.author, b.lang,
-                                                 b.version, n, headerless=not b.author and not b.name))
+                                                 b.version, n, headerless=not b.author and not b.name,
+                                                 category=block_category(b, (b.kind, b.number) in bf.protected) or ""))
         elif n == 0 and b.library not in ("SFC system", "SIMATIC system / Standard Library", STANDARD_LIBRARY):
             res.unused_library_fbs.append(f"FB{b.number} {b.name} ({b.author})")
         if b.name.upper().startswith("F_CH_") or b.library == "S7 F Systems Failsafe Blocks":
@@ -732,9 +754,10 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
     for info in d.os_projects:
         lst = list_os_entries(src.entries, info.path)
         listings[info.path] = lst
+        pre = info.path + "/" if info.path else ""       # '' = .mcp kökte (girdi WinCC projesinin kendisi)
         for e in src.entries:
-            if e.rel.startswith(info.path + "/"):
-                display.setdefault(e.rel[len(info.path) + 1:].lower(), e.rel[len(info.path) + 1:])
+            if e.rel.startswith(pre):
+                display.setdefault(e.rel[len(pre):].lower(), e.rel[len(pre):])
         op = OsProject(info=info, role=os_role(info.name), in_es=info.project != "-")
         if info.is_library:
             op.role, op.role_note = "library", "library projesindeki (.s7l) OS: master data, karşılaştırmaya girmez"
@@ -775,6 +798,8 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
         es = [o for o in ops if o.in_es]
         copies = [o for o in ops if not o.in_es]
         if not es:
+            # Farklı adlı eşleme TAHMİN EDİLMEZ (ÇIKARIM yok): sadece tam isim eşleşmesi
+            an.unmatched_os_copies += [c.info.path or c.info.name for c in copies if c.role != "library"]
             continue
         for c in copies:
             a, b = listings[es[0].info.path], listings[c.info.path]
@@ -782,6 +807,11 @@ def _analyze_os(src: Source, d: DiscoveryResult, an: Analysis) -> None:
             an.os_diffs.append(OsDiff(es[0].info.path, c.info.path, "ES", _copy_label(c.info.path),
                                       disp(r["only_a"]), disp(r["only_b"]), disp(r["newer_in_a"]),
                                       disp(r["newer_in_b"]), len(r["size_diff"])))
+    if an.unmatched_os_copies:
+        why = ("aynı adlı ES OS projesi yok (backup'ta .s7p içinde OS projesi bulunamadı)"
+               if not any(o.in_es for o in an.os_projects) else "aynı adlı ES OS projesi yok")
+        an.warnings.append(f"OS PC kopyası eşleşmedi ({len(an.unmatched_os_copies)}): {why} -> ES↔OS karşılaştırması "
+                           f"yapılmadı: {', '.join(an.unmatched_os_copies[:5])}")
 
     # İki ayrı OS projesi: engineering OS (ENG) <-> OS server (SRV1). Master/kopya ilişkisi YOK (connection'lar
     # farklı: AS2_ES / AS2_SRV); farklar "iki proje ayrışmış" olarak raporlanır, online değişiklik yorumu yapılmaz.
@@ -1018,7 +1048,8 @@ def _versions(an: Analysis) -> None:
     for (lib, v, asl), n in libs.items():
         per_lib[lib][v].append(asl)
     for lib, vs in per_lib.items():
-        val = "; ".join(f"{v} ({', '.join(sorted(set(a)))})" for v, a in sorted(vs.items()))
+        val = "; ".join(f"{v} ({', '.join(sorted(set(a)))})" for v, a in sorted(
+            vs.items(), key=lambda x: ([int(t) for t in re.findall(r"\d+", x[0])], x[0])))
         an.versions.append(VersionInfo(lib, val, "block header author (SUBBLK.DBF)"))
     if apl_fams:
         cands.append((apl_fams.most_common(1)[0][0], "APL", False))

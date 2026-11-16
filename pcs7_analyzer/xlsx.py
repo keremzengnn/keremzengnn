@@ -77,9 +77,9 @@ class Workbook:
             i += 1
         return name
 
-    def add(self, name: str, headers: list[str], rows: list[list]) -> None:
+    def add(self, name: str, headers: list[str], rows: list[list], widths: list[int] | None = None) -> None:
         self.add_sheet(name, [list(headers)] + [list(r) for r in rows], header_rows={0}, filter_row=0,
-                       filter_last=len(rows), freeze=1)
+                       filter_last=len(rows), freeze=1, widths=widths)
 
     def add_sheet(self, name: str, rows: list[list], header_rows: set[int] | None = None, filter_row: int | None = None,
                   filter_last: int | None = None, freeze: int = 0, widths: list[int] | None = None) -> None:
