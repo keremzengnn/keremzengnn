@@ -22,3 +22,22 @@ tests/regression/expected_local.json
 kb/
 fixtures_real/
 pcs7_rapor/
+
+# Fiyat / teklif / katalog / müşteri raporu dosyaları: ASLA repoya girmez (repo public).
+work/
+99_Work/
+10_Offers/
+20_Reports/
+Calisma/
+Anket/
+*katalog*
+*catalog*
+*fiyat*
+*price*
+*Fiyatlama*
+*.xlsm
+KG_*.pdf
+pricing_local/
+pricing_eval*
+offer_eval*
+offer_local/
